@@ -1076,6 +1076,8 @@ fn spawn_gem(commands: &mut Commands, serial: u64, pos: Vec3, kind: GemKind) {
             commands
                 .entity(e)
                 .insert((super::loot_ground::GroundedLoot, Visibility::Hidden));
+            #[cfg(not(target_os = "macos"))]
+            commands.entity(e).insert(crate::blob_shadow::NoBlobShadow);
             e
         }
         GemKind::Gold(_) => super::loot_ground::spawn(commands, serial, display, scale, pos),
@@ -1098,6 +1100,7 @@ pub(super) fn collect_gems(
     mut next: ResMut<NextState<Phase>>,
     hero: Query<&Transform, (With<Hero>, Without<Gem>)>,
     mut gems: Query<(Entity, &mut Transform, &mut Gem, &Visibility)>,
+    emitters: Query<(Entity, &benilla_world::particles::ParticleEmitter)>,
 ) {
     let Ok(h) = hero.single() else { return };
     if run.dead_t.is_some() {
@@ -1139,7 +1142,16 @@ pub(super) fn collect_gems(
         }
         if dist < 0.9 {
             match g.kind {
-                GemKind::Xp(base) => collected_xp = collected_xp.saturating_add(base),
+                GemKind::Xp(base) => {
+                    collected_xp = collected_xp.saturating_add(base);
+                    // Model emitters are separate world entities. Free them with the pickup,
+                    // including when receipt immediately pauses the run for a level-up.
+                    for (emitter_entity, emitter) in &emitters {
+                        if emitter.emit_host() == Some(e) || emitter.anchor() == Some(e) {
+                            commands.entity(emitter_entity).despawn();
+                        }
+                    }
+                }
                 GemKind::Heal(hp) => run.hp = (run.hp + hp).min(stats.max_hp),
                 GemKind::Gold(_) => {
                     unreachable!("gold handled before pickup attraction")

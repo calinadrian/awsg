@@ -82,6 +82,11 @@ struct ShadowAssets {
 
 pub(crate) struct BlobShadowPlugin;
 
+/// Fork-owned visuals such as XP wisps can opt out of unit blob shadows.
+#[cfg(not(target_os = "macos"))]
+#[derive(Component)]
+pub(crate) struct NoBlobShadow;
+
 impl Plugin for BlobShadowPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_shadow_assets)
@@ -118,6 +123,7 @@ fn sync_shadows(
         ),
     >,
     shadows: Query<(Entity, &BlobShadow)>,
+    #[cfg(not(target_os = "macos"))] excluded: Query<(), With<NoBlobShadow>>,
     // The answer changes only when a model or a mount arrives or leaves; any other frame is
     // skipped.
     grew: Query<(), Added<ModelAnimations>>,
@@ -134,13 +140,20 @@ fn sync_shadows(
     }
     let mut shadowed = EntityHashSet::default();
     for (entity, shadow) in &shadows {
-        if units.get(shadow.owner).is_err() {
+        let keep = units.get(shadow.owner).is_ok();
+        #[cfg(not(target_os = "macos"))]
+        let keep = keep && excluded.get(shadow.owner).is_err();
+        if !keep {
             commands.entity(entity).despawn();
         } else {
             shadowed.insert(shadow.owner);
         }
     }
     for (owner, net) in &units {
+        #[cfg(not(target_os = "macos"))]
+        if excluded.get(owner).is_ok() {
+            continue;
+        }
         if !matches!(net.kind, EntityKind::Player | EntityKind::Unit) || shadowed.contains(&owner) {
             continue;
         }
