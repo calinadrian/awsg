@@ -1115,7 +1115,11 @@ fn receive(
         } else {
             coop.remote_paused || coop.since_host > 2.
         };
-        if local_wait || waiting {
+        // This hero's own entry needs the clock: it seats only once physics has stepped the new
+        // ground's colliders in. The run itself is held by its entry and loading-screen gates, so
+        // pausing here deadlocked a guest whose host was waiting for it to load.
+        let entering = entry.0 || loading.covering();
+        if *phase.get() == Phase::Menu || (waiting && !entering) {
             clock.pause();
         } else {
             clock.unpause();
