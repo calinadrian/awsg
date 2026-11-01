@@ -1,4 +1,4 @@
-//! Normal-mode Elwynn chasers, derived from ASR.exe 0.124 (SHA-256 2e68f986…).
+//! Normal-mode Elwynn chasers, derived from ASR.exe 0.124 (SHA-256 08563b3a…).
 //! Budget/floor: 0x5c15374–0x5c159cf; cap/annulus: 0x5c00487–0x5c005ef.
 use std::collections::HashMap;
 
