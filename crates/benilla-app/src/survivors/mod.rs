@@ -195,7 +195,7 @@ impl Plugin for SurvivorsPlugin {
             )
             .add_systems(
                 PostUpdate,
-                card_view::refresh_text_scale
+                card_view::refresh_render_scale
                     .after(bevy::ui::UiSystems::Propagate)
                     .before(bevy::text::detect_text_needs_rerender::<Text>),
             )

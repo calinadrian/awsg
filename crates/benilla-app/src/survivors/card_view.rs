@@ -232,11 +232,22 @@ fn rect(x: f32, y: f32, width: f32, height: f32, scale: f32) -> Node {
 #[derive(Component)]
 pub(super) struct RasterScale(f32);
 
-pub(super) fn refresh_text_scale(
+#[derive(Component)]
+pub(super) struct SeparatorLine {
+    center_y: f32,
+    thickness: f32,
+}
+
+pub(super) fn refresh_render_scale(
     mut texts: Query<(
         &bevy::ui::ComputedUiRenderTargetInfo,
         &mut RasterScale,
         &mut TextFont,
+    )>,
+    mut separators: Query<(
+        &bevy::ui::ComputedUiRenderTargetInfo,
+        &SeparatorLine,
+        &mut Node,
     )>,
 ) {
     for (target, mut previous, mut font) in &mut texts {
@@ -244,6 +255,18 @@ pub(super) fn refresh_text_scale(
         if scale.is_finite() && scale > 0.0 && previous.0 != scale {
             previous.0 = scale;
             font.set_changed();
+        }
+    }
+    for (target, line, mut node) in &mut separators {
+        let scale = target.scale_factor();
+        if scale.is_finite() && scale > 0.0 {
+            // Two physical pixels remain visible even when the card is scaled down.
+            let height = line.thickness.max(2.0 / scale);
+            let top = px(line.center_y - height * 0.5);
+            if node.height != px(height) || node.top != top {
+                node.height = px(height);
+                node.top = top;
+            }
         }
     }
 }
@@ -334,7 +357,13 @@ pub fn spawn(
                 },
                 ImageNode::new(art.diamond[rarity].clone()),
             ));
-            label.spawn(text(&art.label, content.rarity_name, 12.0 * scale, rc));
+            label.spawn(weighted_text(
+                &art.title,
+                content.rarity_name,
+                14.0 * scale,
+                rc,
+                FontWeight::BOLD,
+            ));
         });
         if content.state == "NEW" {
             c.spawn((
@@ -410,13 +439,21 @@ pub fn spawn(
                 }
             });
         }
-        let rule = Color::srgb(0.46, 0.41, 0.29);
+        let rule = Color::srgb(0.62, 0.56, 0.40);
         c.spawn((
-            rect(24.0, divider_y, 168.0, 1.0, scale),
+            SeparatorLine {
+                center_y: divider_y * scale,
+                thickness: 2.5 * scale,
+            },
+            rect(24.0, divider_y - 1.25, 168.0, 2.5, scale),
             BackgroundColor(rule),
         ));
         c.spawn((
-            rect(228.0, divider_y, 168.0, 1.0, scale),
+            SeparatorLine {
+                center_y: divider_y * scale,
+                thickness: 2.5 * scale,
+            },
+            rect(228.0, divider_y - 1.25, 168.0, 2.5, scale),
             BackgroundColor(rule),
         ));
         c.spawn((

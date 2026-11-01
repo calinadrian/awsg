@@ -11,3 +11,5 @@ The final readability proposal uses a 356×156 description area and a separate 3
 Rank and stat arrows use the same transparent procedural image because the bundled text faces lack the arrow glyph.
 
 Card text is re-shaped after the UI render scale has propagated, so resizing, maximizing and fullscreen transitions rebuild the font metrics at the same scale as their frame. UI scale is updated before dealing the hand.
+
+Rarity labels use the bundled Cinzel Bold face at 14 design units. Separator rules use a brighter muted gold, 2.5 design units thick with a two-physical-pixel minimum after render scaling, and stay centred on the gem.
