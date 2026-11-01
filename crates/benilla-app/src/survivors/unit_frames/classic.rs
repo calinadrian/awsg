@@ -71,7 +71,7 @@ pub(super) fn spawn(
             Node {
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                ..seat(x(20., 22.), 51., 22., 16.)
+                ..seat(x(18., 22.), 50., 22., 16.)
             },
             ZIndex(5),
         ))

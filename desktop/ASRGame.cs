@@ -69,6 +69,83 @@ namespace ASRDesktop {
             VersionOf(current.version); return current;
         }
         internal static string VersionFolder(string root, Current pointer) { return Under(Path.Combine(root, "versions"), pointer.directory); }
+        internal static bool PlainPath(string root, string path) {
+            string boundary = Path.GetFullPath(root).TrimEnd('\\');
+            string full = Path.GetFullPath(path);
+            if (!full.StartsWith(boundary + "\\", StringComparison.OrdinalIgnoreCase)) return false;
+            for (string at = full; at != null; at = Path.GetDirectoryName(at)) {
+                if ((File.Exists(at) || Directory.Exists(at)) && (File.GetAttributes(at) & FileAttributes.ReparsePoint) != 0) return false;
+                if (at.Equals(boundary, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+        internal static Dictionary<int, string> TalentLines(string text) {
+            var result = new Dictionary<int, string>();
+            foreach (string line in text.Split('\n')) {
+                string[] words = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries); int id; double xp;
+                if (words.Length < 2 || !Int32.TryParse(words[0], out id) || id < 1 || id > 255 || !Double.TryParse(words[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out xp) || Double.IsNaN(xp) || Double.IsInfinity(xp) || xp < 0) continue;
+                result[id] = line.Trim();
+            }
+            return result;
+        }
+        internal static double TalentXp(string line) { return Double.Parse(line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)[1], System.Globalization.CultureInfo.InvariantCulture); }
+        internal static void RecoverSaves(string root) {
+            string home = Path.Combine(UserHome, "benilla-config"); Directory.CreateDirectory(home);
+            var sources = new List<string> { Path.Combine(root, "benilla-config") };
+            string versions = Path.Combine(root, "versions");
+            if (Directory.Exists(versions)) foreach (string folder in Directory.GetDirectories(versions)) if (PlainPath(root, folder)) sources.Add(Path.Combine(folder, "benilla-config"));
+            foreach (string source in sources) {
+                if (!Directory.Exists(source) || !PlainPath(root, source)) continue;
+                foreach (string file in Directory.GetFiles(source)) {
+                    if (!PlainPath(source, file)) continue;
+                    string name = Path.GetFileName(file), target = Path.Combine(home, name);
+                    if (!File.Exists(target)) { File.Copy(file, target, false); Log("Recovered save " + name + " from " + source); }
+                    else if (name.Equals("survivors-talents.txt", StringComparison.OrdinalIgnoreCase)) {
+                        var current = TalentLines(File.ReadAllText(target)); var old = TalentLines(File.ReadAllText(file)); bool changed = false;
+                        foreach (var entry in old) if (!current.ContainsKey(entry.Key) || TalentXp(entry.Value) > TalentXp(current[entry.Key])) { current[entry.Key] = entry.Value; changed = true; }
+                        if (changed) {
+                            File.Copy(target, target + ".before-recovery-" + Guid.NewGuid().ToString("N"), false);
+                            string temporary = target + ".new-" + Guid.NewGuid().ToString("N");
+                            File.WriteAllText(temporary, String.Join("\n", current.OrderBy(p => p.Key).Select(p => p.Value)), new UTF8Encoding(false));
+                            File.Replace(temporary, target, null); Log("Recovered higher class talent progress from " + source);
+                        }
+                    }
+                }
+            }
+        }
+        internal static void PruneVersions(string root) {
+            Managed(root); var current = Pointer(root); string versions = Path.Combine(root, "versions");
+            if (!PlainPath(root, versions) || !Directory.Exists(versions) || RunningGame(root)) return;
+            RecoverSaves(root);
+            var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { VersionFolder(root, current), Path.GetDirectoryName(Self) };
+            string previous = Path.Combine(root, "previous.json");
+            if (File.Exists(previous)) keep.Add(VersionFolder(root, Read<Current>(previous)));
+            foreach (string folder in Directory.GetDirectories(versions)) {
+                if (keep.Contains(folder) || !PlainPath(root, folder) || !Regex.IsMatch(Path.GetFileName(folder), @"^\d+\.\d+\.\d+\.\d+-[0-9a-f]{8}$")) continue;
+                try {
+                    string manifest = Path.Combine(folder, "package.json"); if (!PlainPath(folder, manifest) || !File.Exists(manifest)) continue;
+                    var package = Read<Package>(manifest);
+                    if (package == null || package.schema != 1 || package.product != Product || package.files == null || package.version + "-" != Path.GetFileName(folder).Substring(0, Path.GetFileName(folder).Length - 8)) continue;
+                    var owned = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { manifest };
+                    bool safe = true;
+                    foreach (var file in package.files) {
+                        string path = Under(folder, file.path);
+                        if (!PlainPath(folder, path) || file.path.StartsWith("benilla-config", StringComparison.OrdinalIgnoreCase) || file.path.StartsWith("Data/", StringComparison.OrdinalIgnoreCase)) { safe = false; break; }
+                        owned.Add(path);
+                        if (File.Exists(path)) ValidateFile(folder, file);
+                    }
+                    if (!safe) continue;
+                    // Never recursively delete a version folder: remove only unchanged,
+                    // manifest-owned files. Unknown files and local saves remain intact.
+                    foreach (string path in owned.Where(p => !p.Equals(manifest, StringComparison.OrdinalIgnoreCase))) if (File.Exists(path)) File.Delete(path);
+                    File.Delete(manifest);
+                    foreach (string path in owned.Select(Path.GetDirectoryName).Distinct().OrderByDescending(p => p.Length)) {
+                        if (PlainPath(root, path) && Directory.Exists(path) && Directory.GetFileSystemEntries(path).Length == 0) Directory.Delete(path);
+                    }
+                    Log("Pruned obsolete version " + Path.GetFileName(folder));
+                } catch (Exception error) { Log("Version cleanup skipped " + folder + ": " + error.Message); }
+            }
+        }
         internal static string Worker(string root) {
             var current = Pointer(root); string folder = VersionFolder(root, current);
             var package = Read<Package>(Path.Combine(folder, "package.json"));
@@ -139,9 +216,9 @@ namespace ASRDesktop {
             string data = Path.Combine(root, "Data");
             if (!Directory.Exists(data)) throw new DirectoryNotFoundException("Game data is missing. Run ASR Game Setup to repair the installation.");
             string home = Path.Combine(UserHome, "benilla-config");
-            // A portable copy's saves may be imported once; later launches never overwrite them.
-            string legacy = Path.Combine(root, "benilla-config");
-            if (!Directory.Exists(home) && Directory.Exists(legacy)) CopyTree(legacy, home);
+            // Recover portable/version-local saves even if the shared folder already exists.
+            // Do not touch a live game's save file; it will save its in-memory book at exit.
+            if (!RunningGame(root)) { try { RecoverSaves(root); } catch (Exception error) { Log("Save recovery: " + error.Message); } }
             Directory.CreateDirectory(home);
             var info = new ProcessStartInfo(Path.Combine(folder, "warcraft-survivors.exe")) { WorkingDirectory = root, UseShellExecute = false };
             info.EnvironmentVariables["WOW_DATA"] = data;
@@ -241,7 +318,10 @@ namespace ASRDesktop {
                 Managed(root);
                 using (var mutex = Gate(root)) {
                     if (!Enter(mutex)) { if (play) Launch(root); else MessageBox.Show("ASR Game is already checking for updates.", Title); return; }
-                    try { Application.Run(new UpdateWindow(root, play || !check)); } finally { mutex.ReleaseMutex(); }
+                    try {
+                        try { PruneVersions(root); } catch (Exception error) { Log("Version cleanup: " + error.Message); }
+                        Application.Run(new UpdateWindow(root, play || !check));
+                    } finally { mutex.ReleaseMutex(); }
                 }
             } catch (Exception error) { Log(error.ToString()); MessageBox.Show(error.Message, Title, MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }

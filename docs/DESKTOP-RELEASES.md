@@ -36,8 +36,11 @@ its saves use their own paths.
 To carry progress from this recreation's portable build into a fresh install,
 close both copies and copy that portable build's `benilla-config` into
 `%LOCALAPPDATA%\ASRGame\benilla-config` before playing the installed copy.
-Keep an existing destination if it already contains newer progress. The original
-binary game's character-save format is not imported.
+The launcher also recovers missing files from `benilla-config` in the installation
+root or an older version folder. Talent recovery compares XP per class, preserving
+the entry with higher XP and its spent ranks; the current file is backed up before
+any merge. It waits until the game is closed. The original binary game's
+character-save format is not imported.
 
 Uninstall through Settings → Apps or Start → ASR Game → Uninstall. The
 uninstaller removes its own program files, shortcuts and unchanged installed
@@ -102,8 +105,11 @@ to replace personal state or runtime data. The GitHub account publishing release
 is the authority for executable updates.
 
 Program files are extracted into a new folder under `versions/`. `current.json`
-is replaced atomically only after validation. The old folder and `previous.json`
-remain available if a release needs repair. A failed download/extraction keeps
+is replaced atomically only after validation. The current version and the rollback
+version named by `previous.json` remain available. On later launcher starts,
+obsolete versions are pruned when no installed game or relay is running. Cleanup
+removes only unchanged manifest-owned files, skips directory links, and preserves
+local saves and unknown files. A failed download/extraction keeps
 the existing version selected. Launcher updates live inside the new version;
 the root bootstrap delegates to them rather than overwriting an executable
 while it is running. `updates.log` lives beside the saved-state folder.
