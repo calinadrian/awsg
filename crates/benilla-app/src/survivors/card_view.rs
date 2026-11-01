@@ -439,14 +439,13 @@ pub fn spawn(
                 }
             });
         }
-        let rule = Color::srgb(0.62, 0.56, 0.40);
         c.spawn((
             SeparatorLine {
                 center_y: divider_y * scale,
                 thickness: 2.5 * scale,
             },
             rect(24.0, divider_y - 1.25, 168.0, 2.5, scale),
-            BackgroundColor(rule),
+            BackgroundColor(rc),
         ));
         c.spawn((
             SeparatorLine {
@@ -454,7 +453,7 @@ pub fn spawn(
                 thickness: 2.5 * scale,
             },
             rect(228.0, divider_y - 1.25, 168.0, 2.5, scale),
-            BackgroundColor(rule),
+            BackgroundColor(rc),
         ));
         c.spawn((
             rect(205.0, divider_y - 5.0, 10.0, 12.0, scale),
