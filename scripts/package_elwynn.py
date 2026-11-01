@@ -362,6 +362,7 @@ def build():
     parser.add_argument('--data-only', action='store_true', help='Build the archive only; do not build/copy a player executable')
     parser.add_argument('--skip-reader-build', action='store_true', help='Use an already compiled elwynn_assets helper')
     parser.add_argument('--zip', action='store_true', help='Also create a ZIP beside the output folder')
+    parser.add_argument('--include-coop-server', action='store_true', help='Include the operator relay executable and startup script')
     args = parser.parse_args()
     source, output = args.data.resolve(), args.out.resolve()
     if not output.is_relative_to(ROOT / 'out') or output == ROOT / 'out' or source == output or output.is_relative_to(source) or source.is_relative_to(output):
@@ -496,6 +497,12 @@ def build():
         (output / 'Play.cmd').write_text('@echo off\nsetlocal\ncd /d "%~dp0"\nset "WOW_DATA=%~dp0Data"\n"%~dp0warcraft-survivors.exe"\n')
         for name in ('LICENSE-MIT', 'LICENSE-APACHE', 'CONTROLS.md'):
             shutil.copy2(ROOT / name, output / name)
+        shutil.copy2(ROOT / 'docs/COOP.md', output / 'COOP.md')
+        if args.include_coop_server:
+            subprocess.run(['cargo', 'build', '--release', '-p', 'asr-coop'], cwd=ROOT, check=True)
+            relay = 'asr-coop.exe' if os.name == 'nt' else 'asr-coop'
+            shutil.copy2(ROOT / 'target/release' / relay, output / relay)
+            (output / 'Host Server.cmd').write_text('@echo off\ncd /d "%~dp0"\n"%~dp0asr-coop.exe" --bind 0.0.0.0:47771\npause\n')
         (output / 'README.txt').write_text('Elwynn Forest local player package\n\nRun Play.cmd. No Rust installation is needed to play.\nKeep Data beside the executable. This package contains assets from your own\nlocal game installation; keep game data out of the source repository.\nBuild and packaging do not establish gameplay correctness; gameplay is untested.\n')
     total = sum(path.stat().st_size for path in output.rglob('*') if path.is_file())
     print(f'Elwynn output: {output}\n{len(package.manifest):,} assets; {report["archive_bytes"]:,} archive bytes; {total:,} total bytes', flush=True)

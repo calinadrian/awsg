@@ -857,6 +857,8 @@ pub(super) fn apply_hits(
     mut loot: MessageWriter<Loot>,
     mut fields: MessageWriter<FieldChanged>,
     mut rng: ResMut<Rng>,
+    mut coop: ResMut<super::coop::Coop>,
+    replicas: Query<&super::coop::Replica>,
 ) {
     let dt = time.delta_secs();
     let now = run.elapsed;
@@ -1023,6 +1025,12 @@ pub(super) fn apply_hits(
         if h.mark != 0 {
             marks.add(h.mark, h.mark_dur);
         }
+        if coop.guest() {
+            if let Ok(id) = replicas.get(e) {
+                coop.submit(id.0, dmg, h.effect);
+            }
+            en.hp = en.hp.max(0.001);
+        }
         if en.hp <= 0.0 {
             super::spell_passives::on_death(
                 &mut run,
@@ -1061,6 +1069,12 @@ pub(super) fn apply_hits(
             en.hp -= dealt;
             run.damage_done += f64::from(dealt);
             fx.number(e, dealt, false, COLOR_SPELL);
+            if coop.guest() {
+                if let Ok(id) = replicas.get(e) {
+                    coop.submit(id.0, dealt, Effect::None);
+                }
+                en.hp = en.hp.max(0.001);
+            }
             if en.hp <= 0.0 {
                 super::spell_passives::on_death(&mut run, &mut rng, e, tf.translation, 0, 0);
                 kill(&mut commands, &mut run, e, tf.translation, &mut en);

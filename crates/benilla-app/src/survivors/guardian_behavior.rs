@@ -4,8 +4,8 @@
 use bevy::prelude::*;
 
 use super::enemies::{self, Charge, Enemy};
-use super::units::{COLOR_HURT, Fx, flat};
-use super::{Rng, Run, data, dungeon::Ground, hero, telegraphs::Telegraphs};
+use super::units::{flat, Fx, COLOR_HURT};
+use super::{data, dungeon::Ground, hero, telegraphs::Telegraphs, Rng, Run};
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -272,7 +272,7 @@ pub(super) fn tick(
                 }
             }
         }
-        if hit && run.dead_t.is_none() {
+        if hit && (run.dead_t.is_none() || run.coop_target != 0) {
             let taken = hero::hurt_hero(run, impact.damage);
             if taken > 0.0 {
                 fx.number(hero_entity, taken, false, COLOR_HURT);
@@ -291,7 +291,7 @@ pub(super) fn tick(
     for wait in &mut script.waits {
         *wait -= dt;
     }
-    if run.dead_t.is_some() || en.stun_t > 0.0 || en.fear_t > 0.0 {
+    if (run.dead_t.is_some() && run.coop_target == 0) || en.stun_t > 0.0 || en.fear_t > 0.0 {
         return;
     }
     if script.second_charge.is_some_and(|at| now >= at) {

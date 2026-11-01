@@ -6,6 +6,7 @@
 |---|---|---|
 | Menu | Click a race, gender, class and zone | make your pick (**Randomize** rolls one) |
 | Menu | **Enter** (or **Enter World**) | start the run; the world travels to the zone picked |
+| Menu | **F6** (or **Co-op**) | browse rooms, host a party or join by invite code |
 | Playing | **W / S** or **up / down** | run forward / backpedal |
 | Playing | **A / D** or **left / right** | turn (strafe while the right button is held) |
 | Playing | **Q / E** | strafe |
@@ -24,8 +25,12 @@
 | Any | minimap **+ / −** / minimize | minimap zoom / collapse |
 
 The camera sits behind the hero, as in WoW; a left-drag looks around and it swings back behind
-once you run. In the menu it slowly orbits the preview
-hero. Your race, gender, class and zone are remembered across reloads.
+once you run. In the menu the preview faces you. Your race, gender, class and zone
+are remembered across reloads.
+
+**Co-op** offers **Host game** and **Join game**. The host shares the six-character
+join code with **Copy code**. Guests click **Ready to play**; the host clicks
+**Start adventure**. The server address is remembered under **Connection settings**.
 
 **Settings → Graphics** adjusts fullscreen/windowed mode, vertical sync, render scale,
 view distance, grass and flower density, and bloom. **Settings → Sound** adjusts mute,

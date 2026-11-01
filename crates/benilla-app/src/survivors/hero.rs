@@ -26,13 +26,12 @@ pub(super) const HERO_RADIUS: f32 = 0.7;
 /// The fall back to the ground off the controller (`player/state.rs`'s `GRAVITY`).
 const GRAVITY: f32 = 19.291_105;
 
-/// The menu's and the auto-run's camera: the menu orbits the preview hero; an auto-run follows
+/// The menu's and the auto-run's camera: the menu frames the preview hero; an auto-run follows
 /// behind the driven hero. In play by hand the player controller's camera takes over
 /// ([`super::drive`]).
 #[derive(Resource)]
 pub(super) struct CamRig {
     pub dist: f32,
-    pub orbit: f32,
     /// Camera azimuth (radians) around the hero: 0 puts it on +Z, behind a hero facing −Z.
     pub yaw: f32,
     /// Elevation above the horizon (radians).
@@ -43,7 +42,6 @@ impl Default for CamRig {
     fn default() -> Self {
         Self {
             dist: 14.0,
-            orbit: 0.6,
             yaw: 0.0,
             pitch: 22.0 * std::f32::consts::PI / 180.0,
         }
@@ -285,9 +283,8 @@ pub(super) fn drop_stray_buttons(
 /// A slow orbit at the menu, and behind an auto-run's hero; in play by hand, the level-up pick,
 /// the pause and the results it leaves the camera where the controller put it.
 pub(super) fn place_camera(
-    time: Res<Time<Real>>,
     phase: Res<State<Phase>>,
-    mut rig: ResMut<CamRig>,
+    rig: Res<CamRig>,
     auto: Option<Res<super::auto::Auto>>,
     player: Res<crate::player::Player>,
     world: WorldPoint,
@@ -302,10 +299,11 @@ pub(super) fn place_camera(
     // With no hero yet, the focus `drive_hero` grounded.
     let focus = hero.single().map_or(player.pos, |t| t.translation);
     let (eye, look) = if menu {
-        rig.orbit += time.delta_secs() * 0.2;
+        // Keep the hero facing the viewer while the player chooses their appearance.
+        let angle = std::f32::consts::PI + 0.18;
         let d = 7.0;
         (
-            focus + Vec3::new(rig.orbit.sin() * d, 2.4, rig.orbit.cos() * d),
+            focus + Vec3::new(angle.sin() * d, 2.4, angle.cos() * d),
             focus + Vec3::Y * 1.1,
         )
     } else {
@@ -336,6 +334,10 @@ pub(super) fn place_camera(
 /// Damage the hero takes from one blow, after immunity, armour and the shield; returns what got
 /// through.
 pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
+    if run.coop_target != 0 {
+        run.coop_damage.push((run.coop_target, raw));
+        return raw;
+    }
     if run.immune_t > 0.0 || run.dead_t.is_some() {
         return 0.0;
     }
@@ -360,6 +362,7 @@ pub(super) fn hero_vitals(
     mut fx: Fx,
     selection: Res<super::Selection>,
     mut rng: ResMut<super::Rng>,
+    coop: Res<super::coop::Coop>,
 ) {
     let dt = time.delta_secs();
     let stats = run.stats();
@@ -372,7 +375,14 @@ pub(super) fn hero_vitals(
     };
     if let Some(t) = run.dead_t.as_mut() {
         *t += dt;
-        if *t > 3.0 {
+        if *t > 3.0 && !coop.guest() && !coop.living_guests() {
+            next.set(Phase::GameOver);
+        }
+        if coop.active() && !coop.guest() {
+            run.elapsed += dt;
+        }
+        if coop.active() && !coop.guest() && run.slain_last {
+            run.won = true;
             next.set(Phase::GameOver);
         }
         return;
@@ -432,9 +442,9 @@ pub(super) fn hero_vitals(
         marks.flush(entity, guid.0, &mut store, &mut fields);
     } else if if data::roster(selection.map).timed {
         // The old ASR's battlegrounds are won by slaying their last boss.
-        run.slain_last
+        run.slain_last && !coop.guest()
     } else {
-        run.elapsed >= data::VICTORY_SECS
+        run.elapsed >= data::VICTORY_SECS && !coop.guest()
     } {
         run.won = true;
         // A last flourish before the results.

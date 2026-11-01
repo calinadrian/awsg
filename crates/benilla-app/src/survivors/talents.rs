@@ -522,6 +522,7 @@ pub(super) struct ResultsProgress;
 
 /// Keep the reward receipt and the selected class's saved progress visible between runs.
 pub(super) fn refresh_progress(
+    progress: Res<super::progress::Progress>,
     phase: Res<State<Phase>>,
     selection: Res<Selection>,
     run: Res<Run>,
@@ -533,9 +534,15 @@ pub(super) fn refresh_progress(
 ) {
     match phase.get() {
         Phase::Menu => {
-            let value = selection
+            let mut value = selection
                 .class_def()
                 .map_or_else(String::new, |class| book.class(class.id).progress_text());
+            if let Some(class) = selection.class_def() {
+                value.push_str(&format!(
+                    "\n{}",
+                    progress.summary(class.id, selection.stage_def().name)
+                ));
+            }
             for mut text in &mut texts.p0() {
                 if text.0 != value {
                     text.0 = value.clone();
@@ -758,7 +765,7 @@ fn build_panel(
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
         Interaction::default(),
         bevy::ui::FocusPolicy::Block,
-        GlobalZIndex(40),
+        GlobalZIndex(1000),
     ))
     .with_children(|back| {
         back.spawn((

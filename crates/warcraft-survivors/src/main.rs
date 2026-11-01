@@ -1,4 +1,5 @@
 //! The `warcraft-survivors` launcher: the build stamp, handed to the survivors mode.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use benilla_app::BuildId;
 

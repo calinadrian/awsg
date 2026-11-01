@@ -1135,6 +1135,7 @@ pub(super) fn buttons(
 }
 
 pub(super) fn keys(
+    coop: Res<super::coop::Coop>,
     keys: Res<ButtonInput<KeyCode>>,
     phase: Res<State<Phase>>,
     mut selection: ResMut<Selection>,
@@ -1142,6 +1143,9 @@ pub(super) fn keys(
     mut next: ResMut<NextState<Phase>>,
     mut options: ResMut<super::options::Options>,
 ) {
+    if coop.open || (*phase.get() == Phase::Menu && coop.in_room()) {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         options.escape(*phase.get(), &mut next);
         return;
@@ -2232,6 +2236,7 @@ pub(super) fn icon_tooltip(
 #[allow(clippy::type_complexity)]
 pub(super) fn show_panels(
     phase: Res<State<Phase>>,
+    coop: Res<super::coop::Coop>,
     options: Res<super::options::Options>,
     mut roots: ParamSet<(
         Query<(&mut Visibility, &mut Node), With<MenuRoot>>,
@@ -2258,7 +2263,7 @@ pub(super) fn show_panels(
         }
     };
     for root in &mut roots.p0() {
-        set(root, p == Phase::Menu && !options.open);
+        set(root, p == Phase::Menu && !options.open && !coop.open);
     }
     for root in &mut roots.p1() {
         set(root, p != Phase::Menu && p != Phase::GameOver);

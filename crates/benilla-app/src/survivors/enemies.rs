@@ -8,10 +8,10 @@ use bevy::prelude::*;
 
 use super::abilities::Hit;
 use super::data::{self, EnemyDef};
-use super::hero::{self, HERO_RADIUS, Hero};
-use super::units::{self, COLOR_HURT, Fx, Marks, UnitSpec, flat, yaw_toward};
+use super::hero::{self, Hero, HERO_RADIUS};
+use super::units::{self, flat, yaw_toward, Fx, Marks, UnitSpec, COLOR_HURT};
 use super::{Phase, Rng, Run, Selection};
-use crate::creature_anim::{MovementState, move_flags};
+use crate::creature_anim::{move_flags, MovementState};
 use crate::net::{FieldChanged, Guid, ObjectStore};
 
 #[derive(Component)]
@@ -136,7 +136,7 @@ pub(super) enum GemKind {
 
 #[derive(Component)]
 pub(super) struct Gem {
-    kind: GemKind,
+    pub kind: GemKind,
     pulled: bool,
     speed: f32,
 }
@@ -336,12 +336,20 @@ pub(super) fn spawn_enemies(
     hero: Query<&Transform, With<Hero>>,
     enemies: Query<&Enemy>,
     ground: super::dungeon::Ground,
+    coop: Res<super::coop::Coop>,
 ) {
     let Ok(h) = hero.single() else { return };
-    if run.dead_t.is_some() {
+    if run.dead_t.is_some() && !coop.living_guests() {
         return;
     }
-    let hpos = h.translation;
+    let hpos = if run.dead_t.is_some() {
+        coop.players
+            .values()
+            .find(|p| p.peer != 0 && p.hp > 0.)
+            .map_or(h.translation, |p| Vec3::from_array(p.pos))
+    } else {
+        h.translation
+    };
     let elapsed = run.elapsed;
     let roster = data::roster(selection.map);
     let pool = if roster.timed {
@@ -401,7 +409,9 @@ pub(super) fn move_enemies(
     mut hits: MessageWriter<Hit>,
     selection: Res<Selection>,
     lairs: Res<super::guardians::Lairs>,
-    mut bolts: Local<Vec<(f32, f32)>>,
+    mut bolts: Local<Vec<(f32, f32, u32)>>,
+    coop: Res<super::coop::Coop>,
+    allies: Query<(Entity, &super::coop::Ally)>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
@@ -416,14 +426,20 @@ pub(super) fn move_enemies(
 
     // Casters' bolts in flight land when due.
     let now = run.elapsed;
-    let landed: Vec<f32> = bolts.iter().filter(|b| b.0 <= now).map(|b| b.1).collect();
+    let landed: Vec<(f32, u32)> = bolts
+        .iter()
+        .filter(|b| b.0 <= now)
+        .map(|b| (b.1, b.2))
+        .collect();
     bolts.retain(|b| b.0 > now);
-    for raw in landed {
+    for (raw, peer) in landed {
+        run.coop_target = peer;
         let taken = hero::hurt_hero(&mut run, raw);
         if taken > 0.0 {
             fx.number(hero_e, taken, false, COLOR_HURT);
         }
     }
+    run.coop_target = 0;
 
     // Separation over a coarse grid: only neighbours in the same or adjacent cells push.
     const CELL: f32 = 3.0;
@@ -491,6 +507,8 @@ pub(super) fn move_enemies(
             e.weaken = 1.0;
         }
         let pos = tf.translation;
+        let (hero_e, hpos, peer, hero_down) = coop.target(pos, (hero_e, hpos), !hero_down, &allies);
+        run.coop_target = peer;
         let to_hero = flat(hpos - pos);
         let dist = to_hero.length();
 
@@ -687,7 +705,7 @@ pub(super) fn move_enemies(
         if let Some(r) = e.def.ranged.filter(|_| free && in_reach && !contact) {
             e.attack_cd = r.cooldown;
             fx.cast(ent, r.spell, &[hero_e], None);
-            bolts.push((now + dist / BOLT_SPEED, e.damage * e.weaken));
+            bolts.push((now + dist / BOLT_SPEED, e.damage * e.weaken, peer));
         } else if contact && free {
             let swing = if e.def.attack > 0.0 {
                 e.def.attack
@@ -703,10 +721,10 @@ pub(super) fn move_enemies(
             if taken > 0.0 {
                 fx.number(hero_e, taken, false, COLOR_HURT);
             }
-            if run.thorns_t > 0.0 {
+            if peer == 0 && run.thorns_t > 0.0 {
                 hits.write(Hit::direct(ent, run.thorns * run.stats().might, false));
             }
-            if taken > 0.0 {
+            if taken > 0.0 && peer == 0 {
                 run.struck = true;
                 let reflect = run.talents.stat(22) + run.jewel_stat(20);
                 if reflect > 0.0 {
@@ -715,6 +733,7 @@ pub(super) fn move_enemies(
             }
         }
     }
+    run.coop_target = 0;
 }
 
 /// Mark timers run down; the state kits reap with them.
@@ -758,6 +777,7 @@ pub(super) fn drop_loot(
     mut rng: ResMut<Rng>,
     mut run: ResMut<Run>,
     gems: Query<(Entity, &Transform, &Gem)>,
+    mut coop: ResMut<super::coop::Coop>,
 ) {
     if drops.is_empty() {
         return;
@@ -805,6 +825,7 @@ pub(super) fn drop_loot(
             info!("survivors gold: dropped base={amount} balance={}", run.gold);
         }
         if d.boss {
+            coop.cache(d.pos);
             super::caches::spawn(&mut commands, run.guid(), d.pos, false);
         }
         if d.boss || rng.f32() < 0.015 {
@@ -844,6 +865,8 @@ pub(super) fn run_scripts(
     // Blows marked on the ground: when they land, where, how wide, how hard, and the visual they
     // land with (its caster, spell, and the spot it plays at, or on the caster).
     mut blasts: Local<Vec<Blast>>,
+    coop: Res<super::coop::Coop>,
+    allies: Query<(Entity, &super::coop::Ally)>,
 ) {
     let dt = time.delta_secs();
     let Ok((hero_e, htf)) = hero.single() else {
@@ -873,6 +896,15 @@ pub(super) fn run_scripts(
                 fx.number(hero_e, taken, false, COLOR_HURT);
             }
         }
+        for p in coop
+            .players
+            .values()
+            .filter(|p| p.peer != 0 && p.hp > 0. && p.loaded)
+        {
+            if flat(Vec3::from_array(p.pos) - spot).length() <= radius {
+                run.coop_damage.push((p.peer, damage));
+            }
+        }
     }
 
     let pool = if roster.timed {
@@ -881,6 +913,13 @@ pub(super) fn run_scripts(
         data::wave_pool(now, roster.enemies.len()).to_vec()
     };
     for (e, tf, mut en, mut script) in &mut scripted {
+        let (hero_e, hpos, peer, _) = coop.target(
+            tf.translation,
+            (hero_e, hpos),
+            run.dead_t.is_none(),
+            &allies,
+        );
+        run.coop_target = peer;
         if en.home.is_some() {
             super::guardian_behavior::tick(
                 &mut script.guardian,
@@ -1052,9 +1091,10 @@ pub(super) fn run_scripts(
             }
         }
     }
+    run.coop_target = 0;
 }
 
-fn spawn_gem(commands: &mut Commands, serial: u64, pos: Vec3, kind: GemKind) {
+pub(super) fn spawn_gem(commands: &mut Commands, serial: u64, pos: Vec3, kind: GemKind) -> Entity {
     let (display, scale) = look_for(kind);
     let e = match kind {
         GemKind::Xp(_) => {
@@ -1090,6 +1130,7 @@ fn spawn_gem(commands: &mut Commands, serial: u64, pos: Vec3, kind: GemKind) {
         pulled: false,
         speed: 6.0,
     });
+    e
 }
 
 /// XP and meals accelerate toward the hero after entering pickup range.
@@ -1101,9 +1142,10 @@ pub(super) fn collect_gems(
     hero: Query<&Transform, (With<Hero>, Without<Gem>)>,
     mut gems: Query<(Entity, &mut Transform, &mut Gem, &Visibility)>,
     emitters: Query<(Entity, &benilla_world::particles::ParticleEmitter)>,
+    mut coop: ResMut<super::coop::Coop>,
 ) {
     let Ok(h) = hero.single() else { return };
-    if run.dead_t.is_some() {
+    if run.dead_t.is_some() && !coop.living_guests() {
         return;
     }
     let dt = time.delta_secs();
@@ -1114,6 +1156,17 @@ pub(super) fn collect_gems(
         if *visible == Visibility::Hidden {
             continue;
         }
+        let (target_peer, target) = coop
+            .players
+            .values()
+            .filter(|p| p.peer != 0 && p.loaded && p.hp > 0.)
+            .map(|p| (p.peer, Vec3::from_array(p.pos) + Vec3::Y))
+            .chain(run.dead_t.is_none().then_some((0, target)))
+            .min_by(|a, b| {
+                a.1.distance_squared(tf.translation)
+                    .total_cmp(&b.1.distance_squared(tf.translation))
+            })
+            .unwrap_or((0, target));
         let d = target - tf.translation;
         let dist = d.length();
         if let GemKind::Gold(base) = g.kind {
@@ -1121,7 +1174,10 @@ pub(super) fn collect_gems(
             // stay put; only collection credits the balance and applies gold-find.
             if flat(d).length() <= stats.magnet {
                 let earned = super::gold::collected(base, run.jewel_stat(13));
-                run.gold = run.gold.saturating_add(earned);
+                if run.dead_t.is_none() {
+                    run.gold = run.gold.saturating_add(earned);
+                }
+                coop.reward(0, base);
                 info!(
                     "survivors gold: collected base={base} earned={earned} balance={}",
                     run.gold
@@ -1152,7 +1208,13 @@ pub(super) fn collect_gems(
                         }
                     }
                 }
-                GemKind::Heal(hp) => run.hp = (run.hp + hp).min(stats.max_hp),
+                GemKind::Heal(hp) => {
+                    if target_peer == 0 {
+                        run.hp = (run.hp + hp).min(stats.max_hp);
+                    } else {
+                        run.coop_damage.push((target_peer, -hp));
+                    }
+                }
                 GemKind::Gold(_) => {
                     unreachable!("gold handled before pickup attraction")
                 }
@@ -1166,7 +1228,10 @@ pub(super) fn collect_gems(
     // Original collects a frame's base XP, applies growth, then rounds once, minimum 1
     // (RVA 0x5c5a1d4..0x5c5a378). Stored XP remains whole points.
     if collected_xp > 0 {
-        run.xp += (collected_xp as f32 * stats.growth).round().max(1.0);
+        coop.reward(collected_xp, 0);
+        if run.dead_t.is_none() {
+            run.xp += (collected_xp as f32 * stats.growth).round().max(1.0);
+        }
     }
     while run.level < data::MAX_LEVEL && run.xp >= data::xp_to_next(run.level) {
         run.xp -= data::xp_to_next(run.level);

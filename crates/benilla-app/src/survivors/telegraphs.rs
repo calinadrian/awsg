@@ -152,6 +152,75 @@ struct Telegraph {
 pub(super) struct Telegraphs(Vec<Telegraph>);
 
 impl Telegraphs {
+    /// The host sends warnings as shapes and encounter times; each guest projects its own art.
+    pub(super) fn snapshot(&self) -> Vec<[f32; 13]> {
+        self.0
+            .iter()
+            .map(|t| {
+                let (kind, a, b, radius, half, len) = match t.shape {
+                    Shape::Circle { center, radius } => (0., center, Vec3::ZERO, radius, 0., 0.),
+                    Shape::Cone {
+                        center,
+                        dir,
+                        radius,
+                        half_angle,
+                    } => (1., center, dir, radius, half_angle, 0.),
+                    Shape::Lane {
+                        from,
+                        dir,
+                        len,
+                        half,
+                    } => (2., from, dir, 0., half, len),
+                };
+                [
+                    kind, a.x, a.y, a.z, b.x, b.y, b.z, radius, half, len, t.start, t.full, t.end,
+                ]
+            })
+            .collect()
+    }
+    pub(super) fn restore(&mut self, warnings: Vec<[f32; 13]>) {
+        let old = self.snapshot();
+        let mut next = Vec::new();
+        for w in warnings
+            .into_iter()
+            .take(256)
+            .filter(|w| w.iter().all(|v| v.is_finite()))
+        {
+            let a = Vec3::new(w[1], w[2], w[3]);
+            let b = Vec3::new(w[4], w[5], w[6]);
+            let shape = match w[0] as u8 {
+                0 => Shape::Circle {
+                    center: a,
+                    radius: w[7],
+                },
+                1 => Shape::Cone {
+                    center: a,
+                    dir: b,
+                    radius: w[7],
+                    half_angle: w[8],
+                },
+                2 => Shape::Lane {
+                    from: a,
+                    dir: b,
+                    len: w[9],
+                    half: w[8],
+                },
+                _ => continue,
+            };
+            let outline = old
+                .iter()
+                .position(|p| *p == w)
+                .map_or_else(Vec::new, |i| std::mem::take(&mut self.0[i].outline));
+            next.push(Telegraph {
+                shape,
+                start: w[10],
+                full: w[11],
+                end: w[12],
+                outline,
+            });
+        }
+        self.0 = next;
+    }
     /// A ground hazard stays filled while it can still deal damage.
     pub fn hazard(&mut self, center: Vec3, radius: f32, now: f32, secs: f32) {
         self.0.push(Telegraph {

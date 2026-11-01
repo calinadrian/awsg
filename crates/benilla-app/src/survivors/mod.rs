@@ -1,5 +1,5 @@
 //! Warcraft Survivors: a survival mode on the benilla world, started by [`crate::run_survivors`].
-//! There is no server: the hero, the enemies and the spells are local entities dressed by the same
+//! Solo and player-hosted co-op use local entities dressed by the same
 //! attach, animation and spell-visual systems a streamed unit gets, on a battleground picked at
 //! the menu ([`data::MAPS`]), with FrameXML off ([`crate::run_mode::CaptureMode`]). In play the
 //! hero is driven by WoW's own player controller ([`drive`]).
@@ -11,6 +11,8 @@ mod caches;
 mod card_content;
 mod card_view;
 mod cards;
+mod coop;
+mod coop_ui;
 mod data;
 mod drive;
 mod dungeon;
@@ -19,6 +21,7 @@ mod elwynn_behavior;
 mod enemies;
 mod fill;
 mod frame_settings;
+mod front_end;
 mod gold;
 mod grade;
 mod guardian_behavior;
@@ -29,9 +32,11 @@ mod jewelry;
 mod loot_ground;
 mod menu;
 mod menu_icons;
+mod menu_layout;
 mod minimap;
 mod options;
 mod plates;
+mod progress;
 mod races;
 mod reward_axes;
 mod rewards;
@@ -67,6 +72,7 @@ impl Plugin for SurvivorsPlugin {
         app.insert_resource(crate::run_mode::CaptureMode)
             .add_plugins(grade::plugin)
             .add_plugins(options::plugin)
+            .add_plugins((coop::plugin, coop_ui::plugin, progress::plugin))
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
@@ -125,16 +131,17 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(
                 Update,
                 (
-                    enemies::spawn_enemies,
-                    guardians::keep_lairs,
-                    enemies::move_enemies,
-                    enemies::run_scripts,
+                    enemies::spawn_enemies.run_if(coop::authority),
+                    guardians::keep_lairs.run_if(coop::authority),
+                    enemies::move_enemies.run_if(coop::authority),
+                    enemies::run_scripts.run_if(coop::authority),
                     abilities::cast_abilities,
                     abilities::tick_areas,
                     abilities::apply_hits,
+                    coop::apply_guest_hits,
                     enemies::tick_marks,
-                    enemies::drop_loot,
-                    enemies::collect_gems,
+                    enemies::drop_loot.run_if(coop::authority),
+                    enemies::collect_gems.run_if(coop::authority),
                     caches::collect,
                     hero::hero_vitals,
                     ring::light_ring,
@@ -142,6 +149,7 @@ impl Plugin for SurvivorsPlugin {
                     .chain()
                     .after(WorldStage::Input)
                     .run_if(in_state(Phase::Playing))
+                    .run_if(|time: Res<Time>| time.delta_secs() > 0.0)
                     .run_if(|entry: Res<drive::EntryPending>| !entry.0)
                     // Entering a battleground raises its loading screen: the run waits behind it.
                     .run_if(|l: Res<crate::loading_screen::LoadingScreen>| !l.covering()),
@@ -399,6 +407,10 @@ pub(super) struct Run {
     hand: cards::Hand,
     /// A melee blow landed on the hero this frame, for the talents that answer one.
     pub struck: bool,
+    /// Enemy attacks route through the host to this guest; zero means the local hero.
+    pub coop_target: u32,
+    pub coop_damage: Vec<(u32, f32)>,
+    pub coop_run: bool,
     /// Key, native effect, strength, and remaining seconds of active spell buffs.
     pub buffs: Vec<(&'static str, u32, f32, f32)>,
     passives: spell_passives::State,
@@ -444,6 +456,9 @@ impl Default for Run {
             talent_paid: false,
             hand: cards::Hand::default(),
             struck: false,
+            coop_target: 0,
+            coop_damage: Vec::new(),
+            coop_run: false,
             buffs: Vec::new(),
             passives: spell_passives::State::default(),
         }
@@ -576,7 +591,13 @@ fn reset_run(
     mut lairs: ResMut<guardians::Lairs>,
     mut selection: ResMut<Selection>,
     mut book: ResMut<talents::TalentBook>,
+    mut progress: ResMut<progress::Progress>,
+    mut coop: ResMut<coop::Coop>,
 ) {
+    progress.settle(&run, selection.stage_def().name, run.coop_run);
+    if coop.active() {
+        coop.leave();
+    }
     if run.elapsed > 0.0 || run.kills > 0 {
         talents::settle_run(&mut run, &mut book, lairs.slain, selection.stage);
     }

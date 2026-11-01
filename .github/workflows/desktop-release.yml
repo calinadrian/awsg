@@ -1,0 +1,58 @@
+name: Desktop release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-windows-release
+      - name: Build Windows installer and immutable runtime update
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $run = [int]$env:GITHUB_RUN_NUMBER
+          $minor = [math]::Floor($run / 60000)
+          $patch = $run % 60000
+          $version = "1.$minor.$patch.$env:GITHUB_RUN_ATTEMPT"
+          $releases = gh release list --repo "$env:GITHUB_REPOSITORY" --limit 100 --json tagName
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read the existing desktop version sequence.' }
+          $highest = [Version]'1.0.0.0'
+          foreach ($release in ($releases | ConvertFrom-Json)) {
+            if ($release.tagName -match '^desktop-v(\d+\.\d+\.\d+\.\d+)$') {
+              $existing = [Version]$Matches[1]
+              if ($existing -gt $highest) { $highest = $existing }
+            }
+          }
+          if ([Version]$version -le $highest) {
+            if ($highest.Revision -lt 65535) { $version = "$($highest.Major).$($highest.Minor).$($highest.Build).$($highest.Revision + 1)" }
+            elseif ($highest.Build -lt 65535) { $version = "$($highest.Major).$($highest.Minor).$($highest.Build + 1).0" }
+            else { throw 'The desktop version sequence needs a new minor version.' }
+          }
+          "ASR_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          ./desktop/Build.ps1 -Version $version
+      - name: Publish desktop release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:ASR_RELEASE_VERSION
+          $folder = "out/desktop/$version"
+          gh release create "desktop-v$version" --draft --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title "ASR Game $version" --generate-notes "$folder/update.json" "$folder/ASRGame-$version-win-x64.zip" "$folder/ASRGame-Setup.exe" "$folder/ASRGame-Setup.exe.sha256"
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop release publication failed.' }
+          gh release edit "desktop-v$version" --repo "$env:GITHUB_REPOSITORY" --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'The release remains a draft because publication failed.' }

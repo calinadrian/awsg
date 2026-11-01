@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 use super::enemies::{self, Enemy};
 use super::hero::{self, Hero};
-use super::{Run, Selection, data};
+use super::{data, Run, Selection};
 
 /// How far out from the centre the lairs lie, as a share of the leash.
 const OUT: f32 = 0.7;
@@ -52,9 +52,10 @@ pub(super) fn keep_lairs(
     hero: Query<&Transform, With<Hero>>,
     guardians: Query<&Enemy>,
     mut next: ResMut<NextState<super::Phase>>,
+    mut coop: ResMut<super::coop::Coop>,
 ) {
     let roster = data::roster(selection.map);
-    if roster.guardians.is_empty() || run.dead_t.is_some() {
+    if roster.guardians.is_empty() || (run.dead_t.is_some() && !coop.living_guests()) {
         return;
     }
     if hero.single().is_err() {
@@ -134,6 +135,7 @@ pub(super) fn keep_lairs(
             5.0,
         ));
         run.pending_chests += 1;
+        coop.cache(lairs.lairs[i].pos);
         next.set(super::Phase::LevelUp);
     }
 }
