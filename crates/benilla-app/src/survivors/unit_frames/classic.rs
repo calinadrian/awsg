@@ -2,7 +2,7 @@
 use super::*;
 
 #[derive(Component)]
-pub(super) struct RacePortrait;
+pub(super) struct RacePortrait(Handle<PortraitMaterial>);
 
 pub(super) fn spawn(
     frame: &mut ChildSpawnerCommands,
@@ -43,17 +43,13 @@ pub(super) fn spawn(
     } else {
         // The race atlas gives a complete Classic portrait without depending on
         // a live model camera, which can crop the head out of this small frame.
+        let material = materials.add(PortraitMaterial {
+            image: Handle::default(),
+        });
         frame.spawn((
-            RacePortrait,
+            RacePortrait(material.clone()),
             face,
-            ImageNode {
-                color: Color::NONE,
-                ..default()
-            },
-            UiArt::crop(
-                "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Races",
-                [0., 0.25, 0., 0.25],
-            ),
+            MaterialNode(material),
             ZIndex(2),
         ));
     }
@@ -71,11 +67,14 @@ pub(super) fn spawn(
             ));
         });
     frame
-        .spawn(Node {
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..seat(x(20., 22.), 51., 22., 16.)
-        })
+        .spawn((
+            Node {
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..seat(x(20., 22.), 51., 22., 16.)
+            },
+            ZIndex(5),
+        ))
         .with_children(|n| {
             n.spawn((FrameLevel(target), label(font, 11., gold)));
         });
@@ -138,30 +137,69 @@ pub(super) fn spawn(
 }
 
 pub(super) fn refresh_portraits(
-    mut commands: Commands,
     run: Res<Run>,
     selection: Res<super::super::Selection>,
-    portraits: Query<Entity, With<RacePortrait>>,
-    mut last: Local<Option<(u8, u8)>>,
+    portraits: Query<&RacePortrait>,
+    mut assets: Option<ResMut<benilla_assets::WorldAssets>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<PortraitMaterial>>,
+    mut cached: Local<Option<((u8, u8), Handle<Image>)>>,
 ) {
     let sex = selection
         .look
         .and_then(|i| selection.looks.get(i))
         .map_or(0, |l| l.2);
     let identity = (run.race, sex);
-    if *last == Some(identity) || portraits.is_empty() {
+    if portraits.is_empty() {
         return;
     }
-    if let Some(coords) = super::super::races::race_tc(run.race, sex) {
-        for entity in &portraits {
-            commands
-                .entity(entity)
-                .remove::<super::super::hud::ArtDone>()
-                .insert(UiArt::crop(
-                    "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Races",
-                    coords,
-                ));
+    if cached.as_ref().is_none_or(|(key, _)| *key != identity) {
+        let Some(coords) = super::super::races::race_tc(run.race, sex) else {
+            return;
+        };
+        let Some(assets) = assets.as_deref_mut() else {
+            return;
+        };
+        let Some((width, height, rgba)) =
+            assets.decode_rgba("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Races")
+        else {
+            return;
+        };
+        let [left, right, top, bottom] = coords;
+        let x = (left * width as f32).round() as usize;
+        let y = (top * height as f32).round() as usize;
+        let w = ((right - left) * width as f32).round() as usize;
+        let h = ((bottom - top) * height as f32).round() as usize;
+        if w == 0 || h == 0 || x + w > width as usize || y + h > height as usize {
+            return;
+        }
+        let mut pixels = Vec::with_capacity(w * h * 4);
+        for row in y..y + h {
+            let start = (row * width as usize + x) * 4;
+            pixels.extend_from_slice(&rgba[start..start + w * 4]);
+        }
+        // Give the circular portrait shader a standalone atlas cell, so its UVs
+        // describe the face rather than the entire rectangular race sheet.
+        let image = Image::new(
+            bevy::render::render_resource::Extent3d {
+                width: w as u32,
+                height: h as u32,
+                depth_or_array_layers: 1,
+            },
+            bevy::render::render_resource::TextureDimension::D2,
+            pixels,
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        *cached = Some((identity, images.add(image)));
+    }
+    if let Some((_, image)) = cached.as_ref() {
+        for portrait in &portraits {
+            if let Some(material) = materials.get_mut(&portrait.0) {
+                if material.image != *image {
+                    material.image = image.clone();
+                }
+            }
         }
     }
-    *last = Some(identity);
 }
