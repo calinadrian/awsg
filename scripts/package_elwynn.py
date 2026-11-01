@@ -279,21 +279,15 @@ class Package:
                 bake = extras.text(extra[18])
                 if bake:
                     self.add('Textures/BakedNpcTextures/' + bake + ('' if bake.lower().endswith('.blp') else '.blp'), f'appearance {display}')
+        # The menu's FEATURES dials offer every skin, face and hair row of a hero's race and sex,
+        # so every row of a carried body ships, not only the displays' own looks.
         sections = self.table('CharSections')
+        bodies = {(race, sex) for race, sex, *_ in appearances}
         for row in sections.rows:
-            for race, sex, skin, face, hair, color, beard in appearances:
-                if (row[1], row[2]) != (race, sex):
-                    continue
-                kind, variation, tint = row[3:6]
-                match = ((kind in (0, 4) and tint == skin) or
-                         (kind == 1 and variation == face and tint == skin) or
-                         (kind == 2 and variation == beard and tint == color) or
-                         (kind == 3 and variation in (hair, 1) and tint == color))
-                if match:
-                    for offset in row[6:9]:
-                        if path := sections.text(offset):
-                            self.add(path, 'playable/NPC character appearance')
-                    break
+            if (row[1], row[2]) in bodies:
+                for offset in row[6:9]:
+                    if path := sections.text(offset):
+                        self.add(path, 'playable/NPC character appearance')
         return item_ids
 
     def equipment(self, item_ids, names):

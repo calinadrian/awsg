@@ -5,7 +5,7 @@ pub mod economy;
 pub mod economy_store;
 
 pub const PROTOCOL: u32 = 1;
-pub const BUILD: &str = "asr-elwynn-coop-economy-3";
+pub const BUILD: &str = "asr-elwynn-coop-economy-4";
 pub const MAX_PLAYERS: usize = 4;
 pub const MAX_MESSAGE: usize = 2 * 1024 * 1024;
 

@@ -120,12 +120,12 @@ enum Packet {
         foes: Vec<Foe>,
         pickups: Vec<Pickup>,
         players: Vec<Pose>,
-        #[serde(default)]
+        #[serde(default, with = "peer_map")]
         revive_progress: HashMap<u32, f32>,
         #[serde(default)]
         equipment_kills: [u32; 3],
         /// Each guest's last applied `seq`, so guests can drop acknowledged hits.
-        #[serde(default)]
+        #[serde(default, with = "peer_map")]
         acks: HashMap<u32, u32>,
         elapsed: f32,
         kills: u32,
@@ -141,6 +141,28 @@ enum Packet {
         ended: bool,
         won: bool,
     },
+}
+
+/// A per-peer map as `[peer, value]` pairs. A tagged packet buffers its fields before reading
+/// them, and a buffered JSON object key stays a string a `u32` key will not read from, so a map
+/// keyed by peer failed every snapshot that held one.
+mod peer_map {
+    use std::collections::HashMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer, T: Serialize>(
+        map: &HashMap<u32, T>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        s.collect_seq(map.iter())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+        d: D,
+    ) -> Result<HashMap<u32, T>, D::Error> {
+        Ok(Vec::<(u32, T)>::deserialize(d)?.into_iter().collect())
+    }
 }
 
 #[derive(Component)]
@@ -1610,5 +1632,41 @@ mod tests {
         );
         let back: Foe = serde_json::from_str(&text).unwrap();
         assert_eq!((back.group, back.speed, back.dead), (0, 0., false));
+    }
+
+    /// A snapshot that acknowledges a guest still reaches it: the per-peer maps travel through
+    /// the tagged packet and the relay's JSON value intact.
+    #[test]
+    fn world_with_acks_and_revivals_round_trips() {
+        let packet = Packet::World {
+            foes: Vec::new(),
+            pickups: Vec::new(),
+            players: Vec::new(),
+            revive_progress: HashMap::from([(1, 0.5)]),
+            equipment_kills: [0; 3],
+            acks: HashMap::from([(1, 42)]),
+            elapsed: 3.,
+            kills: 0,
+            bosses: 0,
+            guardians: 0,
+            xp: 0,
+            gold: 0,
+            caches: Vec::new(),
+            damage: Vec::new(),
+            visuals: Vec::new(),
+            warnings: Vec::new(),
+            paused: false,
+            ended: false,
+            won: false,
+        };
+        let value = serde_json::to_value(packet).unwrap();
+        let text = serde_json::to_string(&value).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let Packet::World { acks, revive_progress, .. } = serde_json::from_value(value).unwrap()
+        else {
+            panic!("a world packet");
+        };
+        assert_eq!(acks.get(&1), Some(&42));
+        assert_eq!(revive_progress.get(&1), Some(&0.5));
     }
 }
