@@ -25,6 +25,8 @@ pub(super) struct Enemy {
     pub xp: u32,
     pub boss: bool,
     pub attack_cd: f32,
+    /// Native Elwynn ranged attacks wind up before releasing their bolt.
+    cast_until: Option<f32>,
     pub slow: f32,
     pub slow_t: f32,
     pub root_t: f32,
@@ -51,6 +53,7 @@ struct Approach {
 
 impl Enemy {
     pub(super) fn relocated(&mut self, pos: Vec3, center: Vec3) {
+        self.cast_until = None;
         if let Some(approach) = self.approach.as_mut() {
             let side = flat(pos - center);
             approach.angle = side.z.atan2(side.x);
@@ -280,6 +283,7 @@ fn spawn_with(
             } else {
                 0.5
             },
+            cast_until: None,
             slow: 1.0,
             slow_t: 0.0,
             root_t: 0.0,
@@ -672,6 +676,25 @@ pub(super) fn move_enemies(
             continue;
         }
 
+        if let Some(until) = e.cast_until {
+            mv.speed = 0.0;
+            mv.flags = 0;
+            if homing.is_some() || e.stun_t > 0.0 || e.fear_t > 0.0 || hero_down {
+                e.cast_until = None;
+            } else {
+                if now >= until {
+                    e.cast_until = None;
+                    if let Some(r) = e.def.ranged {
+                        fx.cast(ent, r.spell, &[hero_e], None);
+                        // Native spell-speed lookup: Fireball 24, Frostbolt 28 yd/s.
+                        let bolt_speed = if r.spell == 116 { 28.0 } else { BOLT_SPEED };
+                        bolts.push((now + dist / bolt_speed, e.damage * e.weaken, peer));
+                    }
+                }
+                continue;
+            }
+        }
+
         let held = e.stun_t > 0.0 || e.root_t > 0.0;
         let contact_reach = if e.home.is_some() {
             2.2 + 1.2 * e.def.scale * 1.35
@@ -755,10 +778,25 @@ pub(super) fn move_enemies(
             && e.fear_t <= 0.0
             && e.attack_cd <= 0.0
             && !hero_down;
-        if let Some(r) = e.def.ranged.filter(|_| free && in_reach && !contact) {
-            e.attack_cd = r.cooldown;
-            fx.cast(ent, r.spell, &[hero_e], None);
-            bolts.push((now + dist / BOLT_SPEED, e.damage * e.weaken, peer));
+        let native_caster = elwynn && super::elwynn::is_regular(e.def);
+        let cast_reach = e.def.ranged.is_some_and(|r| {
+            if native_caster {
+                dist <= r.range + 4.0
+            } else {
+                in_reach && !contact
+            }
+        });
+        if let Some(r) = e.def.ranged.filter(|_| free && cast_reach) {
+            if native_caster {
+                // RVA 0x5c0bf27 uses the table swing interval (3.2 seconds), while
+                // +0x0c in the ranged record is the cast duration, not a cooldown.
+                e.attack_cd = e.def.attack;
+                e.cast_until = Some(now + r.cooldown);
+            } else {
+                e.attack_cd = r.cooldown;
+                fx.cast(ent, r.spell, &[hero_e], None);
+                bolts.push((now + dist / BOLT_SPEED, e.damage * e.weaken, peer));
+            }
         } else if contact && free {
             let swing = if e.def.attack > 0.0 {
                 e.def.attack
