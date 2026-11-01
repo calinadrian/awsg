@@ -81,6 +81,12 @@ pub(super) fn current<'a>(
     Some(((class, race, sex), f, ranges))
 }
 
+/// Whether a race's body skin can be composited from CharSections: the eight 1.12 races. A
+/// modded race wears its display's baked atlas, so only its geoset dials change it.
+pub(crate) fn composites(race: u8) -> bool {
+    (1..=8).contains(&race)
+}
+
 /// A display's own dials.
 pub(crate) fn base(npc: &benilla_formats::NpcAppearance) -> Features {
     [npc.skin, npc.face, npc.hair_style, npc.hair_color, npc.facial_hair]
@@ -165,7 +171,14 @@ fn load(mut commands: Commands, assets: Option<Res<WorldAssets>>) {
     }
     let ranges: HashMap<(u8, u8), Ranges> = acc
         .into_iter()
-        .map(|(key, (skins, faces, all_faces, styles, colors, facial))| {
+        .map(|(key, (mut skins, mut faces, mut all_faces, styles, mut colors, facial))| {
+            // Texture dials have nothing to paint on a race that keeps its baked atlas.
+            if !composites(key.0) {
+                skins.clear();
+                faces.clear();
+                all_faces.clear();
+                colors.clear();
+            }
             (
                 key,
                 Ranges {

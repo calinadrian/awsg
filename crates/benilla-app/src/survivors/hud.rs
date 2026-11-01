@@ -1139,6 +1139,7 @@ pub(super) fn buttons(
 
 pub(super) fn keys(
     inventory: Res<super::inventory::Equipment>,
+    atlas: Res<super::adventure_atlas::Atlas>,
     coop: Res<super::coop::Coop>,
     keys: Res<ButtonInput<KeyCode>>,
     phase: Res<State<Phase>>,
@@ -1147,7 +1148,7 @@ pub(super) fn keys(
     mut next: ResMut<NextState<Phase>>,
     mut options: ResMut<super::options::Options>,
 ) {
-    if inventory.open || coop.open || (*phase.get() == Phase::Menu && coop.in_room()) {
+    if inventory.open || atlas.open || coop.open || (*phase.get() == Phase::Menu && coop.in_room()) {
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
@@ -2249,6 +2250,7 @@ pub(super) fn show_panels(
     phase: Res<State<Phase>>,
     coop: Res<super::coop::Coop>,
     inventory: Res<super::inventory::Equipment>,
+    atlas: Res<super::adventure_atlas::Atlas>,
     options: Res<super::options::Options>,
     mut roots: ParamSet<(
         Query<(&mut Visibility, &mut Node), With<MenuRoot>>,
@@ -2278,7 +2280,7 @@ pub(super) fn show_panels(
         // Inventory and the auction house draw under the menu, so it steps aside for them.
         set(
             root,
-            p == Phase::Menu && !options.open && !coop.open && !inventory.open,
+            p == Phase::Menu && !options.open && !coop.open && !inventory.open && !atlas.open,
         );
     }
     for root in &mut roots.p1() {

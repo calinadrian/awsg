@@ -1,17 +1,13 @@
-//! The adventure atlas: the story's zones, the dungeons and the raids, each on its own tab.
-//! Playable battlegrounds are picked here as on the adventure panel; the rest show what
-//! unlocks them. Card art is each map's own loading screen, read from the player's install.
+//! The adventure atlas: the story's road, the dungeons and the raids, each a linear map of
+//! location cards joined by the path between them, as on the original ASR's story map.
+//! Playable battlegrounds are picked here as on the adventure panel; the rest show as locked.
+//! Card art is the original ASR's zone photographs (`assets/atlas`, sources in `sources.json`);
+//! a raid without one falls back to its own loading screen from the player's install.
 use super::{data, front_end as skin, hud::HudFont, inventory::Equipment, Phase, Selection};
 use crate::glue::GlueClicks;
 use benilla_assets::{LockRecover, MapCatalogRes, WorldAssets};
 use bevy::prelude::*;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tab {
-    Story,
-    Dungeons,
-    Raids,
-}
+use std::collections::HashMap;
 
 #[derive(Component, Clone, Copy)]
 pub(super) enum Action {
@@ -25,6 +21,8 @@ pub(super) enum Action {
 pub(super) struct Atlas {
     pub open: bool,
     tab: u8,
+    /// The card under the cursor, by index into [`PLACES`]; the details strip describes it.
+    hover: Option<usize>,
     revision: u64,
 }
 
@@ -35,29 +33,36 @@ enum Side {
     Horde,
 }
 
-struct Entry {
+#[derive(Clone, Copy)]
+enum Art {
+    /// A photograph in `assets/atlas`.
+    Photo(&'static str),
+    /// The `Map.dbc` row whose loading screen stands in.
+    Screen(u32),
+}
+
+struct Place {
     name: &'static str,
-    tab: Tab,
+    /// The battleground's name in [`data`], where it differs from the card's.
+    map: &'static str,
     side: Side,
-    /// The `Map.dbc` row whose loading screen is the card's art.
-    art: u32,
+    art: Art,
     line: &'static str,
     blurb: &'static str,
-    /// The encounters of a raid not yet built as a battleground.
+    /// The encounters of a place not yet built as a battleground.
     bosses: &'static [&'static str],
 }
 
-const fn entry(
+const fn place(
     name: &'static str,
-    tab: Tab,
     side: Side,
-    art: u32,
+    art: Art,
     line: &'static str,
     blurb: &'static str,
-) -> Entry {
-    Entry {
+) -> Place {
+    Place {
         name,
-        tab,
+        map: name,
         side,
         art,
         line,
@@ -66,106 +71,194 @@ const fn entry(
     }
 }
 
-/// In the order the road runs: the starting zones, then the contested lands beyond them.
-static ATLAS: &[Entry] = &[
-    entry("Elwynn Forest", Tab::Story, Side::Alliance, 0, "A hero is born",
+use Art::{Photo, Screen};
+use Side::{Alliance, Both, Horde};
+
+static PLACES: &[Place] = &[
+    // 0..=3: the Alliance road.
+    place("Elwynn Forest", Alliance, Photo("elwynn"), "A hero is born",
         "Northshire's bells fade behind you. Gnolls, kobolds and the Defias test a new hero across the forests of Elwynn."),
-    entry("Durotar", Tab::Story, Side::Horde, 1, "Strength and honour",
-        "The red canyons around Orgrimmar ring with the cries of quilboar, harpies and the Burning Blade."),
-    entry("Teldrassil", Tab::Story, Side::Alliance, 1, "Under the World Tree",
-        "Corruption creeps through the boughs of Teldrassil, and the night elves call their sentinels to arms."),
-    entry("Dun Morogh", Tab::Story, Side::Alliance, 0, "Snow and steel",
-        "Troggs boil up from below Ironforge while frostmane trolls hold the passes."),
-    entry("Mulgore", Tab::Story, Side::Horde, 1, "The plains of the tauren",
-        "Centaur raiders and the Venture Company threaten the grasslands below Thunder Bluff."),
-    entry("Tirisfal Glades", Tab::Story, Side::Horde, 0, "The Forsaken rise",
-        "Scarlet zealots and the mindless Scourge haunt the fields above the Undercity."),
-    entry("Westfall", Tab::Story, Side::Both, 0, "The Defias brotherhood",
+    place("Westfall", Alliance, Photo("westfall"), "The Defias brotherhood",
         "Harvest golems and bandits overrun the farms the Stormwind guard abandoned."),
-    entry("The Barrens", Tab::Story, Side::Horde, 1, "The long road south",
-        "Raptors, quilboar and centaur roam a savanna that never seems to end."),
-    entry("Redridge Mountains", Tab::Story, Side::Both, 0, "Blackrock at the gates",
-        "Blackrock orcs and gnolls press on Lakeshire from the burning hills."),
-    entry("Duskwood", Tab::Story, Side::Both, 0, "Where the night never ends",
-        "Worgen, ghouls and the restless dead stalk the darkened woods around Darkshire."),
-    entry("Stonetalon Mountains", Tab::Story, Side::Horde, 1, "Peaks of the Venture Company",
-        "Goblin shredders cut the ancient forests while elementals stir in the heights."),
-    entry("Stranglethorn Vale", Tab::Story, Side::Both, 0, "Jungle of blood",
-        "Trolls, pirates and the hunters of Nesingwary contest every clearing of the jungle."),
-    entry("Fire Plume Ridge", Tab::Story, Side::Both, 1, "Un'Goro's heart",
-        "Devilsaurs and fire elementals guard the smoking crater at the heart of Un'Goro."),
-    entry("Mount Hyjal", Tab::Story, Side::Both, 1, "The World Tree's watch",
-        "Demons gather once more on the slopes where Archimonde fell."),
-    entry("The Dark Portal", Tab::Story, Side::Both, 0, "The doorway to Outland",
-        "The Burning Legion pours through the Portal into the Blasted Lands."),
-    entry("The Deadmines", Tab::Dungeons, Side::Both, 36, "Van Cleef's hideout",
+    place("The Deadmines", Alliance, Photo("deadmines"), "Van Cleef's hideout",
         "The Defias forge a juggernaut in the mines beneath Moonbrook."),
-    entry("Wailing Caverns", Tab::Dungeons, Side::Both, 43, "The druids of the Fang",
+    place("Duskwood", Alliance, Photo("duskwood"), "Where the night never ends",
+        "Worgen, ghouls and the restless dead stalk the darkened woods around Darkshire."),
+    // 4..=7: the Horde road.
+    place("Durotar", Horde, Photo("durotar"), "Strength and honour",
+        "The red canyons around Orgrimmar ring with the cries of quilboar, harpies and the Burning Blade."),
+    place("The Barrens", Horde, Photo("barrens"), "The long road south",
+        "Raptors, quilboar and centaur roam a savanna that never seems to end."),
+    place("Wailing Caverns", Horde, Photo("wailing"), "The druids of the Fang",
         "Nightmare twists the druids who sought to restore the Barrens."),
-    entry("Hall of Thanes", Tab::Dungeons, Side::Both, 3065, "The ancient thanes",
-        "Restless dead walk the great burial halls of the thanes."),
-    entry("Gurubashi Arena", Tab::Dungeons, Side::Both, 0, "Blood on the sand",
+    place("Stonetalon Mountains", Horde, Photo("stonetalon"), "Peaks of the Venture Company",
+        "Goblin shredders cut the ancient forests while elementals stir in the heights."),
+    // 8..: where the roads meet, and on to the end.
+    place("Stranglethorn Vale", Both, Photo("stv"), "Jungle of blood",
+        "Trolls, pirates and the hunters of Nesingwary contest every clearing of the jungle."),
+    place("Warsong Gulch", Both, Photo("wsg"), "The battle for the forest",
+        "Silverwing sentinels and Warsong outriders fight over every felled tree of Ashenvale."),
+    Place {
+        map: "Fire Plume Ridge",
+        ..place("Un'Goro Crater", Both, Photo("ungoro"), "Un'Goro's heart",
+            "Devilsaurs and fire elementals guard the smoking crater at the heart of Un'Goro.")
+    },
+    place("Arathi Basin", Both, Photo("ab"), "Resources of the highlands",
+        "The League of Arathor and the Defilers race for the farms, mines and mills of the basin."),
+    place("Feralas", Both, Photo("feralas"), "The ruins of Dire Maul",
+        "Ogres and the last Highborne guard the shattered halls of Eldre'Thalas."),
+    place("Gurubashi Arena", Both, Photo("arena"), "Blood on the sand",
         "Every three hours the chest falls, and every brawler in Stranglethorn comes for it."),
-    Entry {
+    place("Scarlet Monastery", Both, Photo("sm"), "The Crusade's stronghold",
+        "Zealots of the Scarlet Crusade guard their cathedral in the north of Tirisfal."),
+    place("Alterac Valley", Both, Photo("av"), "The war in the mountains",
+        "Stormpike and Frostwolf clash across the snowbound valley."),
+    place("Blackrock Mountain", Both, Photo("brm"), "Fire beneath the mountain",
+        "The Dark Iron dwarves and the black dragonflight hold the mountain between them."),
+    place("Gates of Ahn'Qiraj", Both, Photo("aq"), "The war of the shifting sands",
+        "The gong has rung. C'Thun's armies march out of Silithus."),
+    place("Naxxramas", Both, Photo("naxx"), "The necropolis",
+        "Kel'Thuzad's floating citadel looms over the Eastern Plaguelands."),
+    // 19..: dungeons and raids off the story road.
+    place("Hall of Thanes", Both, Screen(3065), "The ancient thanes",
+        "Restless dead walk the great burial halls of the thanes."),
+    Place {
         bosses: &["Hakkar the Soulflayer", "High Priest Thekal", "Bloodlord Mandokir", "Jin'do the Hexxer"],
-        ..entry("Zul'Gurub", Tab::Raids, Side::Both, 309, "The Soulflayer returns",
+        ..place("Zul'Gurub", Both, Screen(309), "The Soulflayer returns",
             "The Gurubashi priests summon Hakkar into the heart of Stranglethorn.")
     },
-    Entry {
+    Place {
         bosses: &["Onyxia"],
-        ..entry("Onyxia's Lair", Tab::Raids, Side::Both, 249, "The brood mother",
+        ..place("Onyxia's Lair", Both, Screen(249), "The brood mother",
             "Deathwing's daughter waits in her lair beneath Dustwallow Marsh.")
     },
-    Entry {
+    Place {
         bosses: &["Lucifron", "Magmadar", "Golemagg", "Majordomo Executus", "Ragnaros"],
-        ..entry("Molten Core", Tab::Raids, Side::Both, 409, "The Firelord's domain",
+        ..place("Molten Core", Both, Screen(409), "The Firelord's domain",
             "Ragnaros stirs in the molten depths below Blackrock Mountain.")
     },
-    Entry {
+    Place {
         bosses: &["Razorgore", "Vaelastrasz", "Broodlord Lashlayer", "Chromaggus", "Nefarian"],
-        ..entry("Blackwing Lair", Tab::Raids, Side::Both, 469, "Nefarian's citadel",
+        ..place("Blackwing Lair", Both, Photo("brm"), "Nefarian's citadel",
             "The black dragonflight breeds its chromatic army atop Blackrock Spire.")
     },
-    Entry {
+    Place {
         bosses: &["Kurinnaxx", "General Rajaxx", "Moam", "Ossirian the Unscarred"],
-        ..entry("Ruins of Ahn'Qiraj", Tab::Raids, Side::Both, 509, "The scarab wall falls",
+        ..place("Ruins of Ahn'Qiraj", Both, Screen(509), "The scarab wall falls",
             "The qiraji swarm through the ruins beyond the Scarab Wall.")
     },
-    entry("Gates of Ahn'Qiraj", Tab::Raids, Side::Both, 531, "The war of the shifting sands",
-        "The gong has rung. C'Thun's armies march out of Silithus."),
-    entry("Naxxramas", Tab::Raids, Side::Both, 533, "The necropolis",
-        "Kel'Thuzad's floating citadel looms over the Eastern Plaguelands."),
 ];
 
-const TABS: [(Tab, &str, &str); 3] = [
-    (Tab::Story, "Story", "The road so far"),
-    (Tab::Dungeons, "Dungeons", "Five-player instances"),
-    (Tab::Raids, "Raids", "Raid instances"),
+/// A map of cards on a seven-column grid, and the path drawn between them.
+struct Road {
+    rows: u8,
+    /// `(place, column, row)`.
+    cards: &'static [(usize, u8, u8)],
+    /// Pairs of indices into `cards`.
+    path: &'static [(usize, usize)],
+}
+
+/// The original story map: the two faction roads meet in Stranglethorn, climb to Un'Goro and
+/// Arathi, and run back west along the bottom to Naxxramas.
+const STORY: Road = Road {
+    rows: 4,
+    cards: &[
+        (4, 0, 0), (5, 1, 0), (6, 2, 0), (7, 3, 0),
+        (8, 4, 1), (9, 5, 1), (10, 6, 1),
+        (0, 0, 2), (1, 1, 2), (2, 2, 2), (3, 3, 2), (11, 6, 2),
+        (18, 0, 3), (17, 1, 3), (16, 2, 3), (15, 3, 3), (14, 4, 3), (13, 5, 3), (12, 6, 3),
+    ],
+    path: &[
+        (0, 1), (1, 2), (2, 3), (3, 4),
+        (7, 8), (8, 9), (9, 10), (10, 4),
+        (4, 5), (5, 6), (6, 11), (11, 18),
+        (18, 17), (17, 16), (16, 15), (15, 14), (14, 13), (13, 12),
+    ],
+};
+
+const DUNGEONS: Road = Road {
+    rows: 1,
+    cards: &[(2, 0, 0), (6, 1, 0), (19, 2, 0), (14, 3, 0), (13, 4, 0), (16, 5, 0)],
+    path: &[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)],
+};
+
+const RAIDS: Road = Road {
+    rows: 1,
+    cards: &[(20, 0, 0), (21, 1, 0), (22, 2, 0), (23, 3, 0), (24, 4, 0), (17, 5, 0), (18, 6, 0)],
+    path: &[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)],
+};
+
+const TABS: [(&str, &str, Road); 3] = [
+    ("Story", "The road so far", STORY),
+    ("Dungeons", "Five-player instances", DUNGEONS),
+    ("Raids", "Raid instances", RAIDS),
 ];
+
+/// Grid geometry, in percent of the map: a card fills 90% of its column, at the photos' 2:1
+/// widened slightly, and a row is a card's height plus a fifth for the path between rows.
+const COLUMNS: f32 = 7.;
+const CARD_W: f32 = 90. / COLUMNS;
+const CARD_ASPECT: f32 = 1.75;
+const ROW_GAP: f32 = 1.25;
 
 #[derive(Component)]
 struct Root;
 #[derive(Component)]
-struct Art(u32);
+struct CardArt(Art);
 #[derive(Component)]
-struct Scroll;
+struct Card(usize);
+
+/// The decoded photographs, built on first use.
+#[derive(Resource, Default)]
+struct Photos(HashMap<&'static str, Handle<Image>>);
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Atlas>().add_systems(
-        Update,
-        (input, draw, art, scroll)
-            .chain()
-            .after(super::hud::show_panels),
-    );
+    app.init_resource::<Atlas>()
+        .init_resource::<Photos>()
+        .add_systems(
+            Update,
+            (input, hover, draw, art).chain().after(super::hud::show_panels),
+        );
 }
 
-/// What a card's entry is in this build: its index into [`data::MAPS`] when playable, or why not.
-fn status(e: &Entry) -> Result<usize, &'static str> {
-    match data::MAPS.iter().position(|m| m.name == e.name) {
-        Some(i) if super::dungeon::available(&data::MAPS[i]) => Ok(i),
-        Some(_) => Err("Locked · dungeon pack required"),
-        None if e.tab == Tab::Raids => Err("Locked · raid in development"),
-        None => Err("Locked · coming in a later update"),
+fn photo_bytes(key: &str) -> Option<&'static [u8]> {
+    macro_rules! photos {
+        ($($k:literal),*) => {
+            match key {
+                $($k => Some(include_bytes!(concat!("../../assets/atlas/", $k, ".png")).as_slice()),)*
+                _ => None,
+            }
+        };
+    }
+    photos!(
+        "ab", "aq", "arena", "av", "barrens", "brm", "deadmines", "durotar", "duskwood",
+        "elwynn", "feralas", "naxx", "sm", "stonetalon", "stv", "ungoro", "wailing",
+        "westfall", "wsg"
+    )
+}
+
+/// The place's index into [`data::MAPS`] when it can be played in this build.
+fn playable(p: &Place) -> Option<usize> {
+    data::MAPS
+        .iter()
+        .position(|m| m.name == p.map)
+        .filter(|&i| super::dungeon::available(&data::MAPS[i]))
+}
+
+fn status(p: &Place) -> (String, Color) {
+    let side = match p.side {
+        Both => None,
+        Alliance => Some(("Alliance", Color::srgb(0.42, 0.62, 1.0))),
+        Horde => Some(("Horde", Color::srgb(0.95, 0.36, 0.3))),
+    };
+    let locked = Color::srgb(0.95, 0.42, 0.36);
+    match (playable(p), side) {
+        (Some(_), Some((side, color))) => (side.into(), color),
+        (Some(_), None) => ("Open".into(), skin::GREEN),
+        (None, _) if data::MAPS.iter().any(|m| m.name == p.map) => {
+            ("Dungeon pack required".into(), locked)
+        }
+        (None, _) => ("Locked".into(), locked),
     }
 }
 
@@ -205,13 +298,14 @@ fn input(
     match action {
         Action::Open => {
             atlas.open = true;
-            atlas.tab = ATLAS
-                .iter()
-                .find(|e| data::MAPS.get(selection.map).is_some_and(|m| m.name == e.name))
-                .map_or(0, |e| TABS.iter().position(|t| t.0 == e.tab).unwrap_or(0) as u8);
+            atlas.tab = 0;
+            atlas.hover = None;
         }
         Action::Close => atlas.open = false,
-        Action::Tab(tab) => atlas.tab = tab,
+        Action::Tab(tab) => {
+            atlas.tab = tab;
+            atlas.hover = None;
+        }
         Action::Pick(i) => {
             if selection.map != i && data::MAPS.get(i).is_some_and(super::dungeon::available) {
                 selection.map = i;
@@ -220,6 +314,126 @@ fn input(
         }
     }
     atlas.revision += 1;
+}
+
+/// The details strip follows the cursor; leaving every card returns it to the selected map.
+fn hover(cards: Query<(&Card, &Interaction)>, mut atlas: ResMut<Atlas>) {
+    if !atlas.open {
+        return;
+    }
+    let now = cards
+        .iter()
+        .find(|(_, i)| **i != Interaction::None)
+        .map(|(c, _)| c.0);
+    if now.is_some() && now != atlas.hover {
+        atlas.hover = now;
+        atlas.revision += 1;
+    }
+}
+
+fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, index: usize, at: (f32, f32), height: f32, selected: bool) {
+    let place = &PLACES[index];
+    let open = playable(place);
+    let (state, color) = status(place);
+    let mut card = p.spawn((
+        Button,
+        Card(index),
+        Action::Pick(open.unwrap_or(usize::MAX)),
+        skin::Control {
+            primary: false,
+            selected,
+            enabled: open.is_some(),
+        },
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(at.0),
+            top: Val::Percent(at.1),
+            width: Val::Percent(CARD_W),
+            height: Val::Percent(height),
+            border: UiRect::all(Val::Px(if selected { 2. } else { 1. })),
+            padding: UiRect::axes(Val::Px(12.), Val::Px(8.)),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::FlexEnd,
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(skin::SURFACE),
+        BorderColor::all(if selected { skin::GOLD } else { skin::EDGE }),
+    ));
+    if selected {
+        card.insert(BoxShadow::new(
+            skin::GOLD.with_alpha(0.45),
+            Val::Px(0.),
+            Val::Px(0.),
+            Val::Px(2.),
+            Val::Px(10.),
+        ));
+    }
+    card.with_children(|p| {
+        let fill = Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.),
+            top: Val::Px(0.),
+            width: Val::Percent(100.),
+            height: Val::Percent(100.),
+            ..default()
+        };
+        p.spawn((CardArt(place.art), ImageNode::default(), fill.clone()));
+        // Darker toward the name, and darker still while locked.
+        p.spawn((
+            fill,
+            BackgroundGradient::from(LinearGradient::to_bottom(vec![
+                ColorStop::auto(Color::srgba(0., 0., 0., if open.is_some() { 0.05 } else { 0.35 })),
+                ColorStop::auto(Color::srgba(0., 0., 0., if open.is_some() { 0.7 } else { 0.85 })),
+            ])),
+        ));
+        skin::label(p, f, place.name, 19., if open.is_some() { skin::GOLD } else { skin::TEXT });
+        skin::label(p, f, state, 12., color);
+    });
+}
+
+/// The path between two cards: straight along a row or column, otherwise out of the first
+/// card's side to the second's column and on to its nearest edge.
+fn path(p: &mut ChildSpawnerCommands, a: (f32, f32), b: (f32, f32), height: f32) {
+    let line = |p: &mut ChildSpawnerCommands, left: f32, top: f32, w: Option<f32>, h: Option<f32>| {
+        p.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(left),
+                top: Val::Percent(top),
+                width: w.map_or(Val::Px(3.), Val::Percent),
+                height: h.map_or(Val::Px(3.), Val::Percent),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.72, 0.55, 0.24)),
+        ));
+    };
+    let (ax, ay, bx, by) = (a.0, a.1, b.0, b.1);
+    let mid = |y: f32| y + height / 2.;
+    let center = |x: f32| x + CARD_W / 2.;
+    if (ay - by).abs() < 0.01 {
+        let (l, r) = if ax < bx { (ax, bx) } else { (bx, ax) };
+        line(p, l + CARD_W, mid(ay), Some(r - l - CARD_W), None);
+    } else if (ax - bx).abs() < 0.01 {
+        let (t, d) = if ay < by { (ay, by) } else { (by, ay) };
+        line(p, center(ax), t + height, None, Some(d - t - height));
+    } else {
+        // Out of the side facing the other card, to the gap before its column, then along it.
+        let gap = (100. / COLUMNS - CARD_W) / 2.;
+        if bx > ax {
+            let x = bx - gap;
+            line(p, ax + CARD_W, mid(ay), Some(x - ax - CARD_W), None);
+            line(p, x, mid(by), Some(gap), None);
+            let (t, d) = (mid(ay).min(mid(by)), mid(ay).max(mid(by)));
+            line(p, x, t, None, Some(d - t));
+        } else {
+            let x = bx + CARD_W + gap;
+            line(p, x, mid(ay), Some(ax - x), None);
+            line(p, bx + CARD_W, mid(by), Some(gap), None);
+            let (t, d) = (mid(ay).min(mid(by)), mid(ay).max(mid(by)));
+            line(p, x, t, None, Some(d - t));
+        }
+    }
 }
 
 fn chip(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: String, last: bool) {
@@ -232,110 +446,48 @@ fn chip(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: String, last: bool
             ..default()
         },
         BackgroundColor(Color::srgba(0.06, 0.03, 0.02, 0.85)),
-        BorderColor::all(if last {
-            skin::GOLD
-        } else {
-            Color::srgb(0.45, 0.22, 0.14)
-        }),
+        BorderColor::all(if last { skin::GOLD } else { Color::srgb(0.45, 0.22, 0.14) }),
     ))
     .with_children(|p| {
-        skin::label(p, f, text, 14., Color::srgb(0.96, 0.66, 0.45));
+        skin::label(p, f, text, 13., Color::srgb(0.96, 0.66, 0.45));
     });
 }
 
-fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, e: &Entry, selected: bool) {
-    let status = status(e);
-    let open = status.is_ok();
+fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place) {
+    let open = playable(place);
+    let (state, color) = status(place);
     p.spawn((
-        Button,
-        Action::Pick(*status.as_ref().unwrap_or(&usize::MAX)),
-        skin::Control {
-            primary: false,
-            selected,
-            enabled: open,
-        },
         Node {
             width: Val::Percent(100.),
-            min_height: Val::Px(if selected { 230. } else { 120. }),
-            padding: UiRect::axes(Val::Px(22.), Val::Px(16.)),
-            border: UiRect::all(Val::Px(if selected { 2. } else { 1. })),
-            flex_direction: FlexDirection::Column,
-            justify_content: if selected {
-                JustifyContent::FlexStart
-            } else {
-                JustifyContent::Center
-            },
-            row_gap: Val::Px(4.),
-            overflow: Overflow::clip(),
             flex_shrink: 0.,
+            padding: UiRect::axes(Val::Px(18.), Val::Px(12.)),
+            border: UiRect::all(Val::Px(1.)),
+            border_radius: BorderRadius::all(Val::Px(5.)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(5.),
             ..default()
         },
         BackgroundColor(skin::SURFACE),
-        BorderColor::all(if selected { skin::GOLD } else { skin::EDGE }),
+        BorderColor::all(skin::EDGE),
     ))
     .with_children(|p| {
-        // Loading screens are 4:3; the card shows a band across their middle.
-        p.spawn((
-            Art(e.art),
-            ImageNode::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.),
-                top: Val::Percent(-60.),
-                width: Val::Percent(100.),
-                ..default()
-            },
-        ));
-        p.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.),
-                top: Val::Px(0.),
-                width: Val::Percent(100.),
-                height: Val::Percent(100.),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0., 0., 0., if open { 0.45 } else { 0.62 })),
-        ));
-        skin::label(
-            p,
-            f,
-            e.name,
-            if selected { 34. } else { 28. },
-            if open { skin::GOLD } else { skin::TEXT },
-        );
-        let side = match e.side {
-            Side::Both => None,
-            Side::Alliance => Some(("Alliance", Color::srgb(0.45, 0.65, 1.0))),
-            Side::Horde => Some(("Horde", Color::srgb(0.95, 0.35, 0.3))),
-        };
-        match status {
-            Ok(_) => skin::label(
-                p,
-                f,
-                match side {
-                    Some((side, _)) => format!("{side}: {}", e.line),
-                    None => e.line.to_string(),
-                },
-                17.,
-                side.map_or(Color::srgb(0.96, 0.66, 0.45), |s| s.1),
-            ),
-            Err(why) => skin::label(p, f, why, 16., Color::srgb(0.95, 0.42, 0.36)),
-        };
-        if !selected {
-            return;
-        }
-        skin::label(p, f, e.blurb, 16., skin::TEXT);
+        p.spawn(Node { column_gap: Val::Px(14.), align_items: AlignItems::Baseline, ..default() })
+            .with_children(|p| {
+                skin::label(p, f, place.name, 26., skin::GOLD);
+                skin::label(p, f, place.line, 16., Color::srgb(0.96, 0.66, 0.45));
+                skin::label(p, f, state, 14., color);
+            });
+        skin::label(p, f, place.blurb, 15., skin::TEXT);
         p.spawn(Node {
             flex_wrap: FlexWrap::Wrap,
             column_gap: Val::Px(8.),
             row_gap: Val::Px(6.),
-            margin: UiRect::top(Val::Px(10.)),
+            margin: UiRect::top(Val::Px(4.)),
             ..default()
         })
         .with_children(|p| {
-            let chips: Vec<String> = match status {
-                Ok(i) => data::roster(i)
+            let chips: Vec<String> = match open {
+                Some(i) => data::roster(i)
                     .bosses
                     .iter()
                     .map(|b| {
@@ -347,11 +499,11 @@ fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, e: &Entry, selected: boo
                         }
                     })
                     .collect(),
-                Err(_) => data::all_maps()
+                None => data::all_maps()
                     .iter()
-                    .find(|m| m.name == e.name)
+                    .find(|m| m.name == place.map)
                     .map_or_else(
-                        || e.bosses.iter().map(|b| b.to_string()).collect(),
+                        || place.bosses.iter().map(|b| b.to_string()).collect(),
                         |m| m.boss_names().map(str::to_string).collect(),
                     ),
             };
@@ -389,8 +541,22 @@ fn draw(
         return;
     };
     let f = &font.0;
-    let tab = TABS[usize::from(atlas.tab).min(TABS.len() - 1)].0;
+    let tab = usize::from(atlas.tab).min(TABS.len() - 1);
+    let road = &TABS[tab].2;
     let current = data::MAPS.get(selection.map).map(|m| m.name);
+    let shown = atlas
+        .hover
+        .filter(|h| road.cards.iter().any(|c| c.0 == *h))
+        .or_else(|| road.cards.iter().map(|c| c.0).find(|&i| current == Some(PLACES[i].map)))
+        .unwrap_or(road.cards[0].0);
+    // A row's height in percent of the map, and a card's within it.
+    let row = 100. / f32::from(road.rows);
+    let card_h = row / ROW_GAP;
+    // The map keeps the cards' aspect at any width: its height is rows of cards plus gaps.
+    let aspect = COLUMNS / (0.9 / CARD_ASPECT * ROW_GAP * f32::from(road.rows));
+    let place_at = |(_, c, r): (usize, u8, u8)| {
+        (f32::from(c) * 100. / COLUMNS, f32::from(r) * row + (row - card_h) / 2.)
+    };
     commands
         .spawn((
             Root,
@@ -402,137 +568,83 @@ fn draw(
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0., 0., 0., 0.8)),
+            BackgroundColor(Color::srgba(0., 0., 0., 0.82)),
             GlobalZIndex(400),
         ))
         .with_children(|root| {
             root.spawn(skin::panel(Node {
-                width: Val::Percent(70.),
-                max_width: Val::Px(1120.),
-                height: Val::Percent(92.),
+                width: Val::Percent(96.),
+                max_width: Val::Px(1600.),
+                max_height: Val::Percent(96.),
                 padding: UiRect::all(Val::Px(18.)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.),
-                overflow: Overflow::clip(),
+                row_gap: Val::Px(14.),
                 ..default()
             }))
             .with_children(|p| {
+                p.spawn(Node { column_gap: Val::Px(12.), flex_shrink: 0., ..default() })
+                    .with_children(|p| {
+                        for (i, (title, detail, _)) in TABS.iter().enumerate() {
+                            p.spawn(Node { width: Val::Px(260.), ..default() }).with_children(|p| {
+                                skin::button(p, f, title, detail, Action::Tab(i as u8), true, i == tab, true);
+                            });
+                        }
+                        p.spawn(Node { flex_grow: 1., ..default() });
+                        p.spawn(Node { width: Val::Px(120.), ..default() }).with_children(|p| {
+                            skin::button(p, f, "Close", "Esc", Action::Close, false, false, true);
+                        });
+                    });
                 p.spawn(Node {
-                    column_gap: Val::Px(12.),
+                    width: Val::Percent(100.),
+                    aspect_ratio: Some(aspect),
                     flex_shrink: 0.,
                     ..default()
                 })
-                .with_children(|p| {
-                    for (i, (t, title, detail)) in TABS.iter().enumerate() {
-                        p.spawn(Node {
-                            flex_grow: 1.,
-                            flex_basis: Val::Px(0.),
-                            ..default()
-                        })
-                        .with_children(|p| {
-                            skin::button(
-                                p,
-                                f,
-                                title,
-                                detail,
-                                Action::Tab(i as u8),
-                                true,
-                                *t == tab,
-                                true,
-                            );
-                        });
+                .with_children(|map| {
+                    for &(a, b) in road.path {
+                        path(map, place_at(road.cards[a]), place_at(road.cards[b]), card_h);
                     }
-                    p.spawn(Node {
-                        width: Val::Px(110.),
-                        flex_shrink: 0.,
-                        ..default()
-                    })
-                    .with_children(|p| {
-                        skin::button(p, f, "Close", "", Action::Close, false, false, true);
-                    });
-                });
-                p.spawn((
-                    Scroll,
-                    ScrollPosition::default(),
-                    bevy::ui::RelativeCursorPosition::default(),
-                    Node {
-                        flex_grow: 1.,
-                        min_height: Val::Px(0.),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(8.),
-                        overflow: Overflow::scroll_y(),
-                        ..default()
-                    },
-                ))
-                .with_children(|p| {
-                    for e in ATLAS.iter().filter(|e| e.tab == tab) {
-                        card(p, f, e, current == Some(e.name));
+                    for &c in road.cards {
+                        card(map, f, c.0, place_at(c), card_h, current == Some(PLACES[c.0].map));
                     }
                 });
+                details(p, f, &PLACES[shown]);
             });
         });
 }
 
-/// Each card's loading screen, through `Map.dbc` → `LoadingScreens.dbc`, as the world's own cover.
+/// Photographs from the bundle; the loading screen through `Map.dbc` → `LoadingScreens.dbc`.
 fn art(
     maps: Option<Res<MapCatalogRes>>,
     mut assets: Option<ResMut<WorldAssets>>,
     mut images: ResMut<Assets<Image>>,
+    mut photos: ResMut<Photos>,
     mut screens: Local<Option<benilla_formats::LoadingScreenCatalog>>,
-    mut nodes: Query<(&Art, &mut ImageNode), Added<Art>>,
+    mut nodes: Query<(&CardArt, &mut ImageNode), Added<CardArt>>,
 ) {
-    if nodes.is_empty() {
-        return;
-    }
-    let (Some(maps), Some(assets)) = (maps, assets.as_mut()) else {
-        return;
-    };
-    if screens.is_none() {
-        *screens = benilla_formats::load_loading_screens(&mut assets.chain.lock_recover()).ok();
-    }
-    let Some(screens) = screens.as_ref() else {
-        return;
-    };
-    for (map, mut node) in &mut nodes {
-        let path = maps.0.loading_screen_id(map.0).and_then(|id| screens.path(id));
-        if let Some(image) = path.and_then(|p| assets.sprite_texture(p, &mut images)) {
-            node.image = image;
-        }
-    }
-}
-
-fn scroll(
-    atlas: Res<Atlas>,
-    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
-    mut columns: Query<
-        (
-            &mut ScrollPosition,
-            &ComputedNode,
-            &bevy::ui::RelativeCursorPosition,
-        ),
-        With<Scroll>,
-    >,
-) {
-    if !atlas.open {
-        return;
-    }
-    let delta: f32 = wheel
-        .read()
-        .map(|e| {
-            e.y * if e.unit == bevy::input::mouse::MouseScrollUnit::Line {
-                40.
-            } else {
-                1.
+    for (art, mut node) in &mut nodes {
+        match art.0 {
+            Art::Photo(key) => {
+                let handle = photos.0.entry(key).or_insert_with(|| {
+                    photo_bytes(key).map_or_else(Handle::default, |b| super::card_view::png(b, &mut images))
+                });
+                node.image = handle.clone();
             }
-        })
-        .sum();
-    for (mut scroll, node, cursor) in &mut columns {
-        if cursor
-            .normalized
-            .is_some_and(|p| (0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y))
-        {
-            let limit = (node.content_size.y - node.size.y).max(0.) * node.inverse_scale_factor();
-            scroll.0.y = (scroll.0.y - delta).clamp(0., limit);
+            Art::Screen(map) => {
+                let (Some(maps), Some(assets)) = (maps.as_ref(), assets.as_mut()) else {
+                    continue;
+                };
+                if screens.is_none() {
+                    *screens = benilla_formats::load_loading_screens(&mut assets.chain.lock_recover()).ok();
+                }
+                let path = screens
+                    .as_ref()
+                    .zip(maps.0.loading_screen_id(map))
+                    .and_then(|(s, id)| s.path(id));
+                if let Some(image) = path.and_then(|p| assets.sprite_texture(p, &mut images)) {
+                    node.image = image;
+                }
+            }
         }
     }
 }

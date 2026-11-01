@@ -53,8 +53,17 @@ pub(super) fn resolve_char_look(
             let [skin, face, hair_style, hair_color, facial_hair] =
                 crate::survivors::inventory_outfit::features(store).unwrap_or([npc.skin, npc.face,
                     npc.hair_style, npc.hair_color, npc.facial_hair]);
+            // A modded race's CharSections skins do not composite (the 256² base fails to read
+            // and the body draws untextured), so it keeps its shipped atlas; its geoset dials
+            // (hair style, facial hair) still apply.
+            let body = match &npc.bake_name {
+                Some(name) if !crate::survivors::appearance::composites(npc.race) => {
+                    BodySkin::Baked(name.clone())
+                }
+                _ => BodySkin::Composite { face },
+            };
             return Some(CharLook { race: npc.race, sex: npc.sex, skin, hair_style, hair_color,
-                facial_hair, body: BodySkin::Composite { face } });
+                facial_hair, body });
         }
         return Some(CharLook {
             race: npc.race,
