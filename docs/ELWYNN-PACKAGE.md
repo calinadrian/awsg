@@ -29,5 +29,7 @@ missing from the original data. In the current data set, these include the
 Lightwell display and some older effect/audio references. Building and packaging
 do not verify gameplay; manual gameplay testing remains necessary.
 
-The generated archive contains locally supplied game assets and stays ignored
-under `out/`. Keep those assets out of the source repository.
+Generated output stays ignored under `out/`. The shared player ZIP is stored
+separately at `playable/elwynn-playable.zip` using Git LFS. See
+[playable/README.md](../playable/README.md) to clone, play, or run the source
+against that data. Full-client archives and build caches remain ignored.
