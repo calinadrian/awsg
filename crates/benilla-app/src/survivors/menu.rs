@@ -28,6 +28,12 @@ pub(super) enum MenuAction {
     Enter,
     /// Opens the talents screen ([`super::talents`]).
     Talents,
+    /// Opens the settings, as Escape does.
+    Settings,
+    /// Steps FEATURES dial `.0` (`[skin, face, hair style, hair colour, facial hair]`) back or on.
+    Feature(usize, bool),
+    /// Rolls every FEATURES dial.
+    RandomFeatures,
 }
 
 /// On [`MenuRoot`] once the glue art is in and the screen is built.
@@ -56,8 +62,13 @@ fn save_pick(sel: &Selection) {
         return;
     };
     if let Some(path) = pick_path() {
-        let _ =
-            crate::local_state::write_atomic(&path, &format!("{class} {race} {sex} {}", sel.map));
+        let mut text = format!("{class} {race} {sex} {}", sel.map);
+        let mut features: Vec<_> = sel.features.iter().collect();
+        features.sort_unstable_by_key(|(k, _)| **k);
+        for (&(c, r, s), f) in features {
+            text += &format!("\n{c} {r} {s} {} {} {} {} {}", f[0], f[1], f[2], f[3], f[4]);
+        }
+        let _ = crate::local_state::write_atomic(&path, &text);
     }
 }
 
@@ -78,14 +89,29 @@ pub(super) fn restore_pick(
     let Some(text) = pick_path().and_then(|p| crate::local_state::read_to_string(&p).ok()) else {
         return;
     };
-    let v: Vec<usize> = text
+    let mut lines = text.lines();
+    let first = lines.next().unwrap_or_default();
+    // Each later line is one hero's FEATURES: `class race sex skin face hair_style hair_color
+    // facial_hair`.
+    for line in lines {
+        let f: Vec<u8> = line
+            .split_whitespace()
+            .filter_map(|t| t.parse().ok())
+            .collect();
+        if let [class, race, sex, a, b, c, d, e] = f[..] {
+            selection
+                .features
+                .insert((usize::from(class), race, sex), [a, b, c, d, e]);
+        }
+    }
+    let v: Vec<usize> = first
         .split_whitespace()
         .filter_map(|t| t.parse().ok())
         .collect();
     let [class, race, sex, map] = v[..] else {
         return;
     };
-    if map < data::MAPS.len() {
+    if data::MAPS.get(map).is_some_and(super::dungeon::available) {
         selection.map = map;
         selection.stage = map;
         selection.version += 1;
@@ -121,8 +147,9 @@ fn set(sel: &mut Selection, all: &[Vec<(u32, u8, u8)>], class: usize, look: usiz
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn menu_clicks(
+    inventory: Res<super::inventory::Equipment>,
     coop: Res<super::coop::Coop>,
-    options: Res<super::options::Options>,
+    mut options: ResMut<super::options::Options>,
     clicks: Res<GlueClicks>,
     actions: Query<(Entity, &MenuAction)>,
     phase: Res<State<Phase>>,
@@ -131,8 +158,9 @@ pub(super) fn menu_clicks(
     mut run: ResMut<Run>,
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
+    appearances: Option<Res<super::appearance::Appearances>>,
 ) {
-    if coop.open || coop.in_room() || options.open || *phase.get() != Phase::Menu {
+    if inventory.open || coop.open || coop.in_room() || options.open || *phase.get() != Phase::Menu {
         return;
     }
     let Some(creatures) = creatures.as_deref() else {
@@ -153,12 +181,45 @@ pub(super) fn menu_clicks(
     let (race, sex) = (cur.map(|c| c.0), cur.map_or(0, |c| c.1));
     match action {
         MenuAction::Map(i) => {
-            if selection.map != i {
+            if selection.map != i && data::MAPS.get(i).is_some_and(super::dungeon::available) {
                 selection.map = i;
                 selection.version += 1;
             }
         }
         MenuAction::Talents => {}
+        MenuAction::Feature(dial, forward) => {
+            if let Some((key, mut f, ranges)) =
+                super::appearance::current(&selection, creatures, appearances.as_deref())
+            {
+                let opts = ranges.options(dial, &f);
+                let at = opts.iter().position(|&v| v == f[dial]).unwrap_or(0);
+                let n = opts.len();
+                f[dial] = opts[if forward { (at + 1) % n } else { (at + n - 1) % n }];
+                if dial == 0 {
+                    ranges.fit_face(&mut f);
+                }
+                selection.features.insert(key, f);
+                selection.version += 1;
+            }
+        }
+        MenuAction::RandomFeatures => {
+            if let Some((key, mut f, ranges)) =
+                super::appearance::current(&selection, creatures, appearances.as_deref())
+            {
+                for dial in 0..super::appearance::DIALS {
+                    let opts = ranges.options(dial, &f);
+                    f[dial] = opts[rng.index(opts.len())];
+                }
+                ranges.fit_face(&mut f);
+                selection.features.insert(key, f);
+                selection.version += 1;
+            }
+        }
+        // What Escape does on this screen.
+        MenuAction::Settings => {
+            options.open = true;
+            options.settings = true;
+        }
         MenuAction::Enter => {
             if start_run(&mut run, &mut selection) {
                 next.set(Phase::Playing);
@@ -261,7 +322,12 @@ pub(super) fn refresh_menu_ui(
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == s),
             MenuAction::Class(i) => selection.class == Some(i),
             MenuAction::Map(i) => selection.map == i,
-            MenuAction::Randomize | MenuAction::Enter | MenuAction::Talents => false,
+            MenuAction::Randomize
+            | MenuAction::Feature(..)
+            | MenuAction::RandomFeatures
+            | MenuAction::Enter
+            | MenuAction::Talents
+            | MenuAction::Settings => false,
         };
         if let Some(mut lock) = lock {
             if lock.0 != selected {
@@ -269,7 +335,11 @@ pub(super) fn refresh_menu_ui(
             }
         }
         if let Some(mut disabled) = disabled {
-            let off = *action == MenuAction::Enter && cur.is_none();
+            let off = match *action {
+                MenuAction::Enter => cur.is_none() || !super::dungeon::available(&data::MAPS[selection.map]),
+                MenuAction::Map(i) => !super::dungeon::available(&data::MAPS[i]),
+                _ => false,
+            };
             if disabled.0 != off {
                 disabled.0 = off;
             }
@@ -315,11 +385,26 @@ pub(super) fn refresh_menu_ui(
     }
 
     for (action, mut style) in &mut styles {
-        style.selected = match action {
+        // Painted by [`super::features_ui::refresh`] from the dials' ranges.
+        if matches!(action, MenuAction::Feature(..) | MenuAction::RandomFeatures) {
+            continue;
+        }
+        let selected = match action {
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == *s),
+            MenuAction::Map(i) => selection.map == *i,
             _ => false,
         };
-        style.enabled = *action != MenuAction::Enter || cur.is_some();
+        let enabled = match action {
+            MenuAction::Enter => {
+                cur.is_some() && super::dungeon::available(&data::MAPS[selection.map])
+            }
+            MenuAction::Map(i) => super::dungeon::available(&data::MAPS[*i]),
+            _ => true,
+        };
+        if style.selected != selected || style.enabled != enabled {
+            style.selected = selected;
+            style.enabled = enabled;
+        }
     }
     let class = selection.class_def();
     for mut text in &mut descriptions {

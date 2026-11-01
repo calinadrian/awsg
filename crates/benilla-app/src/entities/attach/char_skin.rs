@@ -47,6 +47,15 @@ pub(super) fn resolve_char_look(
     // answer (`0x60c690`). A druid form is a plain creature model and has no look.
     let d = dm?;
     if let Some(npc) = d.npc_appearance.as_ref() {
+        #[cfg(not(target_os = "macos"))]
+        if let Some(store) = stores.get(entity).ok().filter(|s| crate::survivors::inventory_outfit::has_outfit(s)) {
+            // The menu's FEATURES dials, when the hero carries them (raw fields 2001..=2005).
+            let [skin, face, hair_style, hair_color, facial_hair] =
+                crate::survivors::inventory_outfit::features(store).unwrap_or([npc.skin, npc.face,
+                    npc.hair_style, npc.hair_color, npc.facial_hair]);
+            return Some(CharLook { race: npc.race, sex: npc.sex, skin, hair_style, hair_color,
+                facial_hair, body: BodySkin::Composite { face } });
+        }
         return Some(CharLook {
             race: npc.race,
             sex: npc.sex,
@@ -121,6 +130,11 @@ pub(super) fn resolve_worn_equip(
     equipment: Option<&super::super::Equipment>,
     dm: Option<&DisplayModel>,
 ) -> WornEquip {
+    #[cfg(not(target_os = "macos"))]
+    if let Some(e) = equipment.filter(|e| e.survivors_shoulders.is_some()) {
+        return WornEquip { bodyslots: e.bodyslots, cloak: e.cloak, helm: e.helm,
+            emblem: e.emblem, tabard_preview: e.tabard_preview };
+    }
     match net.kind {
         // A corpse's `Equipment` comes from its 19 `CORPSE_FIELD_ITEM` slots, already
         // ItemDisplayInfo ids.

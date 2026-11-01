@@ -731,6 +731,10 @@ pub(super) fn attach_entity_visuals(
                 Transform::default()
             };
             // What the visual was dressed with, for `redress_player_looks` to diff.
+            #[cfg(not(target_os = "macos"))]
+            if let Some(e) = equipment.filter(|e| e.survivors_shoulders.is_some()) {
+                commands.entity(entity).insert(super::equipment::AppliedEquipment(*e));
+            }
             if let (EntityKind::Player, Some(e)) = (net.kind, equipment) {
                 commands
                     .entity(entity)

@@ -9,7 +9,7 @@ use benilla_world::world_point::WorldPoint;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use super::{data::MapDef, Selection};
+use super::{Selection, data::MapDef};
 
 /// No nearest spawnable cell.
 const NONE: u16 = 0xffff;
@@ -167,7 +167,37 @@ static WAILING: std::sync::LazyLock<Dungeon> = std::sync::LazyLock::new(|| Dunge
     area: PlayArea::NorthOf(372.0),
 });
 
-/// The `Map.dbc` rows of the two dungeon battlegrounds.
+// The generated floor stays in the user's ignored MPQ, never in the source tree.
+static THANES: std::sync::LazyLock<Option<Dungeon>> = std::sync::LazyLock::new(|| {
+    let data = benilla_formats::wow_data()?;
+    let mut chain = benilla_formats::Chain::open(&data).ok()?;
+    let raw = chain
+        .read_file("World\\ASRForeverThanes\\arena.ground")
+        .ok()?;
+    if raw.len() != 110 * 120 * 8 {
+        return None;
+    }
+    let grid = Grid::parse(&raw, 0.0, -60.0, 1.0, 110, 120);
+    // Validate target indices before the grid may be queried.
+    if grid.targets.iter().any(|&(x, y)| x >= 110 || y >= 120)
+        || grid
+            .targets
+            .iter()
+            .any(|&(x, y)| !grid.heights[x as usize * 120 + y as usize].is_finite())
+    {
+        return None;
+    }
+    Some(Dungeon {
+        grid,
+        area: PlayArea::Outline(&[[10.0, -50.0], [98.0, -50.0], [98.0, 40.0], [10.0, 40.0]]),
+    })
+});
+
+pub(super) fn available(map: &MapDef) -> bool {
+    map.map != 3065 || THANES.is_some()
+}
+
+/// The `Map.dbc` rows of the dungeon battlegrounds.
 const DEADMINES_MAP: u32 = 36;
 const WAILING_MAP: u32 = 43;
 
@@ -175,13 +205,14 @@ fn of(map: &MapDef) -> Option<&'static Dungeon> {
     match map.map {
         DEADMINES_MAP => Some(&DEADMINES),
         WAILING_MAP => Some(&WAILING),
+        3065 => THANES.as_ref(),
         _ => None,
     }
 }
 
 /// Whether a battleground is fought underground, with no terrain and no sky to ring with fire.
 pub(super) fn is_dungeon(map: &MapDef) -> bool {
-    of(map).is_some()
+    map.map == 3065 || of(map).is_some()
 }
 
 /// The ground of the battleground being stood in: a dungeon's floor grid, else the terrain.
@@ -229,7 +260,11 @@ impl Ground<'_, '_> {
                 continue;
             }
             if let Some(s) = d.grid.spawn_spot(x, y) {
-                return wow_to_bevy(s);
+                if d.area.contains(s[0], s[1], 2.0)
+                    && (s[0] - center[0]).hypot(s[1] - center[1]) <= map.leash
+                {
+                    return wow_to_bevy(s);
+                }
             }
         }
         wow_to_bevy(map.center)

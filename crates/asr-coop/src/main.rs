@@ -33,6 +33,7 @@ mod directory {
         players: HashMap<u64, Player>,
         rooms: HashMap<String, Match>,
         serial: u64,
+        economy: Option<asr_coop::economy_store::Store>,
     }
 
     impl Directory {
@@ -120,6 +121,14 @@ mod directory {
                 return;
             }
             match message {
+                Client::Economy { request } => {
+                    if let Some(economy) = &mut self.economy {
+                        let reply = economy.handle(request);
+                        self.send(id, Server::Economy { reply });
+                    } else {
+                        self.error(id, "Economy service is unavailable");
+                    }
+                }
                 Client::List => self.send(
                     id,
                     Server::Rooms {
@@ -141,7 +150,7 @@ mod directory {
                         self.error(id, "Leave your current room before hosting");
                         return;
                     }
-                    if name.len() > 64 || !valid_member(&member) || map != 0 {
+                    if name.len() > 64 || !valid_member(&member) || map > 1 {
                         self.error(id, "Invalid room or hero");
                         return;
                     }
@@ -375,7 +384,15 @@ mod directory {
             .map_or("127.0.0.1:47771", |p| p[1].as_str());
         let listener = TcpListener::bind(bind)?;
         println!("ASR-game lobby and relay: {bind}; build {BUILD}; four players per room");
-        let state = Arc::new(Mutex::new(Directory::default()));
+        let economy_path = args
+            .windows(2)
+            .find(|p| p[0] == "--economy-store")
+            .map_or("benilla-config/economy/asr-economy", |p| p[1].as_str());
+        let economy = asr_coop::economy_store::Store::open(economy_path.into())?;
+        let state = Arc::new(Mutex::new(Directory {
+            economy: Some(economy),
+            ..Directory::default()
+        }));
         for stream in listener.incoming() {
             let stream = stream?;
             let state = state.clone();

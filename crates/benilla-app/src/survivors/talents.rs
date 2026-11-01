@@ -12,11 +12,10 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use super::data::{AbilityDef, Kind};
-use super::hud::{HudFont, MenuRoot};
+use super::front_end as skin;
+use super::hud::{rgb, HudFont, MenuRoot};
 use super::menu::MenuAction;
 use super::{Phase, Run, Selection};
-use crate::glue::art::{GlueArt, GOLD};
-use crate::glue::widgets::{glue_button, GlueBtnKind};
 use crate::glue::GlueClicks;
 
 /// One talent, as the old tables hold it.
@@ -636,7 +635,6 @@ pub(super) fn talent_screen(
     selection: Res<Selection>,
     mut screen: ResMut<TalentScreen>,
     mut book: ResMut<TalentBook>,
-    art: Res<GlueArt>,
     font: Res<HudFont>,
     roots: Query<Entity, With<MenuRoot>>,
     panels: Query<Entity, With<TalentPanel>>,
@@ -714,7 +712,7 @@ pub(super) fn talent_screen(
     let page = book.class(class).clone();
     let f = font.0.clone();
     commands.entity(root).with_children(|ui| {
-        build_panel(ui, &art, &f, class, trees_now, &page, hovered);
+        build_panel(ui, &f, class, trees_now, &page, hovered);
     });
 }
 
@@ -724,32 +722,43 @@ fn text(
     s: impl Into<String>,
     size: f32,
     color: Color,
+) -> Entity {
+    skin::label(ui, f, s, size, color)
+}
+
+/// Centred text: a label that fills its row and centres its lines.
+fn centred(
+    ui: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    s: impl Into<String>,
+    size: f32,
+    color: Color,
 ) {
-    ui.spawn((
-        Text::new(s),
-        TextFont {
-            font: f.clone(),
-            font_size: size,
+    let e = text(ui, f, s, size, color);
+    ui.commands().entity(e).insert((
+        Node {
+            width: Val::Percent(100.0),
             ..default()
         },
-        TextColor(color),
+        TextLayout::new_with_justify(Justify::Center),
     ));
 }
 
+/// A partly learnt talent's frame; maxed is gold, an open row plain, a locked one dark.
+const LEARNING: Color = Color::srgb(0.38, 0.82, 0.42);
+const LOCKED: Color = Color::srgb(0.17, 0.16, 0.14);
+const SIDE_W: f32 = 250.0;
+const GAP: f32 = 14.0;
+
 fn build_panel(
     ui: &mut ChildSpawnerCommands,
-    art: &GlueArt,
     f: &Handle<Font>,
     class: u8,
     trees: &'static [TreeDef; 3],
     page: &ClassBook,
     hovered: Option<(usize, usize)>,
 ) {
-    let class_name = super::data::CLASSES
-        .iter()
-        .find(|c| c.id == class)
-        .map_or("Hero", |c| c.name);
-    let (into, next) = page.toward_next();
+    let class_def = super::data::CLASSES.iter().find(|c| c.id == class);
     ui.spawn((
         TalentPanel,
         Node {
@@ -762,96 +771,229 @@ fn build_panel(
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+        BackgroundColor(Color::srgba(0.01, 0.01, 0.008, 0.92)),
         Interaction::default(),
         bevy::ui::FocusPolicy::Block,
         GlobalZIndex(1000),
     ))
     .with_children(|back| {
-        back.spawn((
+        back.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Stretch,
+            column_gap: Val::Px(GAP),
+            ..default()
+        })
+        .with_children(|row| {
+            for (ti, tree) in trees.iter().enumerate() {
+                tree_column(row, f, ti, tree, page);
+            }
+            side_panel(row, f, class_def, trees, page, hovered);
+        });
+    });
+}
+
+/// The points to spend, the experience toward the next one, and the hovered talent.
+fn side_panel(
+    row: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    class_def: Option<&super::data::ClassDef>,
+    trees: &'static [TreeDef; 3],
+    page: &ClassBook,
+    hovered: Option<(usize, usize)>,
+) {
+    let (into, next) = page.toward_next();
+    let class_name = class_def.map_or("Hero", |c| c.name);
+    row.spawn(skin::panel(Node {
+        width: Val::Px(SIDE_W),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        padding: UiRect::all(Val::Px(18.0)),
+        row_gap: Val::Px(8.0),
+        ..default()
+    }))
+    .with_children(|p| {
+        centred(
+            p,
+            f,
+            class_name.to_uppercase(),
+            13.0,
+            class_def.map_or(skin::GOLD, |c| rgb(c.color)),
+        );
+        centred(p, f, "TALENT POINTS", 18.0, skin::GOLD);
+        skin::rule(p);
+        centred(p, f, page.available().to_string(), 40.0, skin::GOLD);
+        centred(p, f, "TO SPEND", 10.0, skin::MUTED);
+        centred(
+            p,
+            f,
+            format!(
+                "Class level {}  ·  {} / {} earned",
+                page.level(),
+                page.earned(),
+                MAX_POINTS
+            ),
+            12.0,
+            skin::TEXT,
+        );
+        let done = page.earned() >= MAX_POINTS;
+        let share = if done || next <= 0.0 {
+            1.0
+        } else {
+            (into / next).clamp(0.0, 1.0)
+        };
+        p.spawn((
             Node {
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(16.0)),
-                row_gap: Val::Px(10.0),
-                border: UiRect::all(Val::Px(2.0)),
-                align_items: AlignItems::Center,
+                width: Val::Percent(100.0),
+                height: Val::Px(6.0),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+                overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.04, 0.03, 0.95)),
-            BorderColor::all(Color::srgb(0.55, 0.45, 0.25)),
+            BackgroundColor(skin::SURFACE),
         ))
-        .with_children(|frame| {
-            text(
-                frame,
-                f,
-                format!(
-                    "{class_name} | Class level {} | {} / {} talent points ({} to spend)",
-                    page.level(), page.earned(), MAX_POINTS, page.available()
-                ),
-                20.0,
-                GOLD,
-            );
-            text(
-                frame,
-                f,
-                if page.earned() >= MAX_POINTS {
-                    "Every talent point earned.".to_string()
-                } else {
-                    format!("Talent experience {into:.0} / {next:.0} to the next point")
+        .with_children(|bar| {
+            bar.spawn((
+                Node {
+                    width: Val::Percent(share * 100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
                 },
-                14.0,
-                Color::srgb(0.85, 0.85, 0.85),
-            );
-            frame
+                BackgroundColor(skin::GOLD),
+            ));
+        });
+        centred(
+            p,
+            f,
+            if done {
+                "Every talent point earned.".to_string()
+            } else {
+                format!("{into:.0} / {next:.0} experience to the next point")
+            },
+            11.0,
+            skin::MUTED,
+        );
+        skin::rule(p);
+        info(p, f, trees, page, hovered);
+        p.spawn(Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(8.0),
+            ..default()
+        });
+        p.spawn(Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|buttons| {
+            buttons
                 .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(14.0),
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
                     ..default()
                 })
-                .with_children(|row| {
-                    for (ti, tree) in trees.iter().enumerate() {
-                        tree_column(row, f, ti, tree, page);
-                    }
+                .with_children(|p| {
+                    skin::button(p, f, "Reset", "", ResetTalents, false, false, true);
                 });
-            let info = hovered
-                .and_then(|(t, i)| trees.get(t).and_then(|tr| tr.talents.get(i)))
-                .map(|t| {
-                    let rank = page.rank(t.key);
-                    let mut s = format!("{}  (Rank {rank}/{})\n{}", t.name, t.ranks, text_at(t, rank));
-                    if rank > 0 && rank < t.ranks {
-                        s += &format!("\nNext rank: {}", text_at(t, rank + 1));
-                    }
-                    if t.tier > 0 {
-                        s += &format!("\nRequires {} points in the tree.", u32::from(t.tier) * 5);
-                    }
-                    if let Some(p) = t.prereq {
-                        if let Some(q) = trees.iter().flat_map(|tr| tr.talents.iter()).find(|q| q.key == p) {
-                            s += &format!("\nRequires {} maxed.", q.name);
-                        }
-                    }
-                    s
-                })
-                .unwrap_or_else(|| {
-                    "Point at a talent to read it. Click to spend a point, right-click to take one back. A row opens at 5 points spent in its tree. Every run pays your class talent experience: time survived, kills, bosses, guardians and a win. Respecs are free.".into()
-                });
-            frame
+            buttons
                 .spawn(Node {
-                    width: Val::Px(3.0 * TREE_W + 28.0),
-                    min_height: Val::Px(84.0),
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
                     ..default()
                 })
-                .with_children(|b| text(b, f, info, 14.0, Color::srgb(1.0, 0.95, 0.8)));
-            frame
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(20.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    glue_button(row, art, f, ResetTalents, "Reset", 140.0, 36.0, GlueBtnKind::Small, 1.0);
-                    glue_button(row, art, f, CloseTalents, "Close", 140.0, 36.0, GlueBtnKind::Small, 1.0);
+                .with_children(|p| {
+                    skin::button(p, f, "Done", "", CloseTalents, true, false, true);
                 });
         });
+    });
+}
+
+/// The hovered talent's name, ranks and requirements, or how the screen works.
+fn info(
+    p: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    trees: &'static [TreeDef; 3],
+    page: &ClassBook,
+    hovered: Option<(usize, usize)>,
+) {
+    p.spawn(Node {
+        width: Val::Percent(100.0),
+        min_height: Val::Px(150.0),
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(5.0),
+        ..default()
+    })
+    .with_children(|b| {
+        let Some((ti, t)) =
+            hovered.and_then(|(t, i)| trees.get(t).and_then(|tr| tr.talents.get(i)).map(|x| (t, x)))
+        else {
+            text(b, f, "Point at a talent to read it.", 14.0, skin::GOLD);
+            text(
+                b,
+                f,
+                "Click to learn, right-click to unlearn. A row opens at 5 points spent in its tree. Every run pays your class talent experience: time survived, kills, bosses, guardians and a win. Respecs are free.",
+                11.0,
+                skin::MUTED,
+            );
+            return;
+        };
+        let rank = page.rank(t.key);
+        b.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(10.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                ImageNode::default(),
+                IconPath(t.icon),
+                Node {
+                    width: Val::Px(36.0),
+                    height: Val::Px(36.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(skin::EDGE),
+            ));
+            row.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                ..default()
+            })
+            .with_children(|c| {
+                text(c, f, t.name, 15.0, skin::GOLD);
+                text(c, f, format!("Rank {rank} / {}", t.ranks), 11.0, skin::MUTED);
+            });
+        });
+        let tree = &trees[ti];
+        let row_open = page.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5;
+        if t.tier > 0 && !row_open {
+            text(
+                b,
+                f,
+                format!("Requires {} points in {}", u32::from(t.tier) * 5, tree.name),
+                11.0,
+                Color::srgb(0.9, 0.45, 0.35),
+            );
+        }
+        if let Some(q) = t
+            .prereq
+            .and_then(|p| trees.iter().flat_map(|tr| tr.talents.iter()).find(|q| q.key == p))
+            .filter(|q| page.rank(q.key) < q.ranks)
+        {
+            text(
+                b,
+                f,
+                format!("Requires {} maxed", q.name),
+                11.0,
+                Color::srgb(0.9, 0.45, 0.35),
+            );
+        }
+        text(b, f, text_at(t, rank.max(1)), 12.0, skin::TEXT);
+        if rank > 0 && rank < t.ranks {
+            text(b, f, format!("Next rank: {}", text_at(t, rank + 1)), 12.0, LEARNING);
+        }
     });
 }
 
@@ -863,86 +1005,164 @@ fn tree_column(
     page: &ClassBook,
 ) {
     let spent = page.tree_spent(tree, 7);
-    row.spawn((
-        Node {
-            width: Val::Px(TREE_W),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            padding: UiRect::all(Val::Px(8.0)),
-            row_gap: Val::Px(6.0),
-            border: UiRect::all(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.12, 0.1, 0.08, 0.9)),
-        BorderColor::all(Color::srgb(0.35, 0.3, 0.2)),
-    ))
+    row.spawn(skin::panel(Node {
+        width: Val::Px(TREE_W + 2.0),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        padding: UiRect::all(Val::Px(12.0)),
+        row_gap: Val::Px(6.0),
+        ..default()
+    }))
     .with_children(|col| {
-        text(col, f, format!("{}  ({spent})", tree.name), 17.0, GOLD);
         col.spawn(Node {
-            width: Val::Px(4.0 * CELL),
-            height: Val::Px(7.0 * CELL),
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
             ..default()
         })
+        .with_children(|head| {
+            text(head, f, tree.name, 17.0, skin::GOLD);
+            text(
+                head,
+                f,
+                format!("{spent} points"),
+                12.0,
+                if spent > 0 { skin::TEXT } else { skin::MUTED },
+            );
+        });
+        skin::rule(col);
+        col.spawn((
+            Node {
+                width: Val::Px(4.0 * CELL),
+                height: Val::Px(7.0 * CELL),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+        ))
         .with_children(|grid| {
-            for (i, t) in tree.talents.iter().enumerate() {
-                let rank = page.rank(t.key);
-                let open = page.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5;
-                let tint = if rank > 0 {
-                    Color::WHITE
-                } else if open {
-                    Color::srgb(0.75, 0.75, 0.75)
-                } else {
-                    Color::srgb(0.3, 0.3, 0.3)
+            // Prerequisite links first, so the icons draw over them.
+            for t in tree.talents {
+                let Some(q) = t
+                    .prereq
+                    .and_then(|p| tree.talents.iter().find(|q| q.key == p))
+                else {
+                    continue;
                 };
-                let edge = if rank >= t.ranks {
-                    GOLD
-                } else if rank > 0 {
-                    Color::srgb(0.3, 0.9, 0.3)
-                } else {
-                    Color::srgb(0.25, 0.25, 0.25)
-                };
-                grid.spawn((
-                    Cell(ti, i),
-                    Button,
-                    Interaction::default(),
+                let lit = page.rank(q.key) >= q.ranks;
+                let (x0, y0) = (f32::from(q.col), f32::from(q.tier));
+                let (x1, y1) = (f32::from(t.col), f32::from(t.tier));
+                let centre = CELL / 2.0;
+                let node = if q.col == t.col {
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(f32::from(t.col) * CELL + (CELL - ICON) / 2.0),
-                        top: Val::Px(f32::from(t.tier) * CELL + (CELL - ICON) / 2.0),
-                        width: Val::Px(ICON),
-                        height: Val::Px(ICON),
-                        border: UiRect::all(Val::Px(2.0)),
+                        left: Val::Px(x0 * CELL + centre - 1.0),
+                        top: Val::Px(y0 * CELL + centre),
+                        width: Val::Px(2.0),
+                        height: Val::Px((y1 - y0) * CELL),
                         ..default()
-                    },
-                    BorderColor::all(edge),
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        ImageNode {
-                            color: tint,
-                            ..default()
-                        },
-                        IconPath(t.icon),
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                    ));
-                    b.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            right: Val::Px(-4.0),
-                            bottom: Val::Px(-6.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
-                    ))
-                    .with_children(|r| {
-                        text(r, f, format!("{rank}/{}", t.ranks), 11.0, edge);
-                    });
-                });
+                    }
+                } else {
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(x0.min(x1) * CELL + centre),
+                        top: Val::Px(y0 * CELL + centre - 1.0),
+                        width: Val::Px((x1 - x0).abs() * CELL),
+                        height: Val::Px(2.0),
+                        ..default()
+                    }
+                };
+                grid.spawn((
+                    node,
+                    BackgroundColor(if lit { skin::GOLD } else { skin::EDGE }),
+                ));
             }
+            for (i, t) in tree.talents.iter().enumerate() {
+                cell(grid, f, ti, i, t, tree, page);
+            }
+        });
+    });
+}
+
+fn cell(
+    grid: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    ti: usize,
+    i: usize,
+    t: &'static TalentDef,
+    tree: &'static TreeDef,
+    page: &ClassBook,
+) {
+    let rank = page.rank(t.key);
+    let open = page.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5;
+    let tint = if rank > 0 {
+        Color::WHITE
+    } else if open {
+        Color::srgb(0.72, 0.72, 0.72)
+    } else {
+        Color::srgb(0.28, 0.28, 0.28)
+    };
+    let edge = if rank >= t.ranks {
+        skin::GOLD
+    } else if rank > 0 {
+        LEARNING
+    } else if open {
+        skin::EDGE
+    } else {
+        LOCKED
+    };
+    grid.spawn((
+        Cell(ti, i),
+        Button,
+        Interaction::default(),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(f32::from(t.col) * CELL + (CELL - ICON) / 2.0),
+            top: Val::Px(f32::from(t.tier) * CELL + (CELL - ICON) / 2.0),
+            width: Val::Px(ICON),
+            height: Val::Px(ICON),
+            border: UiRect::all(Val::Px(2.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(skin::INK),
+        BorderColor::all(edge),
+    ))
+    .with_children(|b| {
+        b.spawn((
+            ImageNode {
+                color: tint,
+                ..default()
+            },
+            IconPath(t.icon),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+        ));
+        // The rank sits inside the icon's corner, clear of its neighbours.
+        b.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                padding: UiRect::horizontal(Val::Px(3.0)),
+                border_radius: BorderRadius::top_left(Val::Px(3.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.82)),
+        ))
+        .with_children(|r| {
+            text(
+                r,
+                f,
+                format!("{rank}/{}", t.ranks),
+                10.0,
+                if rank > 0 { edge } else { skin::MUTED },
+            );
         });
     });
 }

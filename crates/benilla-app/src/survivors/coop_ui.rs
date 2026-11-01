@@ -93,13 +93,14 @@ fn setup(mut commands: Commands, font: Res<HudFont>) {
     ));
 }
 fn toggle(
+    inventory: Res<super::inventory::Equipment>,
     buttons: Query<Entity, With<OpenCoop>>,
     clicks: Res<GlueClicks>,
     mut coop: ResMut<Coop>,
     phase: Res<State<Phase>>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
-    if *phase.get() == Phase::Menu
+    if !inventory.open && *phase.get() == Phase::Menu
         && (buttons.iter().any(|e| clicks.hit(e)) || keys.just_pressed(KeyCode::F6))
     {
         coop.open = coop.in_room() || !coop.open;
@@ -483,14 +484,14 @@ fn render(
                         });
                         p.spawn(Node {width:Val::Px(110.),..default()}).with_children(|p| {skin::button(p,f,if copied {"Copied!"} else {"Copy code"},"",Action::Copy,false,false,true);});
                     });
-                    skin::label(p,f,format!("Elwynn Forest  /  {} of 4 heroes  /  {}",room.members.len(),if room.private {"Invite only"} else {"Public party"}),12.,skin::TEXT);
+                    skin::label(p,f,format!("{}  ·  {} of 4 heroes  ·  {}",data::MAPS.get(room.map).map_or("Unknown arena", |m| m.name),room.members.len(),if room.private {"Invite only"} else {"Public party"}),12.,skin::TEXT);
                     p.spawn(Node {flex_direction:FlexDirection::Row,flex_wrap:FlexWrap::Wrap,column_gap:Val::Px(10.),row_gap:Val::Px(10.),..default()}).with_children(|grid| {
                         for slot in 0..4 {
                             grid.spawn((Node {width:Val::Percent(48.),min_height:Val::Px(74.),padding:UiRect::all(Val::Px(12.)),border:UiRect::all(Val::Px(1.)),border_radius:BorderRadius::all(Val::Px(5.)),flex_direction:FlexDirection::Column,row_gap:Val::Px(7.),..default()},BackgroundColor(skin::SURFACE),BorderColor::all(skin::EDGE))).with_children(|p| {
                                 if let Some(member)=room.members.get(slot) {
                                     skin::label(p,f,format!("{}{}",member.name,if member.peer==coop.peer {" (you)"} else {""}),16.,skin::TEXT);
                                     let class=data::CLASSES.get(member.hero.class).map_or("Hero",|c|c.name);
-                                    skin::label(p,f,format!("{}  /  {}{}",class,if member.ready {"Ready"} else {"Not ready"},if member.peer==0 {"  /  Host"} else {""}),11.,if member.ready {skin::GREEN} else {skin::MUTED});
+                                    skin::label(p,f,format!("{}  ·  {}{}",class,if member.ready {"Ready"} else {"Not ready"},if member.peer==0 {"  ·  Host"} else {""}),11.,if member.ready {skin::GREEN} else {skin::MUTED});
                                 } else {skin::label(p,f,"Waiting for a friend",15.,skin::MUTED);skin::label(p,f,"Share your join code",11.,skin::MUTED);}
                             });
                         }
@@ -500,7 +501,7 @@ fn render(
                     else { let ready=room.members.iter().find(|m|m.peer==coop.peer).is_some_and(|m|m.ready);skin::button(p,f,if ready {"Ready — waiting for host"} else {"Ready to play"},"",Action::Ready,true,ready,true); }
                     skin::button(p,f,"Leave party","",Action::Leave,false,false,true);
                 } else if editor.settings {
-                    skin::label(p,f,"CONNECTION SETTINGS",13.,skin::GOLD);
+                    skin::label(p,f,"CONNECTION SETTINGS",16.,skin::GOLD);
                     skin::label(p,f,"Use the same co-op server as your friends. This address is remembered.",12.,skin::TEXT);
                     field(p,f,"SERVER ADDRESS",&coop.url,0,&editor);
                     skin::button(p,f,if coop.connecting {"Connecting…"} else {"Save & connect"},"",Action::Connect,true,false,!coop.connecting);
@@ -512,13 +513,12 @@ fn render(
                     field(p,f,"YOUR NAME",&coop.name,1,&editor);
                     let busy=coop.connecting || editor.pending.is_some();
                     match editor.page {
+                        // The party's privacy is a setting of the host action below it; joining
+                        // by code has its own tab above.
                         Page::Home => {
-                            p.spawn(Node {flex_direction:FlexDirection::Row,column_gap:Val::Px(14.),..default()}).with_children(|row| {
-                                for (title,detail,action,primary) in [("Host game","Create a party. Invite your friends.",Action::Host,true),("Join game","Enter a code and join your friends.",Action::Page(Page::Join),false)] {
-                                    row.spawn(Node {flex_basis:Val::Px(0.),flex_grow:1.,..default()}).with_children(|p| {skin::button(p,f,title,detail,action,primary,false,!busy);});
-                                }
-                            });
-                            skin::button(p,f,if coop.private {"Invite only"} else {"Public party"},if coop.private {"Only friends with your code can join"} else {"Anyone can find your party in Public games"},Action::Private,false,coop.private,!busy);
+                            skin::label(p,f,"PARTY PRIVACY",10.,skin::MUTED);
+                            skin::button(p,f,if coop.private {"Invite only"} else {"Public party"},if coop.private {"Only friends with your code can join. Click to make it public."} else {"Anyone can find your party in Public games. Click to make it invite only."},Action::Private,false,coop.private,!busy);
+                            skin::button(p,f,"Host game","Create a party and share its join code",Action::Host,true,false,!busy);
                         }
                         Page::Join => {
                             skin::label(p,f,"JOIN YOUR FRIENDS",16.,skin::GOLD);
@@ -527,9 +527,9 @@ fn render(
                             skin::button(p,f,if busy {"Joining…"} else {"Join game"},"",Action::JoinCode,true,false,!busy && coop.code.len()==6);
                         }
                         Page::Browse => {
-                            skin::label(p,f,"PUBLIC GAMES",13.,skin::GOLD);
+                            skin::label(p,f,"PUBLIC GAMES",16.,skin::GOLD);
                             if coop.rooms.is_empty() {skin::label(p,f,if busy {"Looking for parties…"} else {"No public games yet. Host one or join a friend by code."},13.,skin::MUTED);}
-                            for room in &coop.rooms {skin::button(p,f,&room.name,&format!("Elwynn Forest  /  {}/4 heroes  /  Join",room.members.len()),Action::Join(room.code.clone()),false,false,!busy);}
+                            for room in &coop.rooms {skin::button(p,f,&room.name,&format!("{}  ·  {}/4 heroes  ·  Join",data::MAPS.get(room.map).map_or("Unknown arena", |m| m.name),room.members.len()),Action::Join(room.code.clone()),false,false,!busy);}
                             skin::button(p,f,"Refresh games","",Action::Refresh,false,false,!busy);
                         }
                     }

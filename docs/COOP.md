@@ -69,7 +69,7 @@ either faction and keep their own class, race, talents and card choices.
 
 The host synchronizes enemies, boss outcomes, the clock and pickups. Collected
 XP and gold are shared with living party members, with each hero's own growth
-and gold bonuses. Meals heal the player collecting them. Arena caches and
+and gold bonuses, divided by the native party share `1 + (living - 1) * 0.336`. Meals heal the player collecting them. Arena caches and
 boss/guardian rewards give each player their own choices. In co-op, a card,
 item choice or pause menu removes only that player from enemy targeting and
 protects them from damage while the encounter and other players continue.
@@ -87,17 +87,84 @@ budget, kill-pressure feedback, boss suppression and separate population floor.
 Living party size scales density and the ordinary constructor's total living
 enemy limit: 50 solo, 67 with two, 84 with three and 100 with four. Spawn centers
 rotate across living heroes. Timed roaming elites are separate from the fixed
-lair guardians. These source-derived rules do not establish full terrain,
-scripted event-wave, difficulty/endless or combat-stat parity.
+lair guardians.
+
+The native constructors also scale health with the living party, as
+`1 + (living - 1) * 0.7 * k`: k = 0.72 for ordinary chasers and roaming elites
+(ASR.exe 0.124.5 RVA 0x5c00785, giving 1.50/2.01/2.51x for two to four players)
+and k = 1.04 for bosses and lair guardians (0x5c134be, 0x5c6798a: 1.73/2.46/3.18x).
+Health is fixed at spawn or a guardian's wake; enemy damage is not party-scaled.
+Damage each hero takes is multiplied by `1 + (living - 1) * 0.7 * 0.064`
+(0x5be466b), and collected XP and gold use the density share above
+(0x5c5a2e1, 0x5bfe22f). A vector of the same factors at 0x5bdc3ab, which may
+rescale living enemies when the party changes, is not ported. These source-derived
+rules do not establish full terrain, scripted event-wave or difficulty/endless parity.
 
 Party frames show names, levels, health and choosing/loading status beneath
 the player frame. Remote heroes also have overhead names and health bars.
-Remote enemy and player movement is interpolated between 10 Hz snapshots;
-clients use TCP_NODELAY, and snapshot/hit lookups use entity-ID indexes.
-These address known delay and repeated-scan costs; actual latency and frame
-rate on players' machines still need gameplay confirmation.
+The host sends world snapshots at 15 Hz and guests send their pose and hits at
+20 Hz, at an even rate rather than resetting each frame. Remote enemies, heroes
+and pickups glide from where they are drawn to each new snapshot over one measured
+packet interval, extrapolate up to 0.15 s when a packet is late and snap beyond
+20 yards; remote heroes animate at the speed being drawn. Guests number their
+packets and the host echoes the last one applied, so a guest's hits stay on enemy
+health bars until the host confirms them instead of bouncing back for a round
+trip. Snapshot rows use short keys, omit defaults and round positions to 1 cm.
+Clients use TCP_NODELAY, and snapshot/hit lookups use entity-ID indexes. Actual
+latency and frame rate on players' machines still need gameplay confirmation.
 
-## Personal progress
+## Equipment and shared auctions
+
+The character menu has **Inventory** and **Auction House** buttons. Inventory is
+per class and server on this PC; race and gender changes keep that class's gear.
+The server owns every item copy, material balance, gold balance and listing.
+All players using the same directory see the same marketplace, including when
+they play solo. The catalog reuses the owned ASR project's 696 common items and
+nine zone tables, with individual bonuses and no set bonuses. Only a playable
+zone's own table awards its equipment.
+
+Kills award equipment and materials: normal enemies have an 8% equipment chance,
+elites 35%, and bosses 100%. Equipment rolls are filtered by class. Material
+chances are 35%/100%/100%, giving 1/3/8 materials. Duplicate copies stay separate.
+Gear can be equipped into compatible slots, locked, upgraded with materials
+through +5, scrapped, or listed for gold. Listings reserve their item for 48 hours;
+buying transfers ownership and gold in one saved transaction. Cancelled and
+expired listings return to the seller's bags. Equipped and locked items must be
+unequipped and unlocked before sale or scrapping. Two-handed weapons displace
+the off hand. Bonuses and outfits are captured when a run starts; co-op also
+shares outfits with the other players. Equipping armor uses the character's
+live skin composite instead of its baked starter outfit on non-macOS builds.
+Appearance fitting still requires player validation.
+
+Kills are submitted in batches during the run, and unspent run gold is banked
+when the results open, when leaving to the menu, or on a graceful exit. Spending
+run gold on caches reduces that payout. Pending requests are saved before sending
+and retried with the same transaction ID after connection loss or a server write
+failure. The client caches equipped gear for offline play; new transactions wait
+for the shared server. The simulation remains player-hosted: bounded reward
+reports and duplicate protection do not provide server-authoritative anti-cheat.
+
+The updated directory binary includes the economy service on the existing
+WebSocket port; it needs no separate Python service or database installation.
+The original ASR preview database and its real saves are not imported or changed.
+Run **Host Server.cmd** in a source checkout, or rebuild and restart the directory:
+
+```powershell
+cargo build --release -p asr-coop
+.\target\release\asr-coop.exe --bind 0.0.0.0:47771 --economy-store .\benilla-config\economy\asr-economy
+```
+
+The default store is `benilla-config/economy/asr-economy`. Its `.0.json` and
+`.1.json` snapshots alternate on each transaction; preserve both and back them
+up together while the server is stopped. Use one directory process per store.
+The server binds its port before opening the store. Never replace the store with
+a fresh copy when updating the executable. Client credentials, cached inventory
+and pending transactions are in `benilla-config/survivors-inventory.json`; keep
+this file to retain access to those heroes. A server that predates economy
+messages must be updated before these screens can synchronize. Public servers
+should use the `wss://` proxy configuration above to protect hero credentials.
+
+## Local completion records
 
 Each PC keeps its class XP and talents in `survivors-talents.txt`, using the same
 payout path for solo and co-op. `survivors-progress.toml` keeps per-class,

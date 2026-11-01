@@ -117,6 +117,39 @@ pub(super) fn button<A: Component>(
     })
     .id()
 }
+/// A compact single-line control for a header's navigation row, sized by its text.
+pub(super) fn tab<A: Component>(
+    p: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    title: &str,
+    action: A,
+) -> Entity {
+    p.spawn((
+        Button,
+        action,
+        Control {
+            primary: false,
+            selected: false,
+            enabled: true,
+        },
+        Node {
+            height: Val::Px(30.),
+            padding: UiRect::horizontal(Val::Px(16.)),
+            border: UiRect::all(Val::Px(1.)),
+            border_radius: BorderRadius::all(Val::Px(4.)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            flex_shrink: 0.,
+            ..default()
+        },
+        BackgroundColor(SURFACE),
+        BorderColor::all(EDGE),
+    ))
+    .with_children(|p| {
+        label(p, font, title, 14., GOLD);
+    })
+    .id()
+}
 pub(super) fn hover(
     mut controls: Query<(
         &Interaction,

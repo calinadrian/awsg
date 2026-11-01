@@ -910,6 +910,7 @@ pub(super) fn apply_hits(
                     0.0
                 },
                 roaming_elite: en.home.is_none() && super::elwynn::is_roaming_elite(en.def),
+                elite: en.home.is_some() || super::elwynn::is_roaming_elite(en.def),
             });
             run.kills += 1;
             let healing = run.talents.stat(15) + run.jewel_stat(15);

@@ -342,8 +342,10 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
     if run.immune_t > 0.0 || run.dead_t.is_some() {
         return 0.0;
     }
+    // Native co-op damage intake (0x5be466b..0x5be46d4): +4.48% per extra living player.
+    let raw = raw * run.party_factor(0.064);
     let mut dmg = (raw - run.stats().armor).max(1.0)
-        * (1.0 - run.talents.stat(5) - run.jewel_stat(5)).max(0.3);
+        * (1.0 - run.talents.stat(5) - run.jewel_stat(5) - run.gear[4]).max(0.3);
     if run.shield_t > 0.0 && run.shield > 0.0 {
         let absorbed = dmg.min(run.shield);
         run.shield -= absorbed;

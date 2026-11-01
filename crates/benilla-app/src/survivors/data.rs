@@ -689,6 +689,7 @@ const fn giant(name: &'static str, display: u32, level: u32, speed: f32, scale: 
 }
 
 /// Where a run is fought.
+#[derive(Clone, Copy)]
 pub(crate) struct MapDef {
     pub name: &'static str,
     /// The zone or continent under the name on the menu.
@@ -707,14 +708,29 @@ pub(crate) struct MapDef {
     bosses: &'static [Foe],
 }
 
-/// The collaboration build currently ships only the Elwynn arena. Keep the other
-/// definitions available for later packs without requesting their runtime assets.
-pub(crate) static MAPS: std::sync::LazyLock<&'static [MapDef]> = std::sync::LazyLock::new(|| {
-    let index = ALL_MAPS
-        .iter()
-        .position(|map| map.name == "Elwynn Forest")
-        .expect("Elwynn arena definition");
-    &ALL_MAPS[index..index + 1]
+impl MapDef {
+    /// The boss line-up, by name, for a battleground that may not be playable yet.
+    pub(crate) fn boss_names(&self) -> impl Iterator<Item = &'static str> {
+        self.bosses.iter().map(|b| b.name)
+    }
+}
+
+/// Every battleground defined, playable or not: the adventure atlas lists the locked ones too.
+pub(crate) fn all_maps() -> &'static [MapDef] {
+    ALL_MAPS
+}
+
+/// Stable menu/save/co-op indices: Elwynn remains 0; Hall of Thanes is 1.
+pub(crate) static MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::new(|| {
+    ["Elwynn Forest", "Hall of Thanes"]
+        .into_iter()
+        .map(|name| {
+            *ALL_MAPS
+                .iter()
+                .find(|map| map.name == name)
+                .expect("arena definition")
+        })
+        .collect()
 });
 
 static ALL_MAPS: &[MapDef] = &[
@@ -1380,6 +1396,32 @@ static ALL_MAPS: &[MapDef] = &[
             giant("Gluth", 16064, 63, 5.0, 0.62),
             giant("Thaddius", 16137, 63, 4.0, 0.98),
             foe("Kel'Thuzad", 15945, 63, 4.4, 2.1),
+        ],
+    },
+    MapDef {
+        name: "Hall of Thanes",
+        zone: "Forever / Dungeon",
+        map: 3065,
+        // A safe floor cell in the first great burial hall, from the local import.
+        center: [45.5, 0.5, 501.57],
+        leash: 32.0,
+        victory: "The ancient thanes rest once more.",
+        // Survivors adaptation: existing classic displays stand in for Forever NPCs.
+        foes: &[
+            foe("Restless Dead", 200, 13, 3.6, 1.0),
+            foe("Tormented Soul", 9534, 13, 3.8, 1.0),
+            foe("Dark Iron Intruder", 825, 14, 4.2, 1.0),
+            foe("Dark Iron Engineer", 870, 14, 3.8, 1.0),
+            foe("Dark Iron Summoner", 2871, 15, 3.8, 1.0),
+            foe("Tomb Guardian", 2280, 16, 3.6, 1.0),
+            foe("Enraged Apparition", 9534, 16, 4.2, 1.3),
+            foe("Dark Iron Veteran", 8807, 18, 4.2, 1.1),
+        ],
+        bosses: &[
+            foe("Faldrim Anvilmar", 8807, 15, 4.0, 1.6),
+            giant("Magmatus", 14517, 16, 3.8, 0.75),
+            giant("Plunder", 2280, 17, 3.6, 1.5),
+            foe("Durgen Dirgehammer", 8807, 18, 4.2, 1.8),
         ],
     },
 ];

@@ -6,6 +6,7 @@
 
 mod abilities;
 mod amulets;
+pub(crate) mod appearance;
 mod auto;
 mod caches;
 mod card_content;
@@ -20,6 +21,8 @@ mod dungeon;
 mod elwynn;
 mod elwynn_behavior;
 mod enemies;
+mod adventure_atlas;
+mod features_ui;
 mod fill;
 mod frame_settings;
 mod front_end;
@@ -31,7 +34,11 @@ mod hero;
 mod horde_spawning;
 mod hud;
 mod jewelry;
+mod inventory;
+mod inventory_ui;
+pub(crate) mod inventory_outfit;
 mod loot_ground;
+mod magnets;
 mod menu;
 mod menu_icons;
 mod menu_layout;
@@ -42,6 +49,7 @@ mod progress;
 mod races;
 mod reward_axes;
 mod rewards;
+mod resurrection_ui;
 mod ring;
 pub(crate) mod spell_flight;
 mod spell_passives;
@@ -100,6 +108,10 @@ impl Plugin for SurvivorsPlugin {
             .add_plugins(bevy::ui_render::UiMaterialPlugin::<fill::FillMaterial>::default())
             .add_systems(Startup, (card_view::setup, hud::setup_hud).chain())
             .add_plugins(unit_frames::plugin)
+            .add_plugins(magnets::plugin)
+            .add_plugins(appearance::plugin)
+            .add_plugins((inventory::plugin, inventory_ui::plugin, inventory_outfit::plugin))
+            .add_plugins(adventure_atlas::plugin)
             .add_systems(
                 Update,
                 loot_ground::seat
@@ -164,7 +176,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(
                 Update,
                 (
-                    hero::follow_map,
+                    (hud::apply_ui_scale, hero::follow_map).chain(),
                     hud::menu_preview,
                     hud::buttons,
                     hud::keys,
@@ -172,7 +184,10 @@ impl Plugin for SurvivorsPlugin {
                     menu::restore_pick,
                     menu::build_menu,
                     menu::menu_clicks,
-                    menu::refresh_menu_ui.before(crate::glue::GlueVisuals),
+                    (
+                        menu::refresh_menu_ui.before(crate::glue::GlueVisuals),
+                        menu_layout::refresh_adventure,
+                    ).chain(),
                     talents::talent_screen,
                     talents::fill_talent_icons,
                     talents::refresh_progress,
@@ -203,6 +218,12 @@ impl Plugin for SurvivorsPlugin {
                 )
                     .chain()
                     .after(hud::show_panels),
+            )
+            .add_systems(
+                PostUpdate,
+                card_view::refresh_render_scale
+                    .after(bevy::ui::UiSystems::Propagate)
+                    .before(bevy::text::detect_text_needs_rerender::<Text>),
             )
             // The telegraphs' stream push, after the frame's effect-stream clear.
             .add_systems(
@@ -263,9 +284,18 @@ pub(super) struct Selection {
     pub stage: usize,
     /// Bumped on every change, so the menu rebuilds once.
     pub version: u32,
+    /// The FEATURES dials, kept per class (and the race and sex they were set on); a hero with no
+    /// entry wears its display's own look.
+    pub features: std::collections::HashMap<(usize, u8, u8), appearance::Features>,
 }
 
 impl Selection {
+    /// The picked hero's dials, if any were set.
+    pub fn current_features(&self) -> Option<appearance::Features> {
+        let &(_, race, sex) = self.looks.get(self.look?)?;
+        self.features.get(&(self.class?, race, sex)).copied()
+    }
+
     pub fn class_def(&self) -> Option<&'static ClassDef> {
         self.class.map(|i| &data::CLASSES[i])
     }
@@ -377,6 +407,9 @@ pub(super) struct Run {
     pub shield: f32,
     pub shield_t: f32,
     pub immune_t: f32,
+    pub gear: [f32; 5],
+    pub gear_look: Vec<asr_coop::economy::LookItem>,
+    pub equipment_kills: [u32; 3],
     pub thorns: f32,
     pub thorns_t: f32,
     pub thorns_spell: u32,
@@ -415,6 +448,8 @@ pub(super) struct Run {
     pub coop_damage: Vec<(u32, f32)>,
     pub coop_run: bool,
     pub coop_unavailable: std::collections::HashSet<u32>,
+    /// Living party members (native Game+0xc88, rebuilt at 0x5bd91a0); 1 when solo.
+    pub coop_living: usize,
     /// This update's ordinary-spawn reservations, including deferred entities and summons.
     pub horde_spawn_slots: Option<usize>,
     /// Key, native effect, strength, and remaining seconds of active spell buffs.
@@ -437,6 +472,9 @@ impl Default for Run {
             shield: 0.0,
             shield_t: 0.0,
             immune_t: 0.0,
+            gear: [0.; 5],
+            gear_look: Vec::new(),
+            equipment_kills: [0; 3],
             thorns: 0.0,
             thorns_t: 0.0,
             thorns_spell: 0,
@@ -466,6 +504,7 @@ impl Default for Run {
             coop_damage: Vec::new(),
             coop_run: false,
             coop_unavailable: Default::default(),
+            coop_living: 1,
             horde_spawn_slots: None,
             buffs: Vec::new(),
             passives: spell_passives::State::default(),
@@ -474,6 +513,16 @@ impl Default for Run {
 }
 
 impl Run {
+    /// Native online scaling `1 + (living - 1) * chapter * coefficient`; the patched
+    /// chapter lookup (0x9dc2c70) gives 0.7 below chapter three. Co-op is Elwynn only.
+    /// Coefficients: 0.48 density and pickup shares, 0.72 ordinary health
+    /// (0x5c00785), 1.04 boss and lair health (0x5c134be, 0x5c6798a).
+    pub fn party_factor(&self, coefficient: f32) -> f32 {
+        if !self.coop_run {
+            return 1.0;
+        }
+        1.0 + self.coop_living.saturating_sub(1) as f32 * 0.7 * coefficient
+    }
     /// Ordinary healing cannot bring back a fallen hero, including on the lethal frame.
     pub fn heal(&mut self, amount: f32) {
         if self.dead_t.is_none() && self.hp > 0.0 {
@@ -499,6 +548,10 @@ impl Run {
                 .as_ref()
                 .map_or(0, |a| amulets::AMULETS[a.index].targets),
         };
+        s.max_hp += self.gear[0];
+        s.might += self.gear[1];
+        s.haste += self.gear[2];
+        s.crit += self.gear[3];
         // Tanky classes start tougher, cloth starts quicker.
         match self.class.id {
             1 | 2 => s.max_hp += 40.0,

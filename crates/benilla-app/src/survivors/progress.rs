@@ -70,13 +70,17 @@ impl Progress {
         self.records.get(&format!("{class}:{zone}")).map_or_else(
             || "No completed runs yet".into(),
             |r| {
+                let secs = r.best_seconds.max(0.) as u32;
                 format!(
-                    "{} runs | {} victories ({} co-op) | Best: {} kills, {:.0} minutes",
+                    "{} {}  ·  {} {} ({} co-op)  ·  Best {} kills in {}:{:02}",
                     r.runs,
+                    if r.runs == 1 { "run" } else { "runs" },
                     r.wins,
+                    if r.wins == 1 { "victory" } else { "victories" },
                     r.coop_wins,
                     r.best_kills,
-                    r.best_seconds / 60.
+                    secs / 60,
+                    secs % 60
                 )
             },
         )

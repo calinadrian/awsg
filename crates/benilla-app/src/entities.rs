@@ -38,6 +38,8 @@ use carried_light::spawn_carried_lights;
 
 /// Equipment from the descriptor and `ItemDisplayInfo`: armour, held items, helm and shoulders.
 mod equipment;
+#[cfg(not(target_os = "macos"))]
+pub(crate) mod survivors_outfit;
 use equipment::{attach_held_items, resolve_corpse_equipment, resolve_equipment};
 
 /// Item and enchant glows, hung on the item's own attachment points.
@@ -237,6 +239,10 @@ pub(crate) struct Creatures {
 }
 
 impl Creatures {
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn survivors_appearance(&self, display: u32) -> Option<&benilla_formats::NpcAppearance> {
+        self.models.get(&display)?.npc_appearance.as_ref()
+    }
     /// A display's foley material (`Material.dbc` id), the creature half of the footfall rustle.
     pub(crate) fn foley_material(&self, display_id: u32) -> Option<u32> {
         self.catalog.foley_material(display_id)

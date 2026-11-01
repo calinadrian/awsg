@@ -1,5 +1,5 @@
 //! Escape-menu settings, backed by the same saved CVars as the engine controls.
-use super::{hud::HudFont, Phase};
+use super::{front_end as skin, hud::HudFont, Phase};
 use bevy::prelude::*;
 
 #[derive(Resource, Default)]
@@ -212,11 +212,11 @@ fn control(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label: &str, 
                 border_radius: BorderRadius::all(Val::Px(4.)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.17, 0.075, 0.04)),
-            BorderColor::all(Color::srgb(0.5, 0.37, 0.17)),
+            BackgroundColor(skin::SURFACE),
+            BorderColor::all(skin::EDGE),
         ))
         .with_children(|b| {
-            b.spawn(text(font, label, 18., Color::srgb(1., 0.88, 0.62)));
+            b.spawn(text(font, label, 16., skin::GOLD));
         });
 }
 
@@ -244,22 +244,17 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
             GlobalZIndex(450),
         ))
         .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: Val::Percent(90.),
-                    max_width: Val::Px(650.),
-                    padding: UiRect::all(Val::Px(24.)),
-                    row_gap: Val::Px(12.),
-                    flex_direction: FlexDirection::Column,
-                    border: UiRect::all(Val::Px(2.)),
-                    border_radius: BorderRadius::all(Val::Px(8.)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.055, 0.045, 0.035)),
-                BorderColor::all(Color::srgb(0.6, 0.45, 0.2)),
-            ))
+            root.spawn(skin::panel(Node {
+                width: Val::Percent(90.),
+                max_width: Val::Px(600.),
+                max_height: Val::Percent(92.),
+                padding: UiRect::all(Val::Px(26.)),
+                row_gap: Val::Px(10.),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            }))
             .with_children(|panel| {
-                panel.spawn(text(f, "Settings", 30., Color::srgb(1., 0.82, 0.25)));
+                panel.spawn(text(f, "SETTINGS", 28., skin::GOLD));
                 panel
                     .spawn(Node {
                         column_gap: Val::Px(10.),
@@ -270,6 +265,7 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                         control(tabs, f, "Graphics", Action::Graphics);
                         control(tabs, f, "Sound", Action::Audio);
                     });
+                skin::rule(panel);
                 for (i, setting) in SETTINGS.iter().enumerate() {
                     panel
                         .spawn((
@@ -287,7 +283,7 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                                     flex_grow: 1.,
                                     ..default()
                                 },
-                                text(f, setting.label, 18., Color::srgb(0.9, 0.87, 0.8)),
+                                text(f, setting.label, 16., skin::TEXT),
                             ));
                             control(row, f, "−", Action::Adjust(i, -1));
                             row.spawn((
@@ -297,18 +293,29 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                                     justify_content: JustifyContent::Center,
                                     ..default()
                                 },
-                                text(f, "", 18., Color::WHITE),
+                                text(f, "", 16., skin::GOLD),
+                                TextLayout::new(Justify::Center, LineBreak::NoWrap),
                             ));
                             control(row, f, "+", Action::Adjust(i, 1));
                         });
                 }
-                panel.spawn(text(
-                    f,
-                    "Changes apply immediately and are saved automatically.",
-                    14.,
-                    Color::srgb(0.7, 0.67, 0.6),
-                ));
-                control(panel, f, "Back", Action::Back);
+                skin::rule(panel);
+                panel
+                    .spawn(Node {
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
+                        column_gap: Val::Px(12.),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        row.spawn(text(
+                            f,
+                            "Changes apply immediately and are saved automatically.",
+                            12.,
+                            skin::MUTED,
+                        ));
+                        control(row, f, "Back", Action::Back);
+                    });
             });
         });
 }
@@ -325,9 +332,9 @@ fn clicks(
     }
     for (interaction, action, mut bg) in &mut buttons {
         bg.0 = if *interaction == Interaction::None {
-            Color::srgb(0.17, 0.075, 0.04)
+            skin::SURFACE
         } else {
-            Color::srgb(0.32, 0.16, 0.065)
+            Color::srgb(0.15, 0.12, 0.075)
         };
         if *interaction != Interaction::Pressed {
             continue;
@@ -364,7 +371,19 @@ fn paint(
     mut roots: Query<&mut Node, (With<Root>, Without<Row>)>,
     mut rows: Query<(&Row, &mut Node), Without<Root>>,
     mut labels: Query<(&ValueLabel, &mut Text)>,
+    mut tabs: Query<(&Action, &mut BorderColor)>,
 ) {
+    for (action, mut border) in &mut tabs {
+        let on = match action {
+            Action::Graphics => !options.audio,
+            Action::Audio => options.audio,
+            _ => false,
+        };
+        let want = BorderColor::all(if on { skin::GOLD } else { skin::EDGE });
+        if *border != want {
+            *border = want;
+        }
+    }
     for mut node in &mut roots {
         node.display = if options.settings {
             Display::Flex

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 const DEFAULT_SERVER: &str = "ws://hassian.duckdns.org:47771";
+pub(super) const REVIVE_SECONDS: f32 = 3.0;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(super) struct Pose {
@@ -27,29 +28,62 @@ pub(super) struct Pose {
     pub paused: bool,
     #[serde(default)]
     pub revival: u32,
+    #[serde(default)]
+    pub outfit: Vec<asr_coop::economy::LookItem>,
 }
 
+// Snapshot rows are the bulk of host traffic: short keys, omitted defaults and
+// rounded floats keep a 100-enemy snapshot near half its verbose size.
 #[derive(Clone, Serialize, Deserialize)]
 struct Foe {
+    #[serde(rename = "i")]
     id: u64,
+    #[serde(rename = "g", default, skip_serializing_if = "is_zero")]
     group: u8,
+    #[serde(rename = "n")]
     index: usize,
+    #[serde(rename = "p")]
     pos: [f32; 3],
+    #[serde(rename = "y")]
     yaw: f32,
+    #[serde(rename = "h")]
     hp: f32,
+    #[serde(rename = "m")]
     maximum: f32,
+    /// Zero while standing.
+    #[serde(rename = "s", default, skip_serializing_if = "is_zero_f32")]
     speed: f32,
-    moving: bool,
+    #[serde(rename = "d", default, skip_serializing_if = "is_false")]
     dead: bool,
-    #[serde(default)]
+    #[serde(rename = "l", default, skip_serializing_if = "is_false")]
     lair: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Pickup {
+    #[serde(rename = "i")]
     id: u64,
+    #[serde(rename = "p")]
     pos: [f32; 3],
+    #[serde(rename = "k", default, skip_serializing_if = "is_zero")]
     kind: u8,
+    #[serde(rename = "a")]
     amount: f32,
+}
+fn is_zero(v: &u8) -> bool {
+    *v == 0
+}
+fn is_zero_f32(v: &f32) -> bool {
+    *v == 0.
+}
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+/// Rounds to `1 / per_unit`; dividing last keeps the shortest decimal form.
+fn round_to(v: f32, per_unit: f32) -> f32 {
+    (v * per_unit).round() / per_unit
+}
+fn round_pos(p: Vec3) -> [f32; 3] {
+    [round_to(p.x, 100.), round_to(p.y, 100.), round_to(p.z, 100.)]
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Visual {
@@ -78,11 +112,21 @@ enum Packet {
         pose: Pose,
         hits: Vec<Blow>,
         visuals: Vec<Visual>,
+        /// Guest packet counter; the host echoes the last one it applied.
+        #[serde(default)]
+        seq: u32,
     },
     World {
         foes: Vec<Foe>,
         pickups: Vec<Pickup>,
         players: Vec<Pose>,
+        #[serde(default)]
+        revive_progress: HashMap<u32, f32>,
+        #[serde(default)]
+        equipment_kills: [u32; 3],
+        /// Each guest's last applied `seq`, so guests can drop acknowledged hits.
+        #[serde(default)]
+        acks: HashMap<u32, u32>,
         elapsed: f32,
         kills: u32,
         bosses: u32,
@@ -104,10 +148,69 @@ pub(super) struct Replica(pub u64);
 #[derive(Component)]
 pub(super) struct Ally(pub u32);
 
+/// Host snapshots and guest poses are sent at these intervals (seconds).
+const HOST_TICK: f32 = 1. / 15.;
+const GUEST_TICK: f32 = 1. / 20.;
+/// Past the newest snapshot, keep moving along its velocity for this long.
+const MAX_EXTRAPOLATION: f32 = 0.15;
+
+/// Snapshot interpolation. Each snapshot starts a glide from where the replica is drawn
+/// to the reported position, lasting one measured packet interval, so motion stays
+/// continuous instead of lurching toward each update and then standing still.
 #[derive(Component)]
-struct ReplicaPose {
-    pos: Vec3,
-    yaw: f32,
+pub(super) struct ReplicaPose {
+    from: Vec3,
+    to: Vec3,
+    velocity: Vec3,
+    yaw: Option<f32>,
+    age: f32,
+    span: f32,
+}
+
+impl ReplicaPose {
+    fn new(pos: Vec3, yaw: Option<f32>, span: f32) -> Self {
+        Self {
+            from: pos,
+            to: pos,
+            velocity: Vec3::ZERO,
+            yaw,
+            age: 0.,
+            span,
+        }
+    }
+    fn sample(&self) -> Vec3 {
+        if self.age < self.span {
+            self.from.lerp(self.to, self.age / self.span)
+        } else {
+            self.to + self.velocity * (self.age - self.span).min(MAX_EXTRAPOLATION)
+        }
+    }
+    fn push(&mut self, pos: Vec3, yaw: Option<f32>) {
+        // Smooth the measured interval so TCP clumping cannot make a glide jump.
+        let current = self.sample();
+        let observed = self.age.clamp(0.03, 0.3);
+        self.span += (observed - self.span) * 0.2;
+        if current.distance_squared(pos) > 400. {
+            // Teleports, respawns and stray relocations snap.
+            *self = Self::new(pos, yaw, self.span);
+            return;
+        }
+        self.velocity = ((pos - self.to) / observed).clamp_length_max(30.);
+        self.from = current;
+        self.to = pos;
+        self.yaw = yaw;
+        self.age = 0.;
+    }
+    /// Planar speed being drawn, for run animations.
+    fn speed(&self) -> f32 {
+        if self.age < self.span {
+            units::flat(self.to - self.from).length() / self.span.max(0.03)
+        } else if self.age < self.span + MAX_EXTRAPOLATION {
+            units::flat(self.velocity).length()
+        } else {
+            0.
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -136,10 +239,16 @@ pub(super) struct Coop {
     caches: Vec<[f32; 3]>,
     seen_caches: usize,
     tick: f32,
+    list_t: f32,
+    /// Guest: packets sent, and hits the host has not applied yet as (seq, target, damage).
+    seq: u32,
+    unacked: std::collections::VecDeque<(u32, u64, f32)>,
+    /// Host: each guest's last applied packet.
+    acks: HashMap<u32, u32>,
     remote_paused: bool,
     since_host: f32,
     revival: u32,
-    revive_progress: HashMap<u32, f32>,
+    pub(super) revive_progress: HashMap<u32, f32>,
 }
 
 impl Default for Coop {
@@ -182,6 +291,10 @@ impl Default for Coop {
             caches: Vec::new(),
             seen_caches: 0,
             tick: 0.,
+            list_t: 0.,
+            seq: 0,
+            unacked: Default::default(),
+            acks: HashMap::new(),
             remote_paused: true,
             since_host: 0.,
             revival: 0,
@@ -248,6 +361,7 @@ impl Coop {
                 race,
                 sex,
                 display,
+                features: selection.current_features(),
             },
             ready: false,
         })
@@ -283,6 +397,9 @@ impl Coop {
             data::Effect::Weaken(m, t) => (5, m, t),
             _ => (0, 0., 0.),
         };
+        if self.unacked.len() < 4096 {
+            self.unacked.push_back((self.seq + 1, target, damage.max(0.)));
+        }
         self.outgoing.push(Blow {
             target,
             damage: damage.max(0.),
@@ -351,6 +468,7 @@ pub(super) fn plugin(app: &mut App) {
                 play_visuals,
                 capture_visuals,
                 transmit,
+                super::resurrection_ui::refresh,
             )
                 .chain(),
         );
@@ -360,6 +478,7 @@ fn resurrect(run: &mut Run) {
     run.dead_t = None;
     run.hp = (run.stats().max_hp * 0.5).max(1.0);
     run.heal_t = 0.0;
+    run.immune_t = run.immune_t.max(2.0);
     run.banner = Some(("Resurrected by a teammate".into(), 3.0));
 }
 
@@ -423,7 +542,7 @@ pub(super) fn revive_teammates(
         }
         let progress = coop.revive_progress.entry(peer).or_default();
         *progress += time.delta_secs();
-        if *progress < 3.0 {
+        if *progress < REVIVE_SECONDS {
             continue;
         }
         coop.revive_progress.remove(&peer);
@@ -506,9 +625,13 @@ fn receive(
         &mut Transform,
         &mut ObjectStore,
         &mut crate::creature_anim::MovementState,
+        Option<&mut ReplicaPose>,
     )>,
     mut lairs: ResMut<super::guardians::Lairs>,
-    mut pickups: Query<(Entity, &PickupReplica, &mut Transform), Without<Replica>>,
+    mut pickups: Query<
+        (Entity, &PickupReplica, &mut Transform, Option<&mut ReplicaPose>),
+        Without<Replica>,
+    >,
     emitters: Query<(Entity, &benilla_world::particles::ParticleEmitter)>,
     mut telegraphs: ResMut<super::telegraphs::Telegraphs>,
 ) {
@@ -517,6 +640,7 @@ fn receive(
     }
     for event in events(&coop) {
         match event {
+            Ok(Server::Economy { .. }) => {}
             Err(reason) => {
                 coop.connected = false;
                 coop.connecting = false;
@@ -596,6 +720,9 @@ fn receive(
                 coop.seen_caches = 0;
                 coop.incoming.clear();
                 coop.outgoing.clear();
+                coop.seq = 0;
+                coop.unacked.clear();
+                coop.acks.clear();
                 coop.players.clear();
                 coop.visuals.clear();
                 coop.replay.clear();
@@ -622,6 +749,7 @@ fn receive(
                         mut pose,
                         hits,
                         visuals,
+                        seq,
                     } if coop.peer == 0 && peer != 0 => {
                         if !coop
                             .room
@@ -634,6 +762,8 @@ fn receive(
                             || !pose.yaw.is_finite()
                             || !pose.hp.is_finite()
                             || !pose.maximum.is_finite()
+                            || pose.outfit.len() > 19
+                            || pose.outfit.iter().any(|i| i.display > 2_000_000 || i.slot.len() > 32 || i.category.len() > 32)
                         {
                             continue;
                         }
@@ -659,7 +789,12 @@ fn receive(
                             coop.visuals.push(visual.clone());
                             coop.replay.push(visual);
                         }
-                        if pose.hp > 0. && pose.loaded && !pose.paused {
+                        coop.acks.insert(peer, seq);
+                        if pose.hp > 0. && pose.loaded && !pose.paused && !hits.is_empty() {
+                            let reach: HashMap<_, _> = foes
+                                .iter()
+                                .map(|(_, id, _, tf, ..)| (id.0, tf.translation))
+                                .collect();
                             for h in hits.into_iter().take(2048) {
                                 if h.damage.is_finite()
                                     && (0. ..=1_000_000.).contains(&h.damage)
@@ -667,13 +802,9 @@ fn receive(
                                     && h.strength.is_finite()
                                 {
                                     // Guests cannot hit arbitrary entities or enemies across the arena.
-                                    if foes.iter().any(|(_, id, _, tf, ..)| {
-                                        id.0 == h.target
-                                            && units::flat(
-                                                tf.translation - Vec3::from_array(pose.pos),
-                                            )
-                                            .length()
-                                                <= 70.
+                                    if reach.get(&h.target).is_some_and(|at| {
+                                        units::flat(*at - Vec3::from_array(pose.pos)).length()
+                                            <= 70.
                                     }) {
                                         coop.incoming.push(h);
                                     }
@@ -685,6 +816,9 @@ fn receive(
                         foes: state,
                         pickups: loot,
                         players,
+                        revive_progress,
+                        equipment_kills,
+                        acks,
                         elapsed,
                         kills,
                         bosses,
@@ -701,6 +835,14 @@ fn receive(
                     } if coop.guest() && peer == 0 => {
                         coop.since_host = 0.;
                         coop.remote_paused = paused;
+                        let applied = acks.get(&coop.peer).copied().unwrap_or(0);
+                        coop.unacked.retain(|(seq, ..)| *seq > applied);
+                        let mut predicted: HashMap<u64, f32> = HashMap::new();
+                        for (_, target, damage) in &coop.unacked {
+                            *predicted.entry(*target).or_default() += damage;
+                        }
+                        coop.revive_progress = revive_progress;
+                        run.equipment_kills = equipment_kills;
                         telegraphs.restore(warnings);
                         let me = coop.peer;
                         coop.replay.extend(
@@ -726,11 +868,15 @@ fn receive(
                         coop.gold = gold;
                         if run.dead_t.is_none() {
                             if add_xp > 0 {
-                                run.xp += (add_xp as f32 * run.stats().growth).round().max(1.);
+                                run.xp += (add_xp as f32 * run.stats().growth
+                                    / run.party_factor(0.48))
+                                    .round()
+                                    .max(1.);
                             }
                             run.gold = run.gold.saturating_add(super::gold::collected(
                                 add_gold.min(u64::from(u32::MAX)) as u32,
                                 run.jewel_stat(13),
+                                run.party_factor(0.48),
                             ));
                             while run.level < data::MAX_LEVEL
                                 && run.xp >= data::xp_to_next(run.level)
@@ -761,12 +907,12 @@ fn receive(
                         if !entry.0 && !loading.covering() {
                             let pickup_entities: HashMap<_, _> = pickups
                                 .iter()
-                                .map(|(entity, id, _)| (id.0, entity))
+                                .map(|(entity, id, ..)| (id.0, entity))
                                 .collect();
                             let foe_entities: HashMap<_, _> =
                                 foes.iter().map(|(entity, id, ..)| (id.0, entity)).collect();
                             let present: HashSet<_> = loot.iter().map(|p| p.id).collect();
-                            for (entity, id, _) in &pickups {
+                            for (entity, id, ..) in &pickups {
                                 if !present.contains(&id.0) {
                                     for (emitter_entity, emitter) in &emitters {
                                         if emitter.emit_host() == Some(entity)
@@ -779,15 +925,28 @@ fn receive(
                                 }
                             }
                             for p in loot {
-                                if let Some((_, _, mut tf)) = pickup_entities
+                                if let Some((entity, _, mut tf, pose)) = pickup_entities
                                     .get(&p.id)
                                     .and_then(|entity| pickups.get_mut(*entity).ok())
                                 {
-                                    tf.translation = Vec3::from_array(p.pos);
+                                    match pose {
+                                        Some(mut pose) => {
+                                            pose.push(Vec3::from_array(p.pos), None)
+                                        }
+                                        None => {
+                                            tf.translation = Vec3::from_array(p.pos);
+                                            commands.entity(entity).insert(ReplicaPose::new(
+                                                tf.translation,
+                                                None,
+                                                HOST_TICK,
+                                            ));
+                                        }
+                                    }
                                 } else {
                                     let kind = match p.kind {
                                         1 => enemies::GemKind::Gold(p.amount as u32),
                                         2 => enemies::GemKind::Heal(p.amount),
+                                        3 => enemies::GemKind::Magnet,
                                         _ => enemies::GemKind::Xp(p.amount as u32),
                                     };
                                     let serial = run.guid();
@@ -814,15 +973,32 @@ fn receive(
                                 }
                             }
                             for f in state {
-                                if let Some((_, _, mut e, _tf, mut store, mut mv)) = foe_entities
-                                    .get(&f.id)
-                                    .and_then(|entity| foes.get_mut(*entity).ok())
+                                let moving = f.speed > 0.;
+                                if let Some((entity, _, mut e, _tf, mut store, mut mv, pose)) =
+                                    foe_entities
+                                        .get(&f.id)
+                                        .and_then(|entity| foes.get_mut(*entity).ok())
                                 {
-                                    commands.entity(foe_entities[&f.id]).insert(ReplicaPose {
-                                        pos: Vec3::from_array(f.pos),
-                                        yaw: f.yaw,
-                                    });
-                                    e.hp = f.hp;
+                                    match pose {
+                                        Some(mut pose) => {
+                                            pose.push(Vec3::from_array(f.pos), Some(f.yaw))
+                                        }
+                                        None => {
+                                            commands.entity(entity).insert(ReplicaPose::new(
+                                                Vec3::from_array(f.pos),
+                                                Some(f.yaw),
+                                                HOST_TICK,
+                                            ));
+                                        }
+                                    }
+                                    // Keep this guest's hits the host has not applied yet,
+                                    // instead of letting each snapshot undo them.
+                                    e.hp = if f.dead {
+                                        f.hp
+                                    } else {
+                                        (f.hp - predicted.get(&f.id).copied().unwrap_or(0.))
+                                            .max(0.001)
+                                    };
                                     e.max_hp = f.maximum;
                                     if f.lair {
                                         e.home = Some(enemies::Home {
@@ -830,8 +1006,8 @@ fn receive(
                                             awake: true,
                                         });
                                     }
-                                    mv.speed = if f.moving { f.speed } else { 0. };
-                                    mv.flags = if f.moving {
+                                    mv.speed = f.speed;
+                                    mv.flags = if moving {
                                         crate::creature_anim::move_flags::FORWARD
                                     } else {
                                         0
@@ -857,7 +1033,14 @@ fn receive(
                                         Vec3::ZERO,
                                         f.group == 1,
                                     );
-                                    commands.entity(entity).insert(Replica(f.id));
+                                    commands.entity(entity).insert((
+                                        Replica(f.id),
+                                        ReplicaPose::new(
+                                            Vec3::from_array(f.pos),
+                                            Some(f.yaw),
+                                            HOST_TICK,
+                                        ),
+                                    ));
                                     commands.queue(move |world: &mut World| {
                                         if let Some(mut e) = world.get_mut::<Enemy>(entity) {
                                             e.hp = f.hp;
@@ -884,6 +1067,15 @@ fn receive(
         }
     }
     run.coop_unavailable.clear();
+    run.coop_living = if coop.running {
+        coop.players
+            .values()
+            .filter(|p| p.loaded && p.hp > 0.)
+            .count()
+            .max(1)
+    } else {
+        1
+    };
     if coop.running {
         let choosing = matches!(phase.get(), Phase::LevelUp | Phase::Paused);
         let own = coop.peer;
@@ -944,13 +1136,12 @@ fn sync_allies(
     mut allies: Query<(
         Entity,
         &Ally,
-        &mut Transform,
         &mut ObjectStore,
         &mut crate::creature_anim::MovementState,
+        &mut ReplicaPose,
     )>,
     mut fields: MessageWriter<FieldChanged>,
     guids: Query<&Guid>,
-    time: Res<Time<Real>>,
 ) {
     let wanted: HashSet<_> = if coop.running {
         coop.players
@@ -962,23 +1153,24 @@ fn sync_allies(
         HashSet::new()
     };
     let existing: HashSet<_> = allies.iter().map(|(_, a, ..)| a.0).collect();
-    for (entity, ally, mut tf, mut store, mut mv) in &mut allies {
+    let span = if coop.guest() { HOST_TICK } else { GUEST_TICK };
+    for (entity, ally, mut store, mut mv, mut glide) in &mut allies {
         if !wanted.contains(&ally.0) {
             commands.entity(entity).despawn();
             continue;
         }
         if let Some(p) = coop.players.get(&ally.0).filter(|p| p.loaded) {
+            // A pose is pushed only when it changes, so a guest relayed through the
+            // host at a different rate than its own sends still glides evenly.
             let pos = Vec3::from_array(p.pos);
-            let delta = units::flat(pos - tf.translation).length();
-            let blend = 1. - (-18. * time.delta_secs()).exp();
-            tf.translation = if delta > 20. {
-                pos
-            } else {
-                tf.translation.lerp(pos, blend)
-            };
-            tf.rotation = tf.rotation.slerp(Quat::from_rotation_y(p.yaw), blend);
-            mv.speed = if delta > 0.01 { 7. } else { 0. };
-            mv.flags = if delta > 0.01 {
+            if pos != glide.to || glide.yaw != Some(p.yaw) {
+                glide.push(pos, Some(p.yaw));
+            }
+            // Animate at the speed actually drawn; standing below a slow walk.
+            let speed = glide.speed();
+            let moving = speed > 0.5 && p.hp > 0.;
+            mv.speed = if moving { speed.min(14.) } else { 0. };
+            mv.flags = if moving {
                 crate::creature_anim::move_flags::FORWARD
             } else {
                 0
@@ -1033,25 +1225,25 @@ fn sync_allies(
                 serial,
                 Vec3::from_array(pose.pos),
             );
-            commands
-                .entity(e)
-                .remove::<Hero>()
-                .insert(Ally(member.peer));
+            commands.entity(e).remove::<Hero>().insert((
+                Ally(member.peer),
+                ReplicaPose::new(Vec3::from_array(pose.pos), Some(pose.yaw), span),
+            ));
         }
     }
 }
 
-fn smooth_replicas(time: Res<Time<Real>>, mut units: Query<(&ReplicaPose, &mut Transform)>) {
-    let blend = 1. - (-18. * time.delta_secs()).exp();
-    for (pose, mut transform) in &mut units {
-        transform.translation = if transform.translation.distance_squared(pose.pos) > 400. {
-            pose.pos
-        } else {
-            transform.translation.lerp(pose.pos, blend)
-        };
-        transform.rotation = transform
-            .rotation
-            .slerp(Quat::from_rotation_y(pose.yaw), blend);
+fn smooth_replicas(time: Res<Time<Real>>, mut units: Query<(&mut ReplicaPose, &mut Transform)>) {
+    let dt = time.delta_secs();
+    let blend = 1. - (-15. * dt).exp();
+    for (mut pose, mut transform) in &mut units {
+        pose.age += dt;
+        transform.translation = pose.sample();
+        if let Some(yaw) = pose.yaw {
+            transform.rotation = transform
+                .rotation
+                .slerp(Quat::from_rotation_y(yaw), blend);
+        }
     }
 }
 
@@ -1071,22 +1263,33 @@ fn transmit(
         &Transform,
         &Enemy,
         &crate::creature_anim::MovementState,
+        Has<Replica>,
     )>,
     lairs: Res<super::guardians::Lairs>,
     pickups: Query<(&Guid, &Transform, &enemies::Gem, &Visibility)>,
     telegraphs: Res<super::telegraphs::Telegraphs>,
 ) {
-    coop.tick += real.delta_secs();
-    if coop.tick < 0.1 && !phase.is_changed() {
-        return;
-    }
-    coop.tick = 0.;
+    let dt = real.delta_secs();
     if !coop.running {
-        if coop.connected {
-            coop.send(Client::List);
+        // Browsing refreshes the room list once a second.
+        coop.list_t += dt;
+        if coop.list_t >= 1. || phase.is_changed() {
+            coop.list_t = 0.;
+            if coop.connected {
+                coop.send(Client::List);
+            }
         }
+        coop.tick = 0.;
         return;
     }
+    // Carry the remainder so packets leave at an even rate rather than drifting with
+    // the frame time; never bank more than one extra packet after a stall.
+    let period = if coop.guest() { GUEST_TICK } else { HOST_TICK };
+    coop.tick += dt;
+    if coop.tick < period && !phase.is_changed() {
+        return;
+    }
+    coop.tick = (coop.tick - period).clamp(0., period);
     let Ok(tf) = heroes.single() else { return };
     let pose = Pose {
         peer: coop.peer,
@@ -1098,21 +1301,24 @@ fn transmit(
         loaded: !entry.0 && !loading.covering() && *phase.get() != Phase::Menu,
         paused: matches!(phase.get(), Phase::LevelUp | Phase::Paused),
         revival: coop.revival,
+        outfit: run.gear_look.clone(),
     };
     let own_peer = coop.peer;
     coop.players.insert(own_peer, pose.clone());
     let packet = if coop.guest() {
         let hits = std::mem::take(&mut coop.outgoing);
         let visuals = std::mem::take(&mut coop.visuals);
+        coop.seq += 1;
         Packet::Player {
             pose,
             hits,
             visuals,
+            seq: coop.seq,
         }
     } else {
         let roster = data::roster(selection.stage);
         let mut state = Vec::new();
-        for (entity, guid, tf, e, mv) in &foes {
+        for (entity, guid, tf, e, mv, replica) in &foes {
             let definition = [&roster.enemies, &roster.bosses, &roster.guardians]
                 .iter()
                 .enumerate()
@@ -1124,17 +1330,18 @@ fn transmit(
             let Some((group, index)) = definition else {
                 continue;
             };
-            commands.entity(entity).insert(Replica(guid.0));
+            if !replica {
+                commands.entity(entity).insert(Replica(guid.0));
+            }
             state.push(Foe {
                 id: guid.0,
                 group,
                 index,
-                pos: tf.translation.to_array(),
-                yaw: tf.rotation.to_euler(EulerRot::YXZ).0,
-                hp: e.hp,
-                maximum: e.max_hp,
-                speed: e.speed,
-                moving: mv.speed > 0.,
+                pos: round_pos(tf.translation),
+                yaw: round_to(tf.rotation.to_euler(EulerRot::YXZ).0, 100.),
+                hp: round_to(e.hp, 10.).max(if e.dead { 0. } else { 0.1 }),
+                maximum: round_to(e.max_hp, 10.),
+                speed: if mv.speed > 0. { round_to(e.speed, 100.) } else { 0. },
                 dead: e.dead,
                 lair: e.home.is_some(),
             });
@@ -1152,10 +1359,11 @@ fn transmit(
                     enemies::GemKind::Xp(n) => (0, n as f32),
                     enemies::GemKind::Gold(n) => (1, n as f32),
                     enemies::GemKind::Heal(n) => (2, n),
+                    enemies::GemKind::Magnet => (3, 0.),
                 };
                 Pickup {
                     id: id.0,
-                    pos: tf.translation.to_array(),
+                    pos: round_pos(tf.translation),
                     kind,
                     amount,
                 }
@@ -1165,6 +1373,9 @@ fn transmit(
             foes: state,
             pickups,
             players: coop.players.values().cloned().collect(),
+            revive_progress: coop.revive_progress.clone(),
+            equipment_kills: run.equipment_kills,
+            acks: coop.acks.clone(),
             elapsed: run.elapsed,
             kills: run.kills,
             bosses: run.bosses,
@@ -1318,10 +1529,62 @@ pub(super) fn apply_guest_hits(
                     0.0
                 },
                 roaming_elite: enemy.home.is_none() && super::elwynn::is_roaming_elite(enemy.def),
+                elite: enemy.home.is_some() || super::elwynn::is_roaming_elite(enemy.def),
             });
             units::kill_unit(&mut store);
             marks.clear();
             marks.flush(entity, guid.0, &mut store, &mut fields);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glides_continuously_between_snapshots() {
+        let mut pose = ReplicaPose::new(Vec3::ZERO, None, 0.1);
+        pose.age = 0.1;
+        pose.push(Vec3::X, None);
+        assert_eq!(pose.sample(), Vec3::ZERO);
+        pose.age = 0.05;
+        assert!((pose.sample().x - 0.5).abs() < 1e-4);
+        // A late snapshot keeps moving along the last velocity, then holds.
+        pose.age = 0.15;
+        assert!((pose.sample().x - 1.5).abs() < 1e-3);
+        pose.age = 5.;
+        assert!((pose.sample().x - 2.5).abs() < 1e-3);
+        // The next glide starts from where the replica is drawn.
+        pose.age = 0.12;
+        let drawn = pose.sample();
+        pose.push(Vec3::X * 2., None);
+        assert_eq!(pose.sample(), drawn);
+        // Teleports snap.
+        pose.push(Vec3::X * 100., None);
+        assert_eq!(pose.sample(), Vec3::X * 100.);
+    }
+
+    #[test]
+    fn compact_rows_round_trip_and_omit_defaults() {
+        let foe = Foe {
+            id: 7,
+            group: 0,
+            index: 3,
+            pos: round_pos(Vec3::new(-8943.1234, 12.3456, 0.004)),
+            yaw: 1.5,
+            hp: 10.,
+            maximum: 20.,
+            speed: 0.,
+            dead: false,
+            lair: false,
+        };
+        let text = serde_json::to_string(&foe).unwrap();
+        assert_eq!(
+            text,
+            r#"{"i":7,"n":3,"p":[-8943.12,12.35,0.0],"y":1.5,"h":10.0,"m":20.0}"#
+        );
+        let back: Foe = serde_json::from_str(&text).unwrap();
+        assert_eq!((back.group, back.speed, back.dead), (0, 0., false));
     }
 }

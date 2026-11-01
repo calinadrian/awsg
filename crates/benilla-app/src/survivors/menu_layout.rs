@@ -1,16 +1,28 @@
-//! Hero selection surrounds a live preview with two legible, bounded panels.
+//! Hero selection frames the live preview: a header with the account screens, the hero on the
+//! left, the adventure on the right, the pick's name plate under the hero and one action bar.
+//!
+//! Laid out on the 768-unit-tall canvas; every panel is bounded so 4:3 (1024 wide) still fits.
 use super::{
     data, front_end as skin,
     hud::{HudFont, MenuRoot},
     menu::{ClassSlot, MenuAction, MenuBuilt, PickDescription, PickName, RaceFace},
     menu_icons::icon_button,
-    races::{race_tc, RACES},
+    races::{RACES, race_tc},
 };
 use crate::glue::{
-    art::{class_tc, tc_rect, GlueArt},
+    art::{GlueArt, class_tc, tc_rect},
     widgets::{GlueDisabled, LockHighlight},
 };
 use bevy::prelude::*;
+
+/// Canvas edge to the side panels, and the gap between panels.
+const MARGIN: f32 = 20.;
+const HEADER: f32 = 64.;
+const HERO_WIDTH: f32 = 268.;
+const ADVENTURE_WIDTH: f32 = 282.;
+/// The panels' bottom edge, clear of the action bar and the key hint under it.
+const PANELS_BOTTOM: f32 = 110.;
+const BAR_BOTTOM: f32 = 34.;
 
 pub(super) fn build_menu(
     mut commands: Commands,
@@ -26,53 +38,48 @@ pub(super) fn build_menu(
     art.ensure_loaded(&mut assets, &mut images, &mut add_mats);
     let f = &font.0;
     commands.entity(root).insert(MenuBuilt).with_children(|ui| {
-        ui.spawn((
+        header(ui, f);
+        tower(ui, &art, f);
+        // The hero's looks over the adventure, in the right column.
+        super::features_ui::build(
+            ui,
+            f,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(0.),
-                width: Val::Percent(100.),
-                height: Val::Px(72.),
-                padding: UiRect::axes(Val::Px(26.), Val::Px(14.)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(3.),
+                right: Val::Px(MARGIN),
+                top: Val::Px(HEADER + 16.),
+                width: Val::Px(ADVENTURE_WIDTH),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.025, 0.023, 0.02, 0.83)),
-        ))
-        .with_children(|p| {
-            skin::label(p, f, "AZEROTH SURVIVORS", 25., skin::GOLD);
-            skin::label(
-                p,
-                f,
-                "Choose your hero. Begin your adventure.",
-                12.,
-                skin::MUTED,
-            );
-        });
-        tower(ui, &art, f);
+            heading,
+        );
         adventure(ui, f);
         ui.spawn(skin::panel(Node {
             position_type: PositionType::Absolute,
-            left: Val::Px(306.),
-            right: Val::Px(324.),
-            bottom: Val::Px(34.),
-            min_height: Val::Px(115.),
-            padding: UiRect::all(Val::Px(16.)),
+            left: Val::Px(MARGIN * 2. + HERO_WIDTH),
+            right: Val::Px(MARGIN * 2. + ADVENTURE_WIDTH),
+            bottom: Val::Px(PANELS_BOTTOM),
+            padding: UiRect::axes(Val::Px(18.), Val::Px(14.)),
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(7.),
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(5.),
             ..default()
         }))
         .with_children(|p| {
-            let title = skin::label(p, f, "", 25., skin::GOLD);
-            p.commands().entity(title).insert(PickName);
+            let centre = TextLayout::new_with_justify(Justify::Center);
+            let title = skin::label(p, f, "", 24., skin::GOLD);
+            p.commands().entity(title).insert((PickName, centre));
             let description = skin::label(p, f, "", 12., skin::TEXT);
-            p.commands().entity(description).insert(PickDescription);
+            p.commands()
+                .entity(description)
+                .insert((PickDescription, centre));
             skin::rule(p);
             let progress = skin::label(p, f, "", 11., skin::MUTED);
             p.commands()
                 .entity(progress)
-                .insert(super::talents::MenuProgress);
+                .insert((super::talents::MenuProgress, centre));
         });
+        action_bar(ui, f);
         ui.spawn(Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(12.),
@@ -84,78 +91,225 @@ pub(super) fn build_menu(
             skin::label(
                 p,
                 f,
-                "ENTER  Play solo     F6  Play with friends     ESC  Settings",
+                "ENTER  Play solo      F6  Co-op      ESC  Settings",
                 11.,
-                skin::TEXT,
+                skin::MUTED,
             );
         });
     });
 }
 
-fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
-    ui.spawn(skin::panel(Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(22.),
-        top: Val::Px(91.),
-        bottom: Val::Px(34.),
-        width: Val::Px(264.),
-        padding: UiRect::all(Val::Px(16.)),
-        flex_direction: FlexDirection::Column,
-        row_gap: Val::Px(6.),
-        ..default()
-    }))
-    .with_children(|p| {
-        skin::label(p, f, "YOUR HERO", 18., skin::GOLD);
-        skin::label(p, f, "RACE", 10., skin::MUTED);
-        p.spawn(Node {
+/// The title on the left; the screens that leave the pick on the right.
+fn header(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
+    ui.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.),
+            width: Val::Percent(100.),
+            height: Val::Px(HEADER),
+            padding: UiRect::horizontal(Val::Px(MARGIN + 4.)),
             flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(5.),
-            row_gap: Val::Px(5.),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            border: UiRect::bottom(Val::Px(1.)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.025, 0.023, 0.02, 0.86)),
+        BorderColor::all(skin::EDGE),
+    ))
+    .with_children(|p| {
+        p.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.),
             ..default()
         })
-        .with_children(|grid| {
-            for def in RACES {
-                let face = art.races.as_ref().and_then(|(sheet, size)| {
-                    race_tc(def.id, 0).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
-                });
-                icon_button(
-                    grid,
-                    f,
-                    MenuAction::Race(def.id),
-                    Some(RaceFace(def.id)),
-                    face,
-                    None::<()>,
-                    def.name,
-                    art,
-                    7.0 / 12.0,
-                );
-            }
+        .with_children(|p| {
+            skin::label(p, f, "AZEROTH SURVIVORS", 24., skin::GOLD);
+            skin::label(
+                p,
+                f,
+                "Choose your hero. Begin your adventure.",
+                11.,
+                skin::MUTED,
+            );
         });
         p.spawn(Node {
             flex_direction: FlexDirection::Row,
             column_gap: Val::Px(8.),
             ..default()
         })
+        .with_children(|p| {
+            skin::tab(p, f, "Inventory", super::inventory_ui::Action::Open(false));
+            skin::tab(
+                p,
+                f,
+                "Auction House",
+                super::inventory_ui::Action::Open(true),
+            );
+            skin::tab(p, f, "Settings", MenuAction::Settings);
+        });
+    });
+}
+
+/// A panel's title, centred between two rules; the same on every panel.
+fn heading(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: &str) {
+    p.spawn(Node {
+        width: Val::Percent(100.),
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(10.),
+        margin: UiRect::bottom(Val::Px(2.)),
+        ..default()
+    })
+    .with_children(|row| {
+        let line = || {
+            (
+                Node {
+                    flex_grow: 1.,
+                    height: Val::Px(1.),
+                    ..default()
+                },
+                BackgroundColor(skin::EDGE),
+            )
+        };
+        row.spawn(line());
+        skin::label(row, f, text, 16., skin::GOLD);
+        row.spawn(line());
+    });
+}
+
+/// A small centred caption over a group of controls.
+fn caption(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: &str, color: Color) {
+    let e = skin::label(p, f, text, 10., color);
+    p.commands().entity(e).insert((
+        Node {
+            width: Val::Percent(100.),
+            ..default()
+        },
+        TextLayout::new_with_justify(Justify::Center),
+    ));
+}
+
+const ALLIANCE: Color = Color::srgb(0.42, 0.62, 0.95);
+const HORDE: Color = Color::srgb(0.92, 0.36, 0.3);
+
+/// The race shown beside the gender buttons: the hovered one, else the picked one.
+#[derive(Component)]
+pub(super) struct RaceCaption;
+
+fn race_icons(grid: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>, faction: u8) {
+    for def in RACES.iter().filter(|r| r.faction == faction) {
+        let face = art.races.as_ref().and_then(|(sheet, size)| {
+            race_tc(def.id, 0).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
+        });
+        // The name shows in the [`RaceCaption`], not under the icon, where it would cover the
+        // next row.
+        icon_button(
+            grid,
+            f,
+            MenuAction::Race(def.id),
+            Some(RaceFace(def.id)),
+            face,
+            None::<()>,
+            "",
+            art,
+            26. / 48.,
+        );
+    }
+}
+
+fn race_grid(width: Val) -> Node {
+    Node {
+        width,
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::Wrap,
+        justify_content: JustifyContent::Center,
+        column_gap: Val::Px(4.),
+        row_gap: Val::Px(4.),
+        ..default()
+    }
+}
+
+fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
+    ui.spawn(skin::panel(Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(MARGIN),
+        top: Val::Px(HEADER + 16.),
+        bottom: Val::Px(PANELS_BOTTOM),
+        width: Val::Px(HERO_WIDTH),
+        padding: UiRect::all(Val::Px(16.)),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        row_gap: Val::Px(7.),
+        ..default()
+    }))
+    .with_children(|p| {
+        heading(p, f, "YOUR HERO");
+        // Alliance and Horde side by side, the races of neither under them.
+        p.spawn(Node {
+            width: Val::Percent(100.),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        })
+        .with_children(|sides| {
+            for (faction, name, color) in [(0, "ALLIANCE", ALLIANCE), (1, "HORDE", HORDE)] {
+                sides
+                    .spawn(Node {
+                        width: Val::Px(116.),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(5.),
+                        ..default()
+                    })
+                    .with_children(|col| {
+                        caption(col, f, name, color);
+                        let grid = race_grid(Val::Px(116.));
+                        col.spawn(grid)
+                            .with_children(|g| race_icons(g, art, f, faction));
+                    });
+            }
+        });
+        caption(p, f, "NEUTRAL", skin::MUTED);
+        let grid = race_grid(Val::Percent(100.));
+        p.spawn(grid).with_children(|g| race_icons(g, art, f, 2));
+        // The picked (or pointed-at) race, then the gender.
+        p.spawn(Node {
+            width: Val::Percent(100.),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.),
+            margin: UiRect::top(Val::Px(2.)),
+            ..default()
+        })
         .with_children(|row| {
-            for (sex, name) in [(0, "Male"), (1, "Female")] {
+            let name = skin::label(row, f, "", 15., skin::TEXT);
+            row.commands().entity(name).insert((
+                RaceCaption,
+                Node {
+                    flex_grow: 1.,
+                    ..default()
+                },
+            ));
+            for (sex, label) in [(0, "Male"), (1, "Female")] {
                 row.spawn(Node {
-                    width: Val::Percent(48.),
+                    width: Val::Px(72.),
                     ..default()
                 })
                 .with_children(|p| {
-                    let e = skin::button(p, f, name, "", MenuAction::Sex(sex), false, false, true);
+                    let e = skin::button(p, f, label, "", MenuAction::Sex(sex), false, false, true);
                     p.commands().entity(e).insert(LockHighlight::default());
                 });
             }
         });
-        skin::rule(p);
-        skin::label(p, f, "CLASS", 10., skin::MUTED);
+        heading(p, f, "CLASS");
         p.spawn(Node {
+            width: Val::Percent(100.),
             flex_direction: FlexDirection::Row,
             flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(8.),
-            row_gap: Val::Px(6.),
+            justify_content: JustifyContent::Center,
+            column_gap: Val::Px(6.),
+            row_gap: Val::Px(8.),
             ..default()
         })
         .with_children(|grid| {
@@ -163,7 +317,7 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                 grid.spawn((
                     ClassSlot(i),
                     Node {
-                        width: Val::Px(70.),
+                        width: Val::Px(74.),
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
                         row_gap: Val::Px(4.),
@@ -174,6 +328,7 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                     let face = art.classes.as_ref().and_then(|(sheet, size)| {
                         class_tc(class.id).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
                     });
+                    // Named by the label under it; no hover caption on top of that.
                     icon_button(
                         p,
                         f,
@@ -181,17 +336,17 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         None::<()>,
                         face,
                         None::<()>,
-                        class.name,
+                        "",
                         art,
-                        0.75,
+                        40. / 48.,
                     );
-                    skin::label(p, f, class.name, 10., skin::TEXT);
+                    skin::label(p, f, class.name, 11., super::hud::rgb(class.color));
                 });
             }
         });
         p.spawn(Node {
             flex_grow: 1.,
-            min_height: Val::Px(2.),
+            min_height: Val::Px(4.),
             ..default()
         });
         skin::button(
@@ -204,35 +359,225 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
             false,
             true,
         );
-        skin::button(p, f, "Talents", "", MenuAction::Talents, false, false, true);
     });
 }
 
+#[derive(Component)]
+pub(super) struct AdventureDetails;
+
+/// The detail line of the play button, naming the selected arena.
+#[derive(Component)]
+pub(super) struct PlayTarget;
+
 fn adventure(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
-    ui.spawn(skin::panel(Node { position_type: PositionType::Absolute, right: Val::Px(22.), top: Val::Px(91.), bottom: Val::Px(34.), width: Val::Px(282.), padding: UiRect::all(Val::Px(18.)), flex_direction: FlexDirection::Column, row_gap: Val::Px(7.), ..default() }))
+    ui.spawn(skin::panel(Node {
+        position_type: PositionType::Absolute,
+        right: Val::Px(MARGIN),
+        // Under the FEATURES panel.
+        top: Val::Px(HEADER + 16. + super::features_ui::HEIGHT + 12.),
+        bottom: Val::Px(PANELS_BOTTOM),
+        width: Val::Px(ADVENTURE_WIDTH),
+        padding: UiRect::all(Val::Px(16.)),
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(8.),
+        overflow: Overflow::clip_y(),
+        ..default()
+    }))
+    .with_children(|p| {
+        heading(p, f, "YOUR ADVENTURE");
+        skin::button(
+            p,
+            f,
+            "Story · Dungeons · Raids",
+            "The road so far",
+            super::adventure_atlas::Action::Open,
+            false,
+            false,
+            true,
+        );
+        for (i, map) in data::MAPS.iter().enumerate() {
+            let ready = super::dungeon::available(map);
+            // Selection and availability are painted by [`skin::hover`] from the [`skin::Control`].
+            p.spawn((
+                Button,
+                MenuAction::Map(i),
+                GlueDisabled(!ready),
+                skin::Control {
+                    primary: false,
+                    selected: false,
+                    enabled: ready,
+                },
+                Node {
+                    width: Val::Percent(100.),
+                    min_height: Val::Px(64.),
+                    padding: UiRect::axes(Val::Px(14.), Val::Px(10.)),
+                    border: UiRect::all(Val::Px(1.)),
+                    border_radius: BorderRadius::all(Val::Px(5.)),
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(3.),
+                    flex_shrink: 0.,
+                    ..default()
+                },
+                BackgroundColor(skin::SURFACE),
+                BorderColor::all(skin::EDGE),
+            ))
+            .with_children(|p| {
+                skin::label(
+                    p,
+                    f,
+                    map.name,
+                    20.,
+                    if ready { skin::GOLD } else { skin::MUTED },
+                );
+                skin::label(
+                    p,
+                    f,
+                    if ready {
+                        map.zone
+                    } else {
+                        "Dungeon pack required"
+                    },
+                    10.,
+                    skin::MUTED,
+                );
+            });
+        }
+        skin::rule(p);
+        let details = skin::label(p, f, "", 12., skin::TEXT);
+        p.commands().entity(details).insert(AdventureDetails);
+    });
+}
+
+/// Talents and Co-op flank the one primary action, centred under the preview.
+fn action_bar(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
+    ui.spawn(Node {
+        position_type: PositionType::Absolute,
+        bottom: Val::Px(BAR_BOTTOM),
+        width: Val::Percent(100.),
+        flex_direction: FlexDirection::Row,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Stretch,
+        column_gap: Val::Px(12.),
+        ..default()
+    })
+    .with_children(|bar| {
+        bar.spawn(Node {
+            width: Val::Px(200.),
+            ..default()
+        })
         .with_children(|p| {
-            skin::label(p,f,"YOUR ADVENTURE",12.,skin::MUTED);
-            for (i,map) in data::MAPS.iter().enumerate() {
-                p.spawn((Button,MenuAction::Map(i),LockHighlight::default(),Node { width: Val::Percent(100.), min_height: Val::Px(110.), padding: UiRect::all(Val::Px(14.)), border: UiRect::all(Val::Px(1.)), border_radius: BorderRadius::all(Val::Px(5.)), flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, row_gap: Val::Px(9.), ..default() },BackgroundColor(Color::srgb(0.10,0.125,0.085)),BorderColor::all(skin::EDGE)))
-                    .with_children(|p| {
-                        skin::label(p,f,map.zone,11.,skin::MUTED);
-                        skin::label(p,f,map.name,25.,skin::GOLD);
-                        skin::label(p,f,"NORMAL DIFFICULTY",10.,skin::TEXT);
-                    });
-                skin::label(p,f,"Hold your ground against the creatures of Elwynn. Defeat the final boss to claim victory.",12.,skin::TEXT);
-                skin::rule(p);
-                skin::label(p,f,"ENCOUNTERS",10.,skin::MUTED);
-                for boss in &data::roster(i).bosses {
-                    p.spawn(Node { flex_direction: FlexDirection::Row, justify_content: JustifyContent::SpaceBetween, column_gap: Val::Px(8.), ..default() }).with_children(|p| {
-                        skin::label(p,f,format!("{:02}:{:02}",(boss.from as u32)/60,(boss.from as u32)%60),11.,skin::GOLD);
-                        skin::label(p,f,boss.name,12.,skin::TEXT);
-                    });
-                }
-            }
-            p.spawn(Node { flex_grow: 1., min_height: Val::Px(8.), ..default() });
-            skin::label(p,f,"A new run. A stronger hero.",12.,skin::MUTED);
-            let solo=skin::button(p,f,"Play solo","Enter Elwynn Forest",MenuAction::Enter,true,false,true);
-            p.commands().entity(solo).insert(GlueDisabled(false));
-            skin::button(p,f,"Co-op","Host a game or join friends",super::coop_ui::OpenCoop,false,false,true);
+            skin::button(
+                p,
+                f,
+                "Talents",
+                "Spend your class points",
+                MenuAction::Talents,
+                false,
+                false,
+                true,
+            );
         });
+        bar.spawn((
+            Button,
+            MenuAction::Enter,
+            GlueDisabled(false),
+            skin::Control {
+                primary: true,
+                selected: false,
+                enabled: true,
+            },
+            Node {
+                width: Val::Px(360.),
+                min_height: Val::Px(62.),
+                padding: UiRect::axes(Val::Px(14.), Val::Px(8.)),
+                border: UiRect::all(Val::Px(1.)),
+                border_radius: BorderRadius::all(Val::Px(5.)),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(3.),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.29, 0.075, 0.043)),
+            BorderColor::all(skin::GOLD),
+        ))
+        .with_children(|p| {
+            skin::label(p, f, "Play solo", 22., skin::GOLD);
+            let target = skin::label(p, f, "", 11., skin::TEXT);
+            p.commands().entity(target).insert(PlayTarget);
+        });
+        bar.spawn(Node {
+            width: Val::Px(200.),
+            ..default()
+        })
+        .with_children(|p| {
+            skin::button(
+                p,
+                f,
+                "Co-op",
+                "Host a game or join friends",
+                super::coop_ui::OpenCoop,
+                false,
+                false,
+                true,
+            );
+        });
+    });
+}
+
+pub(super) fn refresh_adventure(
+    selection: Res<super::Selection>,
+    buttons: Query<(&MenuAction, &Interaction)>,
+    mut labels: ParamSet<(
+        Query<&mut Text, With<AdventureDetails>>,
+        Query<&mut Text, With<PlayTarget>>,
+        Query<&mut Text, With<RaceCaption>>,
+    )>,
+) {
+    let race = buttons
+        .iter()
+        .find_map(|(a, i)| match a {
+            MenuAction::Race(r) if *i != Interaction::None => Some(*r),
+            _ => None,
+        })
+        .or_else(|| {
+            selection
+                .look
+                .and_then(|i| selection.looks.get(i))
+                .map(|l| l.1)
+        });
+    let name = race.map_or("", super::races::race_name);
+    for mut text in &mut labels.p2() {
+        if text.0 != name {
+            text.0 = name.into();
+        }
+    }
+    let Some(map) = data::MAPS.get(selection.map) else {
+        return;
+    };
+    let mut description = format!(
+        "Hold your ground in {}. Defeat the final boss to claim victory.\n\nENCOUNTERS\n",
+        map.name
+    );
+    for boss in &data::roster(selection.map).bosses {
+        // A dungeon's bosses wait in their rooms rather than arriving on the clock.
+        let at = boss.from as u32;
+        if at == 0 {
+            description.push_str(&format!("·  {}\n", boss.name));
+        } else {
+            description.push_str(&format!("{:02}:{:02}  {}\n", at / 60, at % 60, boss.name));
+        }
+    }
+    for mut text in &mut labels.p0() {
+        if text.0 != description {
+            text.0.clone_from(&description);
+        }
+    }
+    let target = format!("Enter {}", map.name);
+    for mut text in &mut labels.p1() {
+        if text.0 != target {
+            text.0.clone_from(&target);
+        }
+    }
 }

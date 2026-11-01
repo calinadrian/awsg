@@ -217,12 +217,20 @@ pub(super) fn deal_cards(
     run: Res<Run>,
     spells: Option<Res<crate::ui_action::Spells>>,
     art: Res<super::card_view::CardArt>,
-    rows: Query<Entity, With<hud::OfferRow>>,
+    mut rows: Query<(Entity, &mut Node), With<hud::OfferRow>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut last_size: Local<Option<(u32, u32)>>,
     mut sub: Query<&mut Text, With<hud::LevelUpSub>>,
 ) {
-    if !offer.is_changed() {
+    let Ok(window) = windows.single() else { return };
+    let size = (window.width().to_bits(), window.height().to_bits());
+    let resized = *last_size != Some(size);
+    if !offer.is_changed() && !resized {
         return;
     }
+    *last_size = Some(size);
+    let card_scale =
+        super::card_view::readable_scale(window.width(), window.height(), offer.choices().len());
     if let Ok(mut t) = sub.single_mut() {
         **t = if offer.chest {
             "BATTLEGROUND CACHE  /  Choose one treasure".into()
@@ -230,7 +238,10 @@ pub(super) fn deal_cards(
             format!("LEVEL {}  /  Choose your next spell upgrade", run.level)
         };
     }
-    let Ok(row) = rows.single() else { return };
+    let Ok((row, mut row_node)) = rows.single_mut() else {
+        return;
+    };
+    row_node.column_gap = px(32.0 * card_scale);
     commands.entity(row).despawn_related::<Children>();
     for (i, &choice) in offer.choices().iter().enumerate() {
         let card = hud::describe_card(choice, &run, spells.as_deref());
@@ -241,7 +252,7 @@ pub(super) fn deal_cards(
             content,
             i,
             choice.rarity() as usize,
-            super::card_view::GAME_SCALE,
+            card_scale,
         );
         commands.entity(nodes.root).insert((
             Card {
@@ -270,7 +281,7 @@ pub(super) fn deal_cards(
                 column,
                 &art,
                 HandAction::Banish(i),
-                super::card_view::WIDTH * super::card_view::GAME_SCALE,
+                super::card_view::WIDTH * card_scale,
                 &format!("Banish ({} left)", run.hand.banishes),
             );
         });

@@ -84,3 +84,10 @@ fn worker(
         }
     }
 }
+pub fn request_id() -> String {
+    format!(
+        "{}{}",
+        tungstenite::handshake::client::generate_key(),
+        tungstenite::handshake::client::generate_key()
+    )
+}

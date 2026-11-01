@@ -142,6 +142,7 @@ pub(super) struct Loot {
     pub boss: bool,
     pub spawn_cost: f32,
     pub roaming_elite: bool,
+    pub elite: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -149,6 +150,7 @@ pub(super) enum GemKind {
     Xp(u32),
     Heal(f32),
     Gold(u32),
+    Magnet,
 }
 
 #[derive(Component)]
@@ -169,6 +171,7 @@ fn look_for(kind: GemKind) -> (u32, f32) {
         GemKind::Heal(_) => (114, 2.5),
         // Original gold-pile display 2614 at scale 0.6 (RVA 0x5c0839d).
         GemKind::Gold(_) => (2614, 0.6),
+        GemKind::Magnet => (0, 1.0),
     }
 }
 
@@ -217,6 +220,7 @@ pub(super) fn spawn_guardian(
     }
     let e = spawn_with(commands, run, def, pos, face, false, 1.0, Some(home));
     let (hp, damage) = super::guardian_behavior::stats(def, run.elapsed, slain);
+    let hp = hp * run.party_factor(1.04);
     commands.queue(move |world: &mut World| {
         if let Some(mut enemy) = world.get_mut::<Enemy>(e) {
             enemy.hp = hp;
@@ -268,6 +272,8 @@ fn spawn_with(
         };
         (def.hp * scale, damage, def.speed)
     };
+    // Co-op health follows the living party at spawn; damage is not party-scaled.
+    let hp = hp * run.party_factor(if boss || home.is_some() { 1.04 } else { 0.72 });
     commands.entity(e).insert((
         Enemy {
             def,
@@ -591,6 +597,7 @@ pub(super) fn move_enemies(
                     // The native wake-event list refreshes stats once (RVA 0x5c0d688).
                     // Preserve the wound that woke it; do not heal or grow every frame.
                     let (hp, damage) = super::guardian_behavior::stats(e.def, now, lairs.slain);
+                    let hp = hp * run.party_factor(1.04);
                     if hp > e.max_hp {
                         e.hp = hp * (e.hp / e.max_hp).clamp(0.0, 1.0);
                         e.max_hp = hp;
@@ -885,6 +892,8 @@ pub(super) fn drop_loot(
         .collect();
     let mut xp_changed = false;
     for d in drops.read() {
+        let kind = if d.boss { 2 } else if d.elite { 1 } else { 0 };
+        run.equipment_kills[kind] = run.equipment_kills[kind].saturating_add(1);
         spawner.source.killed(d.spawn_cost);
         // Regular mobs pay 1.65x, stochastically rounded; bosses pay their table XP
         // unchanged (RVA 0x5c03cd9..0x5c03dc3). No global 2x multiplier.
@@ -920,6 +929,14 @@ pub(super) fn drop_loot(
         if d.boss {
             coop.cache(d.pos);
             super::caches::spawn(&mut commands, run.guid(), d.pos, false);
+        }
+        if d.elite && rng.f32() < super::magnets::DROP_CHANCE {
+            spawn_gem(
+                &mut commands,
+                run.guid(),
+                d.pos + Vec3::Z * 0.8,
+                GemKind::Magnet,
+            );
         }
         if d.boss || rng.f32() < 0.015 {
             let heal = GemKind::Heal(if d.boss { 1000.0 } else { 30.0 });
@@ -1219,6 +1236,7 @@ pub(super) fn spawn_gem(commands: &mut Commands, serial: u64, pos: Vec3, kind: G
         GemKind::Heal(_) => {
             units::spawn_object(commands, serial, display, scale, pos + Vec3::Y * 0.5)
         }
+        GemKind::Magnet => super::magnets::spawn(commands, serial, pos),
     };
     commands.entity(e).insert(Gem {
         kind,
@@ -1248,10 +1266,29 @@ pub(super) fn collect_gems(
     let dt = time.delta_secs();
     let stats = run.stats();
     let target = h.translation + Vec3::Y * 1.0;
+    // The host collects for either living player, including XP outside streamed terrain.
+    let magnet_collected = gems.iter().any(|(_, tf, gem, visible)| {
+        matches!(gem.kind, GemKind::Magnet)
+            && *visible != Visibility::Hidden
+            && ((run.dead_t.is_none()
+                && !run.coop_unavailable.contains(&0)
+                && flat(target - tf.translation).length() <= stats.magnet)
+                || coop.players.values().any(|p| {
+                    p.peer != 0
+                        && p.loaded
+                        && !p.paused
+                        && p.hp > 0.
+                        && flat(Vec3::from_array(p.pos) - tf.translation).length() <= stats.magnet
+                }))
+    });
     let mut collected_xp = 0u32;
     for (e, mut tf, mut g, visible) in &mut gems {
-        if *visible == Visibility::Hidden {
+        let vacuum = magnet_collected && matches!(g.kind, GemKind::Xp(_));
+        if *visible == Visibility::Hidden && !vacuum {
             continue;
+        }
+        if vacuum {
+            g.pulled = true;
         }
         let candidates = || {
             coop.players
@@ -1275,11 +1312,18 @@ pub(super) fn collect_gems(
             .unwrap_or((0, target));
         let d = target - tf.translation;
         let dist = d.length();
+        if matches!(g.kind, GemKind::Magnet) {
+            if flat(d).length() <= stats.magnet {
+                commands.entity(e).despawn();
+            }
+            continue;
+        }
         if let GemKind::Gold(base) = g.kind {
             // As in the original, gold is collected within pickup range. Distant piles
             // stay put; only collection credits the balance and applies gold-find.
             if flat(d).length() <= stats.magnet {
-                let earned = super::gold::collected(base, run.jewel_stat(13));
+                let earned =
+                    super::gold::collected(base, run.jewel_stat(13), run.party_factor(0.48));
                 if run.dead_t.is_none() {
                     run.gold = run.gold.saturating_add(earned);
                 }
@@ -1309,7 +1353,7 @@ pub(super) fn collect_gems(
         // Credit on this frame's arrival, not the next frame (which may be
         // paused by a level-up). Contact is planar so floor/capsule height
         // differences cannot leave a wisp floating at shoulder height.
-        if flat(d).length() < 0.9 || dist <= g.speed * dt || g.flight >= 0.75 {
+        if vacuum || flat(d).length() < 0.9 || dist <= g.speed * dt || g.flight >= 0.75 {
             match g.kind {
                 GemKind::Xp(base) => {
                     collected_xp = collected_xp.saturating_add(base);
@@ -1331,6 +1375,7 @@ pub(super) fn collect_gems(
                 GemKind::Gold(_) => {
                     unreachable!("gold handled before pickup attraction")
                 }
+                GemKind::Magnet => unreachable!("magnet handled before pickup attraction"),
             }
             commands.entity(e).despawn();
             continue;
@@ -1342,7 +1387,9 @@ pub(super) fn collect_gems(
     if collected_xp > 0 {
         coop.reward(collected_xp, 0);
         if run.dead_t.is_none() {
-            run.xp += (collected_xp as f32 * stats.growth).round().max(1.0);
+            run.xp += (collected_xp as f32 * stats.growth / run.party_factor(0.48))
+                .round()
+                .max(1.0);
         }
     }
     while run.level < data::MAX_LEVEL && run.xp >= data::xp_to_next(run.level) {

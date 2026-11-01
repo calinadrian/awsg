@@ -908,6 +908,9 @@ pub(super) fn menu_preview(
 }
 
 pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
+    if !data::MAPS.get(selection.map).is_some_and(super::dungeon::available) {
+        return false;
+    }
     let (Some(class), Some(&(_, race, _))) = (
         selection.class_def(),
         selection.look.and_then(|i| selection.looks.get(i)),
@@ -1135,6 +1138,7 @@ pub(super) fn buttons(
 }
 
 pub(super) fn keys(
+    inventory: Res<super::inventory::Equipment>,
     coop: Res<super::coop::Coop>,
     keys: Res<ButtonInput<KeyCode>>,
     phase: Res<State<Phase>>,
@@ -1143,7 +1147,7 @@ pub(super) fn keys(
     mut next: ResMut<NextState<Phase>>,
     mut options: ResMut<super::options::Options>,
 ) {
-    if coop.open || (*phase.get() == Phase::Menu && coop.in_room()) {
+    if inventory.open || coop.open || (*phase.get() == Phase::Menu && coop.in_room()) {
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
@@ -1192,6 +1196,8 @@ pub(super) struct CardText {
     pub spell: u32,
     pub icon: Option<&'static str>,
     pub name: String,
+    /// The pre-ornate badge; the ornate card derives its state and footer itself.
+    #[allow(dead_code)]
     pub tag: String,
     pub desc: String,
 }
@@ -1874,6 +1880,11 @@ fn effect_text(effect: Effect) -> Option<String> {
     })
 }
 
+/// Reward cards describe the same current cast used by combat.
+pub(super) fn ability_description(owned: &Owned, run: &Run) -> String {
+    ability_body(owned.def, &cast_run(owned, run))
+}
+
 /// What an ability does at these numbers, in the voice of a spell description.
 fn ability_body(def: &AbilityDef, c: &Cast) -> String {
     let d = num(c.dmg);
@@ -2237,6 +2248,7 @@ pub(super) fn icon_tooltip(
 pub(super) fn show_panels(
     phase: Res<State<Phase>>,
     coop: Res<super::coop::Coop>,
+    inventory: Res<super::inventory::Equipment>,
     options: Res<super::options::Options>,
     mut roots: ParamSet<(
         Query<(&mut Visibility, &mut Node), With<MenuRoot>>,
@@ -2263,7 +2275,11 @@ pub(super) fn show_panels(
         }
     };
     for root in &mut roots.p0() {
-        set(root, p == Phase::Menu && !options.open && !coop.open);
+        // Inventory and the auction house draw under the menu, so it steps aside for them.
+        set(
+            root,
+            p == Phase::Menu && !options.open && !coop.open && !inventory.open,
+        );
     }
     for root in &mut roots.p1() {
         set(root, p != Phase::Menu && p != Phase::GameOver);
