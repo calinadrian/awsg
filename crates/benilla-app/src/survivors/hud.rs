@@ -1870,6 +1870,11 @@ fn effect_text(effect: Effect) -> Option<String> {
     })
 }
 
+/// Reward cards describe the same current cast used by combat.
+pub(super) fn ability_description(owned: &Owned, run: &Run) -> String {
+    ability_body(owned.def, &cast_run(owned, run))
+}
+
 /// What an ability does at these numbers, in the voice of a spell description.
 fn ability_body(def: &AbilityDef, c: &Cast) -> String {
     let d = num(c.dmg);
