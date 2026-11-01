@@ -75,6 +75,7 @@ pub(super) fn plugin(app: &mut App) {
 fn setup(mut commands: Commands, font: Res<HudFont>) {
     commands.spawn((
         PartyText,
+        Visibility::Hidden,
         Text::new(""),
         TextFont {
             font: font.0.clone(),

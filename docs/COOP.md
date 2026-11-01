@@ -70,10 +70,21 @@ either faction and keep their own class, race, talents and card choices.
 The host synchronizes enemies, boss outcomes, the clock and pickups. Collected
 XP and gold are shared with living party members, with each hero's own growth
 and gold bonuses. Meals heal the player collecting them. Arena caches and
-boss/guardian rewards give each player their own choices. A loading screen,
-pause or card choice pauses the party; the network continues on real time.
+boss/guardian rewards give each player their own choices. In co-op, a card,
+item choice or pause menu removes only that player from enemy targeting and
+protects them from damage while the encounter and other players continue.
+Their automatic attacks wait until they return. Loading screens still hold
+the encounter until party members are ready; network traffic uses real time.
+Solo reward screens continue to pause the run.
 Fallen players watch until the party wins or everyone falls. A quitting or
 crashing host ends the party.
+
+Party frames show names, levels, health and choosing/loading status beneath
+the player frame. Remote heroes also have overhead names and health bars.
+Remote enemy and player movement is interpolated between 10 Hz snapshots;
+clients use TCP_NODELAY, and snapshot/hit lookups use entity-ID indexes.
+These address known delay and repeated-scan costs; actual latency and frame
+rate on players' machines still need gameplay confirmation.
 
 ## Personal progress
 

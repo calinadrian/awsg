@@ -37,6 +37,7 @@ fn worker(
     };
     tcp.set_read_timeout(Some(Duration::from_millis(5)))
         .map_err(|e| e.to_string())?;
+    tcp.set_nodelay(true).map_err(|e| e.to_string())?;
     tcp.set_write_timeout(Some(Duration::from_secs(5)))
         .map_err(|e| e.to_string())?;
     socket

@@ -12,6 +12,7 @@ mod card_content;
 mod card_view;
 mod cards;
 mod coop;
+mod party_frames;
 mod coop_ui;
 mod data;
 mod drive;
@@ -72,7 +73,7 @@ impl Plugin for SurvivorsPlugin {
         app.insert_resource(crate::run_mode::CaptureMode)
             .add_plugins(grade::plugin)
             .add_plugins(options::plugin)
-            .add_plugins((coop::plugin, coop_ui::plugin, progress::plugin))
+            .add_plugins((coop::plugin, coop_ui::plugin, progress::plugin, party_frames::plugin))
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
@@ -135,20 +136,20 @@ impl Plugin for SurvivorsPlugin {
                     guardians::keep_lairs.run_if(coop::authority),
                     enemies::move_enemies.run_if(coop::authority),
                     enemies::run_scripts.run_if(coop::authority),
-                    abilities::cast_abilities,
-                    abilities::tick_areas,
+                    abilities::cast_abilities.run_if(in_state(Phase::Playing)),
+                    abilities::tick_areas.run_if(in_state(Phase::Playing)),
                     abilities::apply_hits,
                     coop::apply_guest_hits,
                     enemies::tick_marks,
                     enemies::drop_loot.run_if(coop::authority),
                     enemies::collect_gems.run_if(coop::authority),
-                    caches::collect,
+                    caches::collect.run_if(in_state(Phase::Playing)),
                     hero::hero_vitals,
                     ring::light_ring,
                 )
                     .chain()
                     .after(WorldStage::Input)
-                    .run_if(in_state(Phase::Playing))
+                    .run_if(coop::world_running)
                     .run_if(|time: Res<Time>| time.delta_secs() > 0.0)
                     .run_if(|entry: Res<drive::EntryPending>| !entry.0)
                     // Entering a battleground raises its loading screen: the run waits behind it.
@@ -411,6 +412,7 @@ pub(super) struct Run {
     pub coop_target: u32,
     pub coop_damage: Vec<(u32, f32)>,
     pub coop_run: bool,
+    pub coop_unavailable: std::collections::HashSet<u32>,
     /// Key, native effect, strength, and remaining seconds of active spell buffs.
     pub buffs: Vec<(&'static str, u32, f32, f32)>,
     passives: spell_passives::State,
@@ -459,6 +461,7 @@ impl Default for Run {
             coop_target: 0,
             coop_damage: Vec::new(),
             coop_run: false,
+            coop_unavailable: Default::default(),
             buffs: Vec::new(),
             passives: spell_passives::State::default(),
         }
@@ -573,8 +576,8 @@ impl Rng {
     }
 }
 
-fn pause(mut time: ResMut<Time<Virtual>>) {
-    time.pause();
+fn pause(mut time: ResMut<Time<Virtual>>, coop: Res<coop::Coop>) {
+    if !coop.running { time.pause(); }
 }
 
 fn unpause(mut time: ResMut<Time<Virtual>>) {

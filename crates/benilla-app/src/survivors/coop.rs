@@ -1,10 +1,11 @@
 //! Player-hosted matches over the operator's directory. Clients own their hero/build;
 //! the host owns enemies, the encounter clock, shared pickups and the result.
 use super::{
-    Phase, Run, Selection, data,
+    data,
     enemies::{self, Enemy},
     hero::{self, Hero},
     units::{self, Fx, Marks},
+    Phase, Run, Selection,
 };
 use crate::net::{FieldChanged, Guid, ObjectStore};
 use asr_coop::{Client, Member, Room, Server};
@@ -97,7 +98,13 @@ enum Packet {
 #[derive(Component)]
 pub(super) struct Replica(pub u64);
 #[derive(Component)]
-pub(super) struct Ally(u32);
+pub(super) struct Ally(pub u32);
+
+#[derive(Component)]
+struct ReplicaPose {
+    pos: Vec3,
+    yaw: f32,
+}
 
 #[derive(Resource)]
 pub(super) struct Coop {
@@ -289,6 +296,8 @@ impl Coop {
         local_alive: bool,
         allies: &Query<(Entity, &Ally)>,
     ) -> (Entity, Vec3, u32, bool) {
+        let local_alive =
+            local_alive && (!self.running || self.players.get(&0).is_none_or(|p| !p.paused));
         let mut result = (local.0, local.1, 0, !local_alive);
         let mut distance = if local_alive {
             units::flat(from - local.1).length_squared()
@@ -297,7 +306,11 @@ impl Coop {
         };
         if self.running {
             for (entity, ally) in allies {
-                if let Some(p) = self.players.get(&ally.0).filter(|p| p.loaded && p.hp > 0.) {
+                if let Some(p) = self
+                    .players
+                    .get(&ally.0)
+                    .filter(|p| p.loaded && !p.paused && p.hp > 0.)
+                {
                     let pos = Vec3::from_array(p.pos);
                     let d = units::flat(pos - from).length_squared();
                     if d < distance {
@@ -314,12 +327,23 @@ impl Coop {
 pub(super) fn authority(coop: Res<Coop>) -> bool {
     !coop.guest()
 }
+pub(super) fn world_running(coop: Res<Coop>, phase: Res<State<Phase>>) -> bool {
+    *phase.get() == Phase::Playing
+        || (coop.running && matches!(phase.get(), Phase::LevelUp | Phase::Paused))
+}
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Coop>()
         .add_systems(PreUpdate, receive)
         .add_systems(
             PostUpdate,
-            (sync_allies, play_visuals, capture_visuals, transmit).chain(),
+            (
+                sync_allies,
+                smooth_replicas,
+                play_visuals,
+                capture_visuals,
+                transmit,
+            )
+                .chain(),
         );
 }
 
@@ -575,7 +599,7 @@ fn receive(
                             if target == coop.peer {
                                 if raw < 0. && run.dead_t.is_none() {
                                     run.hp = (run.hp - raw).min(run.stats().max_hp);
-                                } else if raw >= 0. {
+                                } else if raw >= 0. && *phase.get() == Phase::Playing {
                                     hero::hurt_hero(&mut run, raw);
                                     run.struck = true;
                                 }
@@ -587,6 +611,12 @@ fn receive(
                         }
                         coop.seen_caches = caches.len();
                         if !entry.0 && !loading.covering() {
+                            let pickup_entities: HashMap<_, _> = pickups
+                                .iter()
+                                .map(|(entity, id, _)| (id.0, entity))
+                                .collect();
+                            let foe_entities: HashMap<_, _> =
+                                foes.iter().map(|(entity, id, ..)| (id.0, entity)).collect();
                             let present: HashSet<_> = loot.iter().map(|p| p.id).collect();
                             for (entity, id, _) in &pickups {
                                 if !present.contains(&id.0) {
@@ -601,8 +631,9 @@ fn receive(
                                 }
                             }
                             for p in loot {
-                                if let Some((_, _, mut tf)) =
-                                    pickups.iter_mut().find(|(_, id, _)| id.0 == p.id)
+                                if let Some((_, _, mut tf)) = pickup_entities
+                                    .get(&p.id)
+                                    .and_then(|entity| pickups.get_mut(*entity).ok())
                                 {
                                     tf.translation = Vec3::from_array(p.pos);
                                 } else {
@@ -635,11 +666,14 @@ fn receive(
                                 }
                             }
                             for f in state {
-                                if let Some((_, _, mut e, mut tf, mut store, mut mv)) =
-                                    foes.iter_mut().find(|(_, id, ..)| id.0 == f.id)
+                                if let Some((_, _, mut e, _tf, mut store, mut mv)) = foe_entities
+                                    .get(&f.id)
+                                    .and_then(|entity| foes.get_mut(*entity).ok())
                                 {
-                                    tf.translation = Vec3::from_array(f.pos);
-                                    tf.rotation = Quat::from_rotation_y(f.yaw);
+                                    commands.entity(foe_entities[&f.id]).insert(ReplicaPose {
+                                        pos: Vec3::from_array(f.pos),
+                                        yaw: f.yaw,
+                                    });
                                     e.hp = f.hp;
                                     e.max_hp = f.maximum;
                                     if f.group == 2 {
@@ -701,6 +735,23 @@ fn receive(
             }
         }
     }
+    run.coop_unavailable.clear();
+    if coop.running {
+        let choosing = matches!(phase.get(), Phase::LevelUp | Phase::Paused);
+        let own = coop.peer;
+        if let Some(pose) = coop.players.get_mut(&own) {
+            pose.paused = choosing;
+        }
+        for pose in coop.players.values() {
+            if (own == 0 || pose.peer == own) && (pose.paused || !pose.loaded || pose.hp <= 0.) {
+                run.coop_unavailable.insert(pose.peer);
+            }
+        }
+        if choosing {
+            run.coop_unavailable.insert(own);
+            run.coop_unavailable.insert(0);
+        }
+    }
     if coop.running && !coop.connected {
         run.won = false;
         next.set(Phase::GameOver);
@@ -714,18 +765,12 @@ fn receive(
             clock.unpause();
             return;
         }
-        let local_wait = !matches!(phase.get(), Phase::Playing | Phase::GameOver)
-            || entry.0
-            || loading.covering();
+        let local_wait = *phase.get() == Phase::Menu || entry.0 || loading.covering();
         let waiting = if coop.peer == 0 {
             coop.room.as_ref().is_some_and(|r| {
-                r.members.iter().any(|m| {
-                    m.peer != 0
-                        && coop
-                            .players
-                            .get(&m.peer)
-                            .is_none_or(|p| !p.loaded || p.paused)
-                })
+                r.members
+                    .iter()
+                    .any(|m| m.peer != 0 && coop.players.get(&m.peer).is_none_or(|p| !p.loaded))
             })
         } else {
             coop.remote_paused || coop.since_host > 2.
@@ -757,6 +802,7 @@ fn sync_allies(
     )>,
     mut fields: MessageWriter<FieldChanged>,
     guids: Query<&Guid>,
+    time: Res<Time<Real>>,
 ) {
     let wanted: HashSet<_> = if coop.running {
         coop.players
@@ -776,14 +822,26 @@ fn sync_allies(
         if let Some(p) = coop.players.get(&ally.0).filter(|p| p.loaded) {
             let pos = Vec3::from_array(p.pos);
             let delta = units::flat(pos - tf.translation).length();
-            tf.translation = pos;
-            tf.rotation = Quat::from_rotation_y(p.yaw);
+            let blend = 1. - (-18. * time.delta_secs()).exp();
+            tf.translation = if delta > 20. {
+                pos
+            } else {
+                tf.translation.lerp(pos, blend)
+            };
+            tf.rotation = tf.rotation.slerp(Quat::from_rotation_y(p.yaw), blend);
             mv.speed = if delta > 0.01 { 7. } else { 0. };
             mv.flags = if delta > 0.01 {
                 crate::creature_anim::move_flags::FORWARD
             } else {
                 0
             };
+            let hp = p.hp.max(0.) as u32;
+            let changed = store
+                .0
+                .raw_fields()
+                .find(|(index, _)| *index == 22)
+                .map_or(0, |(_, value)| value)
+                != hp;
             store
                 .0
                 .merge(benilla_protocol::messages::ObjectFields::from_pairs(&[
@@ -794,7 +852,7 @@ fn sync_allies(
             if p.hp <= 0. {
                 units::kill_unit(&mut store);
             }
-            if let Ok(guid) = guids.get(entity) {
+            if let Some(guid) = guids.get(entity).ok().filter(|_| changed) {
                 fields.write(FieldChanged {
                     entity,
                     guid: guid.0,
@@ -835,6 +893,20 @@ fn sync_allies(
     }
 }
 
+fn smooth_replicas(time: Res<Time<Real>>, mut units: Query<(&ReplicaPose, &mut Transform)>) {
+    let blend = 1. - (-18. * time.delta_secs()).exp();
+    for (pose, mut transform) in &mut units {
+        transform.translation = if transform.translation.distance_squared(pose.pos) > 400. {
+            pose.pos
+        } else {
+            transform.translation.lerp(pose.pos, blend)
+        };
+        transform.rotation = transform
+            .rotation
+            .slerp(Quat::from_rotation_y(pose.yaw), blend);
+    }
+}
+
 fn transmit(
     mut commands: Commands,
     mut coop: ResMut<Coop>,
@@ -857,7 +929,7 @@ fn transmit(
     telegraphs: Res<super::telegraphs::Telegraphs>,
 ) {
     coop.tick += real.delta_secs();
-    if coop.tick < 0.0667 && !phase.is_changed() {
+    if coop.tick < 0.1 && !phase.is_changed() {
         return;
     }
     coop.tick = 0.;
@@ -918,11 +990,9 @@ fn transmit(
             });
         }
         let paused = coop.room.as_ref().is_some_and(|r| {
-            r.members.iter().any(|m| {
-                coop.players
-                    .get(&m.peer)
-                    .is_none_or(|p| !p.loaded || p.paused)
-            })
+            r.members
+                .iter()
+                .any(|m| coop.players.get(&m.peer).is_none_or(|p| !p.loaded))
         });
         let pickups = pickups
             .iter()
@@ -1049,9 +1119,14 @@ pub(super) fn apply_guest_hits(
     if coop.guest() {
         return;
     }
+    let targets: HashMap<_, _> = foes
+        .iter()
+        .map(|(entity, guid, ..)| (guid.0, entity))
+        .collect();
     for hit in std::mem::take(&mut coop.incoming) {
-        let Some((entity, guid, tf, mut enemy, mut store, mut marks)) =
-            foes.iter_mut().find(|(_, id, ..)| id.0 == hit.target)
+        let Some((entity, guid, tf, mut enemy, mut store, mut marks)) = targets
+            .get(&hit.target)
+            .and_then(|entity| foes.get_mut(*entity).ok())
         else {
             continue;
         };

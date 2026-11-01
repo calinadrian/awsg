@@ -1165,9 +1165,9 @@ pub(super) fn collect_gems(
         let candidates = || {
             coop.players
                 .values()
-                .filter(|p| p.peer != 0 && p.loaded && p.hp > 0.)
+                .filter(|p| p.peer != 0 && p.loaded && !p.paused && p.hp > 0.)
                 .map(|p| (p.peer, Vec3::from_array(p.pos) + Vec3::Y))
-                .chain(run.dead_t.is_none().then_some((0, target)))
+                .chain((run.dead_t.is_none() && !run.coop_unavailable.contains(&0)).then_some((0, target)))
         };
         // Once attracted, keep the recipient instead of switching between nearby
         // co-op players every frame. Retarget only if that player is no longer alive.
@@ -1259,7 +1259,7 @@ pub(super) fn collect_gems(
         run.level += 1;
         run.pending_levels += 1;
     }
-    if run.pending_levels > 0 {
+    if run.pending_levels > 0 && !run.coop_unavailable.contains(&0) {
         next.set(Phase::LevelUp);
     }
 }

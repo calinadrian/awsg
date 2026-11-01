@@ -334,6 +334,7 @@ pub(super) fn place_camera(
 /// Damage the hero takes from one blow, after immunity, armour and the shield; returns what got
 /// through.
 pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
+    if run.coop_run && run.coop_unavailable.contains(&run.coop_target) { return 0.; }
     if run.coop_target != 0 {
         run.coop_damage.push((run.coop_target, raw));
         return raw;
