@@ -113,10 +113,21 @@ pub(super) fn describe(choice: Choice, run: &Run, card: &CardText) -> Content {
             } else if p.dot > 0.0 {
                 ("DAMAGE / SEC", number(p.dot))
             } else {
-                ("COOLDOWN", format!("{} sec", number(p.cooldown)))
+                ("COOLDOWN", format!("{}s", number(p.cooldown)))
             };
-            result.stat_label = label.into();
-            result.stat_value = value;
+            result.description = super::hud::ability_description(&owned, run);
+            result.rows.push(StatRow {
+                label: label.into(),
+                before: None,
+                after: value,
+            });
+            if label != "COOLDOWN" {
+                result.rows.push(StatRow {
+                    label: "COOLDOWN".into(),
+                    before: None,
+                    after: format!("{}s", number(p.cooldown)),
+                });
+            }
             result.positive = false;
             result.footer = format!(
                 "Takes a spell slot · {}/{}",
@@ -221,6 +232,66 @@ pub(super) fn describe(choice: Choice, run: &Run, card: &CardText) -> Content {
 mod tests {
     use super::super::{amulets::Amulet, hud::describe_card};
     use super::*;
+
+    #[test]
+    fn longest_baseline_spell_fits_the_semibold_body_area() {
+        use super::super::card_view::{BODY_HEIGHT, BODY_LINE_HEIGHT, BODY_SIZE};
+        use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Weight, Wrap};
+        // Isolate the bundled face so a system-font fallback cannot mask overflow.
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_font_data(include_bytes!("../../assets/cards/font-3.ttf").to_vec());
+        let family = db.faces().next().expect("bundled semibold font").families[0]
+            .0
+            .clone();
+        let mut fonts = FontSystem::new_with_locale_and_db("en-US".into(), db);
+        let run = Run::default();
+        let owned = Owned::new(
+            super::super::data::ability("holy_shock"),
+            super::super::rewards::Rarity::Legendary,
+        );
+        let description = super::super::hud::ability_description(&owned, &run);
+        let mut buffer = Buffer::new(&mut fonts, Metrics::new(BODY_SIZE, BODY_LINE_HEIGHT));
+        buffer.set_size(&mut fonts, Some(356.0), None);
+        buffer.set_wrap(&mut fonts, Wrap::WordOrGlyph);
+        buffer.set_text(
+            &mut fonts,
+            &description,
+            &Attrs::new()
+                .family(Family::Name(&family))
+                .weight(Weight::SEMIBOLD),
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut fonts, false);
+        let lines: Vec<_> = buffer.layout_runs().collect();
+        assert!(!lines.is_empty());
+        assert!(
+            lines.len() as f32 * BODY_LINE_HEIGHT <= BODY_HEIGHT,
+            "{} lines: {}",
+            lines.len(),
+            description
+        );
+        assert!(lines.iter().all(|line| line.line_w <= 356.01));
+    }
+
+    #[test]
+    fn new_spell_keeps_description_and_maps_cooldown_to_stats() {
+        let run = Run::default();
+        let def = super::super::data::ability("holy_shock");
+        let rarity = super::super::rewards::Rarity::Legendary;
+        let choice = Choice::NewAbility(def, rarity);
+        let result = describe(choice, &run, &describe_card(choice, &run, None));
+        assert_eq!(
+            result.description,
+            super::super::hud::ability_description(&Owned::new(def, rarity), &run)
+        );
+        assert!(!result.description.contains("Cooldown:"));
+        assert_eq!(result.rows.len(), 2);
+        assert_eq!(result.rows[1].label, "COOLDOWN");
+        assert!(result.rows.iter().all(|row| row.before.is_none()));
+        assert!(!result.positive);
+        assert_eq!(result.state, "NEW");
+    }
 
     #[test]
     fn empty_amulet_slot_is_new_and_shows_acquisition_values() {
