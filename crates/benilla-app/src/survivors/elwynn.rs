@@ -320,6 +320,14 @@ pub(super) fn regular_index(def: &EnemyDef) -> Option<usize> {
         .position(|entry| entry.name == def.name && entry.display == def.display)
 }
 
+/// Whether a definition is one of the source's boss rows, Fedfennel included.
+pub(super) fn is_boss(def: &EnemyDef) -> bool {
+    BOSSES
+        .iter()
+        .chain(std::iter::once(&GUARDIANS[2]))
+        .any(|entry| entry.name == def.name && entry.display == def.display)
+}
+
 /// The three elite enemy-table rows also spawn as roaming chasers, independently of lairs.
 pub(super) fn is_roaming_elite(def: &EnemyDef) -> bool {
     [0, 1, 3].iter().any(|&i| {

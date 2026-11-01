@@ -35,6 +35,12 @@ pub(super) fn roaming_elite_stats(hp: f32, damage: f32, speed: f32, elapsed: f32
     )
 }
 
+/// Boss rows: 5.75x health and flat damage, with no run-time curve (native 0x5c134da and
+/// 0x5c1378f, normal mode, single hero). Speed and swing are the row's own.
+pub(super) fn boss_stats(hp: f32, damage: f32) -> (f32, f32) {
+    (hp * 5.75 * 0.82, damage * 0.82_f32.sqrt())
+}
+
 /// Older unlocked enemies retain weight; their cost reduces how often they are selected.
 pub(super) fn weight(elapsed: f32, from: f32, cost: f32) -> f32 {
     if elapsed < from {
@@ -104,6 +110,13 @@ mod tests {
         // At 9:00 the opening kobold remains eligible, unlike a four-newest pool.
         assert_eq!(weight(540.0, 0.0, COSTS[0]), 4.0);
         assert_eq!(weight(540.0, 540.0, COSTS[8]), 1.0 / 3.0);
+    }
+
+    #[test]
+    fn boss_rows_use_the_native_health_factor_and_flat_damage() {
+        let (hp, damage) = boss_stats(3600.0, 22.0);
+        assert!((hp - 16974.0).abs() < 1.0);
+        assert!((damage - 19.92).abs() < 0.01);
     }
 
     #[test]

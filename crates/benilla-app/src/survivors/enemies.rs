@@ -26,7 +26,7 @@ pub(super) struct Enemy {
     pub xp: u32,
     pub boss: bool,
     pub attack_cd: f32,
-    /// A ranged cast warns at its target point; moving clear of the circle avoids the hit.
+    /// A ranged cast winding up: Elwynn casters then release a bolt, others a marked blast.
     cast: Option<RangedCast>,
     pub slow: f32,
     pub slow_t: f32,
@@ -71,6 +71,26 @@ struct RangedCast {
     damage: f32,
     spell: u32,
     radius: f32,
+    /// Elwynn's casters release a bolt at their target instead of a blast at `center`.
+    bolt: bool,
+}
+
+/// A released bolt in flight. Native 0x5c0cc31 queues the hit at release; it lands on its target
+/// after the caster-to-target distance over the spell's speed, even if the caster has died.
+#[derive(Clone, Copy)]
+struct Bolt {
+    released: f32,
+    at: f32,
+    peer: u32,
+    damage: f32,
+}
+
+#[derive(Resource, Default)]
+pub(super) struct Bolts(Vec<Bolt>);
+
+/// Spell-speed lookup 0x5c6a380: Fireball 24 yd/s, Frostbolt 28 yd/s.
+fn bolt_speed(spell: u32) -> f32 {
+    if spell == 116 { 28.0 } else { 24.0 }
 }
 
 /// A scripted charge down a marked lane.
@@ -274,6 +294,9 @@ fn spawn_with(
         super::elwynn_behavior::regular_stats(def.hp, def.damage, def.speed, run.elapsed)
     } else if !boss && home.is_none() && super::elwynn::is_roaming_elite(def) {
         super::elwynn_behavior::roaming_elite_stats(def.hp, def.damage, def.speed, run.elapsed)
+    } else if boss && super::elwynn::is_boss(def) {
+        let (hp, damage) = super::elwynn_behavior::boss_stats(def.hp, def.damage);
+        (hp, damage, def.speed)
     } else {
         let damage = if home.is_some() {
             def.damage * scale
@@ -480,6 +503,7 @@ pub(super) fn move_enemies(
     mut tele: ResMut<super::telegraphs::Telegraphs>,
     coop: Res<super::coop::Coop>,
     allies: Query<(Entity, &super::coop::Ally)>,
+    mut bolts: ResMut<Bolts>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
@@ -493,6 +517,31 @@ pub(super) fn move_enemies(
     let elwynn = selection.stage_def().name == "Elwynn Forest";
 
     let now = run.elapsed;
+
+    // Bolts from an earlier run's clock are stale; due ones strike their target if it still stands.
+    bolts.0.retain(|b| b.released <= now);
+    let (due, flying): (Vec<Bolt>, Vec<Bolt>) = bolts.0.drain(..).partition(|b| b.at <= now);
+    bolts.0 = flying;
+    for bolt in due {
+        let target = if bolt.peer == 0 {
+            let standing = run.dead_t.is_none()
+                && (!coop.running || coop.players.get(&0).is_none_or(|p| !p.paused));
+            standing.then_some(local_hero_e)
+        } else {
+            coop.players
+                .get(&bolt.peer)
+                .filter(|p| p.loaded && !p.paused && p.hp > 0.0)
+                .and_then(|_| allies.iter().find(|(_, ally)| ally.0 == bolt.peer))
+                .map(|(entity, _)| entity)
+        };
+        let Some(target) = target else { continue };
+        run.coop_target = bolt.peer;
+        let taken = hero::hurt_hero(&mut run, bolt.damage);
+        if taken > 0.0 {
+            fx.number(target, taken, false, COLOR_HURT);
+        }
+    }
+    run.coop_target = 0;
 
     // Separation over a coarse grid: only neighbours in the same or adjacent cells push.
     const CELL: f32 = 3.0;
@@ -685,7 +734,17 @@ pub(super) fn move_enemies(
             if homing.is_some() || e.stun_t > 0.0 || e.fear_t > 0.0 || hero_down {
                 e.cast = None;
             } else {
-                if now >= cast.until {
+                if now >= cast.until && cast.bolt {
+                    // Native 0x5c0bcd0: the bolt carries the caster's damage at release.
+                    e.cast = None;
+                    fx.cast(ent, cast.spell, &[hero_e], None);
+                    bolts.0.push(Bolt {
+                        released: now,
+                        at: now + dist / bolt_speed(cast.spell),
+                        peer,
+                        damage: e.damage * e.weaken,
+                    });
+                } else if now >= cast.until {
                     e.cast = None;
                     fx.cast(ent, cast.spell, &[], Some(cast.center));
                     let in_blast = |target: Vec3| {
@@ -831,7 +890,9 @@ pub(super) fn move_enemies(
             } else {
                 e.attack_cd = r.cooldown;
             }
-            tele.circle(hpos, RANGED_BLAST_RADIUS, now, cast_time);
+            if !native_caster {
+                tele.circle(hpos, RANGED_BLAST_RADIUS, now, cast_time);
+            }
             fx.cast(ent, r.spell, &[], None);
             e.cast = Some(RangedCast {
                 until: now + cast_time,
@@ -839,6 +900,7 @@ pub(super) fn move_enemies(
                 damage: e.damage * e.weaken,
                 spell: r.spell,
                 radius: RANGED_BLAST_RADIUS,
+                bolt: native_caster,
             });
         } else if contact && free {
             let swing = if e.def.attack > 0.0 {
@@ -1452,5 +1514,18 @@ pub(super) fn still_gems(
     }
     for mut drive in &mut drives {
         drive.set_paused(true);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bolts_fly_at_the_native_spell_speeds() {
+        assert_eq!(bolt_speed(133), 24.0);
+        assert_eq!(bolt_speed(116), 28.0);
+        // A Frostbolt released from the 18-yard stop lands about 0.64 s later.
+        assert!((18.0 / bolt_speed(116) - 0.643).abs() < 0.001);
     }
 }

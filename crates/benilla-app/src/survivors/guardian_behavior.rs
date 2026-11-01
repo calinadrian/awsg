@@ -117,10 +117,10 @@ fn kit(name: &str) -> &'static [Move] {
 /// The normal-mode reference guardian curves; the boss-health floor uses all
 /// non-final source bosses, including Fedfennel's original 9:00 record.
 pub(super) fn stats(def: &data::EnemyDef, elapsed: f32, slain: u32) -> (f32, f32) {
-    // Fedfennel is the agreed roster exception: retain his boss stats, rather than
-    // applying a guardian curve to an already boss-sized health pool.
+    // Fedfennel is the agreed roster exception: he keeps his boss row's spawn stats,
+    // rather than a guardian curve on an already boss-sized health pool.
     if def.name == "Fedfennel" {
-        return (def.hp, def.damage);
+        return super::elwynn_behavior::boss_stats(def.hp, def.damage);
     }
     const BOSSES: [(f32, f32); 4] = [
         (180.0, 3600.0),

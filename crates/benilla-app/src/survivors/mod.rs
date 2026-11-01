@@ -98,6 +98,7 @@ impl Plugin for SurvivorsPlugin {
                 spell_flight::prepare.before(crate::entities::EntityVisualsSet),
             )
             .init_resource::<enemies::Spawner>()
+            .init_resource::<enemies::Bolts>()
             .init_resource::<guardians::Lairs>()
             .init_resource::<talents::TalentBook>()
             .init_resource::<telegraphs::Telegraphs>()

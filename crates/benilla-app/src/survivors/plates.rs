@@ -381,16 +381,23 @@ const BOSS_BAR_W: f32 = 380.0;
 const BOSS_BAR_H: f32 = 20.0;
 const YELL_RED: Color = Color::srgb(1.0, 0.25, 0.2);
 
-/// The old ASR's boss bar under the clock: a skull, the name, the health as numbers and a
-/// percent, and the latest yell in red above it.
+/// The old ASR's boss bar under the clock, one row per engaged boss or elite: a skull, the name,
+/// the health as numbers and a percent, and the latest yell in red above them.
 #[derive(Component)]
 pub(super) struct BossBar {
+    rows: Vec<BarRow>,
+    yell: Entity,
+}
+
+struct BarRow {
     frame: Entity,
     fill: Entity,
     name: Entity,
     health: Entity,
-    yell: Entity,
 }
+
+/// At most this many bars stack under the clock; bosses take the first rows.
+const MAX_BARS: usize = 5;
 
 fn bar_text(f: &Handle<Font>, size: f32, color: Color) -> impl Bundle {
     (
@@ -409,8 +416,7 @@ fn bar_text(f: &Handle<Font>, size: f32, color: Color) -> impl Bundle {
     )
 }
 
-fn spawn_boss_bar(commands: &mut Commands, f: &Handle<Font>) -> Entity {
-    let yell = commands.spawn(bar_text(f, 15.0, YELL_RED)).id();
+fn spawn_bar_row(commands: &mut Commands, f: &Handle<Font>) -> BarRow {
     let fill = commands
         .spawn((
             Node {
@@ -439,7 +445,7 @@ fn spawn_boss_bar(commands: &mut Commands, f: &Handle<Font>) -> Entity {
         })
         .add_child(health)
         .id();
-    let frame = commands
+    let bar = commands
         .spawn((
             Node {
                 width: Val::Px(BOSS_BAR_W),
@@ -464,13 +470,29 @@ fn spawn_boss_bar(commands: &mut Commands, f: &Handle<Font>) -> Entity {
             UiArt::crop(nameplate::SKULL_TEXTURE, [0.0, 1.0, 0.0, 1.0]),
         ))
         .id();
-    let row = commands
-        .spawn(Node {
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .add_children(&[skull, frame])
+    let frame = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .add_children(&[skull, bar])
         .id();
+    BarRow {
+        frame,
+        fill,
+        name,
+        health,
+    }
+}
+
+fn spawn_boss_bar(commands: &mut Commands, f: &Handle<Font>) -> Entity {
+    let yell = commands.spawn(bar_text(f, 15.0, YELL_RED)).id();
+    let rows: Vec<BarRow> = (0..MAX_BARS).map(|_| spawn_bar_row(commands, f)).collect();
+    let mut children = vec![yell];
+    children.extend(rows.iter().map(|row| row.frame));
     commands
         .spawn((
             Node {
@@ -483,15 +505,9 @@ fn spawn_boss_bar(commands: &mut Commands, f: &Handle<Font>) -> Entity {
                 ..default()
             },
             Visibility::Hidden,
-            BossBar {
-                frame: row,
-                fill,
-                name,
-                health,
-                yell,
-            },
+            BossBar { rows, yell },
         ))
-        .add_children(&[yell, row])
+        .add_children(&children)
         .id()
 }
 
@@ -508,7 +524,16 @@ fn grouped(n: f32) -> String {
     out
 }
 
-/// Show the nearest awake guardian's or boss's bar, and the latest yell above it.
+/// Whether an enemy is in a fight worth a bar: a boss, an awake lair guardian, or a roaming
+/// elite that has been hit.
+fn engaged(e: &Enemy) -> bool {
+    e.boss
+        || e.home.is_some_and(|h| h.awake)
+        || (super::elwynn::is_roaming_elite(e.def) && e.hp < e.max_hp)
+}
+
+/// Show a bar for every engaged boss and elite in range, bosses first and then the nearest,
+/// and the latest yell above them.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn boss_bar(
     mut commands: Commands,
@@ -536,28 +561,25 @@ pub(super) fn boss_bar(
         return;
     };
     let playing = !matches!(*phase.get(), Phase::Menu | Phase::GameOver);
-    let near = hero.single().ok().and_then(|h| {
-        enemies
-            .iter()
-            .filter(|(_, e)| !e.dead && (e.boss || e.home.is_some_and(|h| h.awake)))
-            .map(|(tf, e)| (tf.translation.distance(h.translation), e))
-            .filter(|(d, _)| *d <= BAR_RANGE)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, e)| e)
-    });
+    let mut near: Vec<(bool, f32, &Enemy)> = hero
+        .single()
+        .map(|h| {
+            enemies
+                .iter()
+                .filter(|(_, e)| !e.dead && engaged(e))
+                .map(|(tf, e)| (!e.boss, tf.translation.distance(h.translation), e))
+                .filter(|(_, d, _)| *d <= BAR_RANGE)
+                .collect()
+        })
+        .unwrap_or_default();
+    near.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    near.truncate(bar.rows.len());
     let yell = run.yell.as_ref().map(|(s, _)| s.clone());
-    *vis = if playing && (near.is_some() || yell.is_some()) {
+    *vis = if playing && (!near.is_empty() || yell.is_some()) {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
-    if let Ok(mut v) = shown.get_mut(bar.frame) {
-        *v = if near.is_some() {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-    }
     let set = |texts: &mut Query<&mut Text>, e: Entity, s: String| {
         if let Ok(mut t) = texts.get_mut(e) {
             if t.0 != s {
@@ -566,15 +588,37 @@ pub(super) fn boss_bar(
         }
     };
     set(&mut texts, bar.yell, yell.unwrap_or_default());
-    if let Some(e) = near {
+    for (i, row) in bar.rows.iter().enumerate() {
+        let entry = near.get(i);
+        if let Ok(mut v) = shown.get_mut(row.frame) {
+            let want = if entry.is_some() {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *v != want {
+                *v = want;
+            }
+        }
+        if let Ok(mut n) = nodes.get_mut(row.frame) {
+            let want = if entry.is_some() {
+                Display::Flex
+            } else {
+                Display::None
+            };
+            if n.display != want {
+                n.display = want;
+            }
+        }
+        let Some((_, _, e)) = entry else { continue };
         let share = (e.hp / e.max_hp).clamp(0.0, 1.0);
-        if let Ok(mut n) = nodes.get_mut(bar.fill) {
+        if let Ok(mut n) = nodes.get_mut(row.fill) {
             n.width = Val::Percent(share * 100.0);
         }
-        set(&mut texts, bar.name, e.def.name.to_string());
+        set(&mut texts, row.name, e.def.name.to_string());
         set(
             &mut texts,
-            bar.health,
+            row.health,
             format!(
                 "{} / {}  {:.0}%",
                 grouped(e.hp),
