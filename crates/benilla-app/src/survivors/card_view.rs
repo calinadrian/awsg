@@ -51,10 +51,37 @@ pub struct CardArt {
     pub label: Handle<Font>,
     pub body: Handle<Font>,
     pub value: Handle<Font>,
+    arrow: Handle<Image>,
     background: [Handle<Image>; 5],
     border: [Handle<Image>; 5],
     diamond: [Handle<Image>; 5],
     stat: [Handle<Image>; 5],
+}
+
+// Cinzel/Crimson do not include U+2192. Draw one shared arrow for ranks and stats.
+fn comparison_arrow(images: &mut Assets<Image>) -> Handle<Image> {
+    let mut pixels = Vec::with_capacity(36 * 20 * 4);
+    for y in 0..20 {
+        for x in 0..36 {
+            let (a, b) = ((x as f32 + 0.5) / 2.0, (y as f32 + 0.5) / 2.0);
+            let shaft = a <= 16.5 && (b - 5.0).abs() <= 0.65;
+            let head = (12.0..=17.5).contains(&a) && ((b - 5.0).abs() - (17.0 - a)).abs() <= 0.8;
+            pixels.extend_from_slice(&[188, 180, 166, if shaft || head { 255 } else { 0 }]);
+        }
+    }
+    let mut image = Image::new(
+        Extent3d {
+            width: 36,
+            height: 20,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        pixels,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::linear();
+    images.add(image)
 }
 
 // Flat inset panel; the outer frame carries the item-quality color.
@@ -146,6 +173,7 @@ impl CardArt {
                 Font::try_from_bytes(include_bytes!("../../assets/cards/font-3.ttf").to_vec())
                     .expect("Crimson Pro semibold"),
             ),
+            arrow: comparison_arrow(images),
             background: layers!("background"),
             border: layers!("border"),
             diamond: layers!("diamond"),
@@ -199,6 +227,27 @@ fn rect(x: f32, y: f32, width: f32, height: f32, scale: f32) -> Node {
     }
 }
 
+/// Re-shape at the propagated render scale, before Bevy measures the text.
+/// A newly dealt hand can otherwise retain glyph metrics from the previous window scale.
+#[derive(Component)]
+pub(super) struct RasterScale(f32);
+
+pub(super) fn refresh_text_scale(
+    mut texts: Query<(
+        &bevy::ui::ComputedUiRenderTargetInfo,
+        &mut RasterScale,
+        &mut TextFont,
+    )>,
+) {
+    for (target, mut previous, mut font) in &mut texts {
+        let scale = target.scale_factor();
+        if scale.is_finite() && scale > 0.0 && previous.0 != scale {
+            previous.0 = scale;
+            font.set_changed();
+        }
+    }
+}
+
 pub fn text(font: &Handle<Font>, value: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     weighted_text(font, value, size, color, FontWeight::NORMAL)
 }
@@ -212,6 +261,7 @@ pub fn weighted_text(
 ) -> impl Bundle {
     (
         Text::new(value),
+        RasterScale(f32::NAN),
         TextFont {
             font: font.clone(),
             font_size: size,
@@ -341,10 +391,24 @@ pub fn spawn(
                 ));
             });
         if let Some(rank) = content.rank {
-            c.spawn(rect(24.0, RANK_TOP, 372.0, 20.0, scale))
-                .with_children(|label| {
+            let mut rank_node = rect(24.0, RANK_TOP, 372.0, 20.0, scale);
+            rank_node.column_gap = px(6.0 * scale);
+            c.spawn(rank_node).with_children(|label| {
+                if let Some((before, after)) = rank.split_once('→') {
+                    label.spawn(text(&art.label, before.trim(), 14.0 * scale, MUTED));
+                    label.spawn((
+                        Node {
+                            width: px(14.0 * scale),
+                            height: px(8.0 * scale),
+                            ..default()
+                        },
+                        ImageNode::new(art.arrow.clone()),
+                    ));
+                    label.spawn(text(&art.label, after.trim(), 14.0 * scale, MUTED));
+                } else {
                     label.spawn(text(&art.label, rank, 14.0 * scale, MUTED));
-                });
+                }
+            });
         }
         let rule = Color::srgb(0.46, 0.41, 0.29);
         c.spawn((
@@ -455,7 +519,14 @@ pub fn spawn(
                                     Color::srgb(0.57, 0.58, 0.55),
                                     FontWeight::SEMIBOLD,
                                 ));
-                                values.spawn(text(&art.body, "→", 22.0 * scale, MUTED));
+                                values.spawn((
+                                    Node {
+                                        width: px(18.0 * scale),
+                                        height: px(10.0 * scale),
+                                        ..default()
+                                    },
+                                    ImageNode::new(art.arrow.clone()),
+                                ));
                             }
                             values.spawn(weighted_text(
                                 &art.value,

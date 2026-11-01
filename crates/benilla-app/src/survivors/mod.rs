@@ -153,6 +153,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(
                 Update,
                 (
+                    hud::apply_ui_scale,
                     hero::follow_map,
                     hud::menu_preview,
                     hud::buttons,
@@ -192,6 +193,12 @@ impl Plugin for SurvivorsPlugin {
                 )
                     .chain()
                     .after(hud::show_panels),
+            )
+            .add_systems(
+                PostUpdate,
+                card_view::refresh_text_scale
+                    .after(bevy::ui::UiSystems::Propagate)
+                    .before(bevy::text::detect_text_needs_rerender::<Text>),
             )
             // The telegraphs' stream push, after the frame's effect-stream clear.
             .add_systems(
