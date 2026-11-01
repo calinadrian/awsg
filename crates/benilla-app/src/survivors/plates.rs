@@ -16,6 +16,10 @@ use crate::entities::{mount::MountChild, overhead_anchor, BoneAttach, OverheadFa
 const LIFT: f32 = 2.0 / 3.0;
 /// The name's height in gx units, as the client's plate prints it.
 const NAME_H: f32 = 0.01;
+/// The client's plate reach (`vplates`' 20 yards), squared, for the horde's optional plates.
+const NEARBY_SQ: f32 = 20.0 * 20.0;
+/// At most this many ordinary plates at once, nearest first.
+const MAX_NEARBY: usize = 24;
 
 /// The settings page's equivalent of the two FrameXML nameplate toggles. The Survivors world does
 /// not load FrameXML, so these are persisted alongside the client's CVars.
@@ -39,13 +43,31 @@ pub(super) fn toggle_nameplates(settings: &mut NameplateSettings, control: bool,
         settings.enemies = show_both;
         settings.friends = show_both;
     } else if shift {
-        let show_friends = !(settings.friends && !settings.enemies);
-        settings.enemies = false;
-        settings.friends = show_friends;
+        // As in the client, V and Shift+V each flip only their own side.
+        settings.friends = !settings.friends;
     } else {
-        let show_enemies = !(settings.enemies && !settings.friends);
-        settings.enemies = show_enemies;
-        settings.friends = false;
+        settings.enemies = !settings.enemies;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v_and_shift_v_toggle_their_own_side_and_ctrl_v_sets_both() {
+        let mut s = NameplateSettings {
+            enemies: false,
+            friends: true,
+        };
+        toggle_nameplates(&mut s, false, false);
+        assert!(s.enemies && s.friends, "V leaves ally plates alone");
+        toggle_nameplates(&mut s, false, true);
+        assert!(s.enemies && !s.friends, "Shift+V leaves enemy plates alone");
+        toggle_nameplates(&mut s, true, false);
+        assert!(s.enemies && s.friends, "Ctrl+V shows both when either is off");
+        toggle_nameplates(&mut s, true, false);
+        assert!(!s.enemies && !s.friends, "Ctrl+V hides both when both are on");
     }
 }
 
@@ -186,7 +208,8 @@ pub(super) fn enemy_plates(
     font: Option<Res<HudFont>>,
     ui_scale: Res<UiScale>,
     enemies: Query<(Entity, &Transform, &Enemy)>,
-    cams: Query<(&Camera, &Transform), (With<WorldCamera>, Without<Enemy>)>,
+    hero: Query<&Transform, (With<super::hero::Hero>, Without<Enemy>)>,
+    cams:Query<(&Camera, &Transform), (With<WorldCamera>, Without<Enemy>)>,
     plates: Query<(Entity, &Plate)>,
     mut nodes: Query<&mut Node>,
     mut vis: Query<&mut Visibility, With<Plate>>,
@@ -241,10 +264,17 @@ pub(super) fn enemy_plates(
     let (pw, ph) = (gx(PLATE_W), gx(PLATE_H));
     let bar_top = ph - gx(BAR_OFF_Y) - gx(BAR_H);
     let ui_viewport = viewport / s;
-    let mut candidates = Vec::new();
+    let near = hero.single().ok().map(|h| h.translation);
+    let mut encounters = Vec::new();
+    let mut nearby = Vec::new();
     for (unit, tf, en) in &enemies {
         let encounter = en.boss || en.home.is_some();
         if en.dead || !(encounter || settings.enemies) {
+            continue;
+        }
+        // Ordinary plates keep the client's 20-yard reach, measured from the hero.
+        let dist_sq = near.map_or(f32::INFINITY, |h| h.distance_squared(tf.translation));
+        if !encounter && dist_sq > NEARBY_SQ {
             continue;
         }
         let head = overhead_anchor(
@@ -257,13 +287,37 @@ pub(super) fn enemy_plates(
         else {
             continue;
         };
-        candidates.push((unit, en, screen));
+        if encounter {
+            encounters.push((unit, en, screen));
+        } else {
+            nearby.push((dist_sq, (unit, en, screen)));
+        }
     }
+    // A packed horde still shows only its nearest few; each plate costs the overlap solver a
+    // pass over every plate seated before it.
+    nearby.sort_by(|a, b| a.0.total_cmp(&b.0));
+    nearby.truncate(MAX_NEARBY);
+    let mut nearby: Vec<_> = nearby.into_iter().map(|(_, c)| c).collect();
     // Entity order makes the overlap solver's priority stable; query iteration order cannot
-    // reshuffle a packed group from frame to frame.
-    candidates.sort_by_key(|(unit, _, _)| unit.index());
+    // reshuffle a packed group from frame to frame. Encounters claim their seats first, so the
+    // horde's plates make way for them rather than the other way round.
+    encounters.sort_by_key(|(unit, _, _)| unit.index());
+    nearby.sort_by_key(|(unit, _, _)| unit.index());
+    // An ordinary unit that left the reach or the nearest few gives its plate back.
+    by_unit.retain(|unit, plate| {
+        let keep = enemies
+            .get(*unit)
+            .is_ok_and(|(_, _, e)| e.boss || e.home.is_some())
+            || nearby.iter().any(|(u, _, _)| u == unit);
+        if !keep {
+            if let Ok(mut c) = commands.get_entity(*plate) {
+                c.despawn();
+            }
+        }
+        keep
+    });
 
-    for (unit, en, screen) in candidates {
+    for (unit, en, screen) in encounters.into_iter().chain(nearby) {
         let Some(&plate) = by_unit.get(&unit) else {
             let p = spawn_plate(&mut commands, &font.0, en);
             by_unit.insert(unit, p);

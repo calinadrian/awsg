@@ -654,7 +654,8 @@ mod tests {
                 audio: true,
                 names: false,
             })
-            .init_resource::<super::plates::NameplateSettings>()
+            .init_resource::<crate::survivors::plates::NameplateSettings>()
+            .insert_resource(State::new(Phase::Paused))
             .add_observer(crate::sound::on_cvar)
             .add_observer(crate::world_backdrop::on_cvar)
             .add_systems(Update, clicks);
