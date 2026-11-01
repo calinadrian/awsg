@@ -30,6 +30,9 @@ pub(super) struct Pose {
     pub revival: u32,
     #[serde(default)]
     pub outfit: Vec<asr_coop::economy::LookItem>,
+    /// This player's own damage this run, as their client counts it, for the damage meter.
+    #[serde(default)]
+    pub damage: f64,
 }
 
 // Snapshot rows are the bulk of host traffic: short keys, omitted defaults and
@@ -784,6 +787,8 @@ fn receive(
                             || !pose.yaw.is_finite()
                             || !pose.hp.is_finite()
                             || !pose.maximum.is_finite()
+                            || !pose.damage.is_finite()
+                            || pose.damage < 0.
                             || pose.outfit.len() > 19
                             || pose.outfit.iter().any(|i| i.display > 2_000_000 || i.slot.len() > 32 || i.category.len() > 32)
                         {
@@ -1348,6 +1353,7 @@ fn transmit(
         paused: matches!(phase.get(), Phase::LevelUp | Phase::Paused),
         revival: coop.revival,
         outfit: run.gear_look.clone(),
+        damage: run.damage_done,
     };
     let own_peer = coop.peer;
     coop.players.insert(own_peer, pose.clone());

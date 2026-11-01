@@ -15,6 +15,7 @@ mod cards;
 mod coop;
 mod party_frames;
 mod coop_ui;
+mod damage_meter;
 mod data;
 mod drive;
 mod dungeon;
@@ -83,6 +84,7 @@ impl Plugin for SurvivorsPlugin {
             .add_plugins(grade::plugin)
             .add_plugins(options::plugin)
             .add_plugins((coop::plugin, coop_ui::plugin, progress::plugin, party_frames::plugin))
+            .add_plugins(damage_meter::plugin)
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()

@@ -1824,7 +1824,7 @@ pub(super) fn refresh_results(
 }
 
 /// 12.3k, 4.5M.
-fn compact(v: f64) -> String {
+pub(super) fn compact(v: f64) -> String {
     if v >= 1e6 {
         format!("{:.1}M", v / 1e6)
     } else if v >= 1e4 {

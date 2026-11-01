@@ -953,6 +953,9 @@ pub(super) fn apply_hits(
             if leech > 0.0 {
                 run.heal(dmg * leech);
             }
+            // The meter counts health actually taken, so a guest's hits on a replica the host
+            // has already killed (held at 0.001 until the kill arrives) add nothing.
+            let landed = dmg.min(en.hp.max(0.0));
             en.hp -= dmg;
             let was_sheep = run
                 .passives
@@ -981,7 +984,7 @@ pub(super) fn apply_hits(
             {
                 en.stun_t = en.stun_t.max(10.0);
             }
-            run.damage_done += f64::from(dmg);
+            run.damage_done += f64::from(landed);
             fx.number(e, dmg, h.crit, h.color);
             if let Effect::Drain(frac) = h.effect {
                 run.heal(dmg * frac);
@@ -1071,8 +1074,8 @@ pub(super) fn apply_hits(
         en.dots.retain(|d| d.left > 0.0);
         if dealt > 0.0 {
             run.heal(drained);
+            run.damage_done += f64::from(dealt.min(en.hp.max(0.0)));
             en.hp -= dealt;
-            run.damage_done += f64::from(dealt);
             fx.number(e, dealt, false, COLOR_SPELL);
             if coop.guest() {
                 if let Ok(id) = replicas.get(e) {
