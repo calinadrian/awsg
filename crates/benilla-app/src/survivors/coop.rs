@@ -1,11 +1,10 @@
 //! Player-hosted matches over the operator's directory. Clients own their hero/build;
 //! the host owns enemies, the encounter clock, shared pickups and the result.
 use super::{
-    data,
+    Phase, Run, Selection, data,
     enemies::{self, Enemy},
     hero::{self, Hero},
     units::{self, Fx, Marks},
-    Phase, Run, Selection,
 };
 use crate::net::{FieldChanged, Guid, ObjectStore};
 use asr_coop::{Client, Member, Room, Server};
@@ -619,7 +618,13 @@ fn receive(
                                         Vec3::from_array(p.pos),
                                         kind,
                                     );
-                                    commands.entity(e).insert(PickupReplica(p.id));
+                                    // The host has already seated/attracted this pickup.
+                                    // Local terrain seating would overwrite its replicated Y
+                                    // every frame, leaving the wisp at a different position.
+                                    commands
+                                        .entity(e)
+                                        .remove::<super::loot_ground::GroundedLoot>()
+                                        .insert((PickupReplica(p.id), Visibility::Inherited));
                                 }
                             }
                             let roster = data::roster(selection.stage);
@@ -848,7 +853,7 @@ fn transmit(
         &crate::creature_anim::MovementState,
     )>,
     lairs: Res<super::guardians::Lairs>,
-    pickups: Query<(&Guid, &Transform, &enemies::Gem)>,
+    pickups: Query<(&Guid, &Transform, &enemies::Gem, &Visibility)>,
     telegraphs: Res<super::telegraphs::Telegraphs>,
 ) {
     coop.tick += real.delta_secs();
@@ -921,7 +926,8 @@ fn transmit(
         });
         let pickups = pickups
             .iter()
-            .map(|(id, tf, gem)| {
+            .filter(|(_, _, _, visible)| **visible != Visibility::Hidden)
+            .map(|(id, tf, gem, _)| {
                 let (kind, amount) = match gem.kind {
                     enemies::GemKind::Xp(n) => (0, n as f32),
                     enemies::GemKind::Gold(n) => (1, n as f32),

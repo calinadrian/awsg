@@ -8,10 +8,10 @@ use bevy::prelude::*;
 
 use super::abilities::Hit;
 use super::data::{self, EnemyDef};
-use super::hero::{self, Hero, HERO_RADIUS};
-use super::units::{self, flat, yaw_toward, Fx, Marks, UnitSpec, COLOR_HURT};
+use super::hero::{self, HERO_RADIUS, Hero};
+use super::units::{self, COLOR_HURT, Fx, Marks, UnitSpec, flat, yaw_toward};
 use super::{Phase, Rng, Run, Selection};
-use crate::creature_anim::{move_flags, MovementState};
+use crate::creature_anim::{MovementState, move_flags};
 use crate::net::{FieldChanged, Guid, ObjectStore};
 
 #[derive(Component)]
@@ -139,6 +139,8 @@ pub(super) struct Gem {
     pub kind: GemKind,
     pulled: bool,
     speed: f32,
+    target_peer: Option<u32>,
+    flight: f32,
 }
 
 /// The display row and scale a pickup wears; XP uses `CreatureDisplayInfo`.
@@ -840,6 +842,8 @@ pub(super) fn drop_loot(
                     kind: GemKind::Xp(xp),
                     pulled: false,
                     speed: 6.0,
+                    target_peer: None,
+                    flight: 0.0,
                 });
             } else {
                 spawn_gem(&mut commands, run.guid(), pos, GemKind::Xp(xp));
@@ -1129,6 +1133,8 @@ pub(super) fn spawn_gem(commands: &mut Commands, serial: u64, pos: Vec3, kind: G
         kind,
         pulled: false,
         speed: 6.0,
+        target_peer: None,
+        flight: 0.0,
     });
     e
 }
@@ -1156,15 +1162,24 @@ pub(super) fn collect_gems(
         if *visible == Visibility::Hidden {
             continue;
         }
-        let (target_peer, target) = coop
-            .players
-            .values()
-            .filter(|p| p.peer != 0 && p.loaded && p.hp > 0.)
-            .map(|p| (p.peer, Vec3::from_array(p.pos) + Vec3::Y))
-            .chain(run.dead_t.is_none().then_some((0, target)))
-            .min_by(|a, b| {
-                a.1.distance_squared(tf.translation)
-                    .total_cmp(&b.1.distance_squared(tf.translation))
+        let candidates = || {
+            coop.players
+                .values()
+                .filter(|p| p.peer != 0 && p.loaded && p.hp > 0.)
+                .map(|p| (p.peer, Vec3::from_array(p.pos) + Vec3::Y))
+                .chain(run.dead_t.is_none().then_some((0, target)))
+        };
+        // Once attracted, keep the recipient instead of switching between nearby
+        // co-op players every frame. Retarget only if that player is no longer alive.
+        let recipient = g
+            .target_peer
+            .and_then(|peer| candidates().find(|p| p.0 == peer));
+        let (target_peer, target) = recipient
+            .or_else(|| {
+                candidates().min_by(|a, b| {
+                    a.1.distance_squared(tf.translation)
+                        .total_cmp(&b.1.distance_squared(tf.translation))
+                })
             })
             .unwrap_or((0, target));
         let d = target - tf.translation;
@@ -1188,6 +1203,7 @@ pub(super) fn collect_gems(
         }
         if !g.pulled && flat(d).length() <= stats.magnet {
             g.pulled = true;
+            g.target_peer = Some(target_peer);
             // Attracted wisps leave the floor and follow the hero even outside pickup range.
             commands
                 .entity(e)
@@ -1196,7 +1212,13 @@ pub(super) fn collect_gems(
         if !g.pulled {
             continue;
         }
-        if dist < 0.9 {
+        g.target_peer = Some(target_peer);
+        g.flight += dt;
+        g.speed += 30.0 * dt;
+        // Credit on this frame's arrival, not the next frame (which may be
+        // paused by a level-up). Contact is planar so floor/capsule height
+        // differences cannot leave a wisp floating at shoulder height.
+        if flat(d).length() < 0.9 || dist <= g.speed * dt || g.flight >= 0.75 {
             match g.kind {
                 GemKind::Xp(base) => {
                     collected_xp = collected_xp.saturating_add(base);
@@ -1222,7 +1244,6 @@ pub(super) fn collect_gems(
             commands.entity(e).despawn();
             continue;
         }
-        g.speed += 30.0 * dt;
         tf.translation += d / dist * (g.speed * dt).min(dist);
     }
     // Original collects a frame's base XP, applies growth, then rounds once, minimum 1
