@@ -707,7 +707,17 @@ pub(crate) struct MapDef {
     bosses: &'static [Foe],
 }
 
-pub(crate) static MAPS: &[MapDef] = &[
+/// The collaboration build currently ships only the Elwynn arena. Keep the other
+/// definitions available for later packs without requesting their runtime assets.
+pub(crate) static MAPS: std::sync::LazyLock<&'static [MapDef]> = std::sync::LazyLock::new(|| {
+    let index = ALL_MAPS
+        .iter()
+        .position(|map| map.name == "Elwynn Forest")
+        .expect("Elwynn arena definition");
+    &ALL_MAPS[index..index + 1]
+});
+
+static ALL_MAPS: &[MapDef] = &[
     MapDef {
         name: "The Barrens",
         zone: "Kalimdor",

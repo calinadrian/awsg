@@ -38,8 +38,34 @@ $env:WOW_DATA = 'D:/Games/WoW/Data'
 cargo run --release -p warcraft-survivors
 ```
 
-No server or account is needed for survivors mode. Controls are in
+This collaboration build currently offers **Elwynn Forest only**, with all
+current races and classes. No server or account is needed. Controls are in
 [CONTROLS.md](CONTROLS.md).
+
+## Small local player package
+
+To create a separate Elwynn-only player folder from your existing local data:
+
+```powershell
+python3.12 scripts/package_elwynn.py --zip
+```
+
+Any Python 3.10+ interpreter works; substitute its command if needed. The script
+builds the asset reader and player executable, reads your existing MPQ patch
+chain, and writes `out/elwynn-playable/` and `out/elwynn-playable.zip`.
+Run that folder's `Play.cmd` to play
+without Rust. The original `wow-data/Data/` is kept intact.
+
+The pack keeps the arena's nine detailed terrain tiles, nearby coarse horizon
+heights, referenced scenery, current character appearances and equipment,
+class spell effects, audio, and shared UI. Other detailed zones, dungeons,
+cinematics, and the full world-map UI are excluded. `asset-manifest.json` records
+included files and any references already missing from the source data. Shared
+spell/UI libraries are retained conservatively; this is not a byte-minimal pack.
+
+The player archive contains locally supplied game assets. It remains ignored
+under `out/`; keep it out of GitHub. Building and packaging do not verify
+gameplay, which is left for manual testing.
 
 ## Working together
 
