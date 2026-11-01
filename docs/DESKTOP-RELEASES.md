@@ -76,6 +76,11 @@ the installer, runtime ZIP, update manifest and checksum. The workflow can also
 be run manually from GitHub Actions. It does not run gameplay or installer tests.
 Local source edits and local builds alone do not publish updates.
 
+After a successful publication, the workflow and publish script retain only the
+three highest published desktop versions. Older releases and their uploaded
+assets are removed; Git tags, draft releases and prereleases are retained.
+Cleanup checks that the expected newest version is public before deleting anything.
+
 The four-part desktop version increases with the workflow run number and retry
 number, starting above the local `1.0.0.0` installer. Desktop release versions
 also advance past explicitly numbered desktop releases already on GitHub, so a

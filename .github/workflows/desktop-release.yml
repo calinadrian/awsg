@@ -56,3 +56,4 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Desktop release publication failed.' }
           gh release edit "desktop-v$version" --repo "$env:GITHUB_REPOSITORY" --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'The release remains a draft because publication failed.' }
+          ./desktop/Prune-Releases.ps1 -Repository "$env:GITHUB_REPOSITORY" -ExpectedLatest "desktop-v$version"

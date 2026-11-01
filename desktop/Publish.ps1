@@ -18,4 +18,5 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }
     & gh release edit $tag --repo calinadrian/awsg --draft=false --latest
     if ($LASTEXITCODE -ne 0) { throw 'Assets were uploaded to a draft, but the release could not be published.' }
+    & (Join-Path $PSScriptRoot 'Prune-Releases.ps1') -ExpectedLatest $tag
 } finally { Pop-Location }
