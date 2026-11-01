@@ -76,7 +76,10 @@ protects them from damage while the encounter and other players continue.
 Their automatic attacks wait until they return. Loading screens still hold
 the encounter until party members are ready; network traffic uses real time.
 Solo reward screens continue to pause the run.
-Fallen players watch until the party wins or everyone falls. A quitting or
+Fallen players cannot heal themselves back to life. A living teammate can stand
+within five yards of a corpse for three continuous seconds to resurrect that
+player at half health. Leaving range resets progress; reward and pause menus
+suspend it. The host ends the run in defeat when everyone falls. A quitting or
 crashing host ends the party.
 
 Party frames show names, levels, health and choosing/loading status beneath

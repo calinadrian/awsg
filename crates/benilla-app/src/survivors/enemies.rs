@@ -1232,7 +1232,7 @@ pub(super) fn collect_gems(
                 }
                 GemKind::Heal(hp) => {
                     if target_peer == 0 {
-                        run.hp = (run.hp + hp).min(stats.max_hp);
+                        run.heal(hp);
                     } else {
                         run.coop_damage.push((target_peer, -hp));
                     }

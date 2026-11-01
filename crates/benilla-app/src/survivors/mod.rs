@@ -145,6 +145,7 @@ impl Plugin for SurvivorsPlugin {
                     enemies::collect_gems.run_if(coop::authority),
                     caches::collect.run_if(in_state(Phase::Playing)),
                     hero::hero_vitals,
+                    coop::revive_teammates,
                     ring::light_ring,
                 )
                     .chain()
@@ -469,6 +470,13 @@ impl Default for Run {
 }
 
 impl Run {
+    /// Ordinary healing cannot bring back a fallen hero, including on the lethal frame.
+    pub fn heal(&mut self, amount: f32) {
+        if self.dead_t.is_none() && self.hp > 0.0 {
+            self.hp = (self.hp + amount).min(self.stats().max_hp);
+        }
+    }
+
     pub fn stats(&self) -> Stats {
         let mut s = Stats {
             might: 1.0,

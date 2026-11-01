@@ -367,24 +367,23 @@ pub(super) fn hero_vitals(
 ) {
     let dt = time.delta_secs();
     let stats = run.stats();
-    if std::mem::take(&mut run.struck) {
+    if std::mem::take(&mut run.struck) && run.hp > 0.0 && run.dead_t.is_none() {
         super::talents::trigger(&mut run, &mut rng, 8, None);
     }
-    super::talents::low_health(&mut run, &mut rng);
+    if run.hp > 0.0 && run.dead_t.is_none() {
+        super::talents::low_health(&mut run, &mut rng);
+    }
     let Ok((entity, guid, mut store, mut marks)) = hero.single_mut() else {
         return;
     };
     if let Some(t) = run.dead_t.as_mut() {
         *t += dt;
-        if *t > 3.0 && !coop.guest() && !coop.living_guests() {
+        if *t > 3.0 && !coop.active() {
             next.set(Phase::GameOver);
         }
+        run.hp = 0.0;
         if coop.active() && !coop.guest() {
             run.elapsed += dt;
-        }
-        if coop.active() && !coop.guest() && run.slain_last {
-            run.won = true;
-            next.set(Phase::GameOver);
         }
         return;
     }
@@ -402,7 +401,7 @@ pub(super) fn hero_vitals(
         heal += run.heal_rate * dt.min(run.heal_t);
         run.heal_t = (run.heal_t - dt).max(0.0);
     }
-    run.hp = (run.hp + heal).min(stats.max_hp);
+    run.heal(heal);
 
     // The buffs show as their own state kits: the shield bubble, the immunity glow, the orbs.
     let mut shown: Vec<u32> = Vec::new();
@@ -438,6 +437,13 @@ pub(super) fn hero_vitals(
     if run.hp <= 0.0 {
         run.hp = 0.0;
         run.dead_t = Some(0.0);
+        run.heal_t = 0.0;
+        if coop.active() {
+            run.banner = Some((
+                "Fallen: a teammate can revive you within 5 yards for 3 seconds".into(),
+                8.0,
+            ));
+        }
         units::kill_unit(&mut store);
         marks.clear();
         marks.flush(entity, guid.0, &mut store, &mut fields);

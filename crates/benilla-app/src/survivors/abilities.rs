@@ -603,7 +603,7 @@ pub(super) fn cast_abilities(
                         run.heal_rate = p.dmg / p.duration;
                         run.heal_t = p.duration;
                     } else {
-                        run.hp = (run.hp + p.dmg).min(stats.max_hp);
+                        run.heal(p.dmg);
                     }
                     fx.cast(me, def.spell, &[me], None);
                     fx.number(me, p.dmg, false, COLOR_HEAL);
@@ -906,8 +906,8 @@ pub(super) fn apply_hits(
                 boss: en.boss,
             });
             run.kills += 1;
-            let max = run.stats().max_hp;
-            run.hp = (run.hp + run.talents.stat(15) + run.jewel_stat(15)).min(max);
+            let healing = run.talents.stat(15) + run.jewel_stat(15);
+            run.heal(healing);
             if en.boss {
                 run.banner = Some((format!("{} is slain!", en.def.name), 3.0));
             }
@@ -944,8 +944,7 @@ pub(super) fn apply_hits(
             }
             let leech = run.talents.stat(14) + run.jewel_stat(18);
             if leech > 0.0 {
-                let max = run.stats().max_hp;
-                run.hp = (run.hp + dmg * leech).min(max);
+                run.heal(dmg * leech);
             }
             en.hp -= dmg;
             let was_sheep = run
@@ -978,8 +977,7 @@ pub(super) fn apply_hits(
             run.damage_done += f64::from(dmg);
             fx.number(e, dmg, h.crit, h.color);
             if let Effect::Drain(frac) = h.effect {
-                let max = run.stats().max_hp;
-                run.hp = (run.hp + dmg * frac).min(max);
+                run.heal(dmg * frac);
             }
         }
         if h.dot > 0.0 && h.dot_dur > 0.0 {
@@ -1013,7 +1011,7 @@ pub(super) fn apply_hits(
             }
             Effect::Heal(f) => {
                 let max = run.stats().max_hp;
-                run.hp = (run.hp + max * f).min(max);
+                run.heal(max * f);
             }
             Effect::Shield(f) => {
                 let max = run.stats().max_hp;
@@ -1065,7 +1063,7 @@ pub(super) fn apply_hits(
         }
         en.dots.retain(|d| d.left > 0.0);
         if dealt > 0.0 {
-            run.hp = (run.hp + drained).min(run.stats().max_hp);
+            run.heal(drained);
             en.hp -= dealt;
             run.damage_done += f64::from(dealt);
             fx.number(e, dealt, false, COLOR_SPELL);

@@ -38,7 +38,8 @@ Options:
   --save PATH     the save (default: %APPDATA%\\wenilla-rogue\\characters.txt)
   --recon PATH    folder holding azs_rse1.py (the reference RSE1 implementation)
   --book PATH     the reimplementation's talent book (import only; default:
-                  <repo>/benilla-config/survivors-talents.txt)
+                  BENILLA_HOME, then the installed ASR Game config if present,
+                  then <repo>/benilla-config/survivors-talents.txt)
   --dry-run       with import, show what would be written without writing
 
 Writes back atomically: backs up first, refuses if the file changed on disk since
@@ -154,6 +155,12 @@ def spent_cost(ranks):
 
 
 def book_default():
+    if os.environ.get('BENILLA_HOME'):
+        return Path(os.environ['BENILLA_HOME']) / 'survivors-talents.txt'
+    if os.environ.get('LOCALAPPDATA'):
+        installed = Path(os.environ['LOCALAPPDATA']) / 'ASRGame' / 'benilla-config'
+        if installed.is_dir():
+            return installed / 'survivors-talents.txt'
     return Path(__file__).resolve().parent.parent / 'benilla-config' / 'survivors-talents.txt'
 
 

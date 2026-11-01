@@ -25,6 +25,8 @@ pub(super) struct Pose {
     pub level: u32,
     pub loaded: bool,
     pub paused: bool,
+    #[serde(default)]
+    pub revival: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -134,6 +136,8 @@ pub(super) struct Coop {
     tick: f32,
     remote_paused: bool,
     since_host: f32,
+    revival: u32,
+    revive_progress: HashMap<u32, f32>,
 }
 
 impl Default for Coop {
@@ -178,6 +182,8 @@ impl Default for Coop {
             tick: 0.,
             remote_paused: true,
             since_host: 0.,
+            revival: 0,
+            revive_progress: HashMap::new(),
         }
     }
 }
@@ -337,6 +343,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             PostUpdate,
             (
+                sync_hero_health,
                 sync_allies,
                 smooth_replicas,
                 play_visuals,
@@ -345,6 +352,128 @@ pub(super) fn plugin(app: &mut App) {
             )
                 .chain(),
         );
+}
+
+fn resurrect(run: &mut Run) {
+    run.dead_t = None;
+    run.hp = (run.stats().max_hp * 0.5).max(1.0);
+    run.heal_t = 0.0;
+    run.banner = Some(("Resurrected by a teammate".into(), 3.0));
+}
+
+/// Original ASR co-op: three seconds within five yards, then half health.
+/// Only the host advances the channel and decides a party wipe.
+pub(super) fn revive_teammates(
+    time: Res<Time>,
+    phase: Res<State<Phase>>,
+    mut next: ResMut<NextState<Phase>>,
+    mut coop: ResMut<Coop>,
+    mut run: ResMut<Run>,
+    heroes: Query<&Transform, With<Hero>>,
+) {
+    if !coop.active() || coop.guest() {
+        return;
+    }
+    let Ok(tf) = heroes.single() else { return };
+    if let Some(local) = coop.players.get_mut(&0) {
+        local.hp = run.hp;
+        local.maximum = run.stats().max_hp;
+        local.pos = tf.translation.to_array();
+    }
+    // Loading players are not corpses. Wait until every remaining member is known.
+    let ready = coop.room.as_ref().is_some_and(|room| {
+        room.members
+            .iter()
+            .all(|m| coop.players.get(&m.peer).is_some_and(|p| p.loaded))
+    });
+    if !ready {
+        return;
+    }
+    if coop.players.values().all(|p| p.hp <= 0.0) {
+        run.won = false;
+        next.set(Phase::GameOver);
+        coop.revive_progress.clear();
+        return;
+    }
+    // Menus preserve channel progress without advancing it.
+    if *phase.get() != Phase::Playing || coop.players.values().any(|p| p.paused) {
+        return;
+    }
+    let fallen: Vec<_> = coop
+        .players
+        .values()
+        .filter(|p| p.loaded && p.hp <= 0.0)
+        .map(|p| (p.peer, Vec3::from_array(p.pos)))
+        .collect();
+    let dead: HashSet<_> = fallen.iter().map(|(peer, _)| *peer).collect();
+    coop.revive_progress.retain(|peer, _| dead.contains(peer));
+    for (peer, corpse) in fallen {
+        let nearby = coop.players.values().any(|p| {
+            p.peer != peer
+                && p.loaded
+                && !p.paused
+                && p.hp > 0.0
+                && Vec3::from_array(p.pos).distance_squared(corpse) <= 25.0
+        });
+        if !nearby {
+            coop.revive_progress.remove(&peer);
+            continue;
+        }
+        let progress = coop.revive_progress.entry(peer).or_default();
+        *progress += time.delta_secs();
+        if *progress < 3.0 {
+            continue;
+        }
+        coop.revive_progress.remove(&peer);
+        run.coop_damage.retain(|(target, _)| *target != peer);
+        if let Some(p) = coop.players.get_mut(&peer) {
+            p.revival += 1;
+            p.hp = (p.maximum * 0.5).max(1.0);
+        }
+        if peer == 0 {
+            coop.revival = coop.players[&0].revival;
+            resurrect(&mut run);
+        }
+    }
+    if run.slain_last {
+        run.won = true;
+        next.set(Phase::GameOver);
+    }
+}
+
+fn sync_hero_health(
+    run: Res<Run>,
+    mut hero: Query<(Entity, &Guid, &mut ObjectStore), With<Hero>>,
+    mut fields: MessageWriter<FieldChanged>,
+) {
+    for (entity, guid, mut store) in &mut hero {
+        let hp = if run.dead_t.is_some() {
+            0
+        } else {
+            run.hp.max(0.0).ceil() as u32
+        };
+        let old = store
+            .0
+            .raw_fields()
+            .find(|(i, _)| *i == 22)
+            .map_or(0, |(_, v)| v);
+        store
+            .0
+            .merge(benilla_protocol::messages::ObjectFields::from_pairs(&[
+                (22, hp),
+                (28, run.stats().max_hp.ceil() as u32),
+            ]));
+        if old != hp {
+            fields.write(FieldChanged {
+                entity,
+                guid: guid.0,
+                kind: benilla_protocol::messages::ObjectType::Unit,
+                index: 22,
+                old,
+                new: hp,
+            });
+        }
+    }
 }
 
 fn events(coop: &Coop) -> Vec<Result<Server, String>> {
@@ -457,6 +586,8 @@ fn receive(
                 coop.open = false;
                 coop.remote_paused = true;
                 coop.since_host = 0.;
+                coop.revival = 0;
+                coop.revive_progress.clear();
                 coop.xp = 0;
                 coop.gold = 0;
                 coop.caches.clear();
@@ -511,6 +642,15 @@ fn receive(
                             continue;
                         }
                         pose.peer = peer;
+                        // Repeat the host's new life until the guest acknowledges it; stale
+                        // packets must neither undo a resurrection nor resurrect an old corpse.
+                        if coop
+                            .players
+                            .get(&peer)
+                            .is_some_and(|p| p.revival != pose.revival)
+                        {
+                            continue;
+                        }
                         coop.players.insert(peer, pose.clone());
                         for mut visual in visuals.into_iter().take(64).filter(valid_visual) {
                             visual.peer = Some(peer);
@@ -568,6 +708,12 @@ fn receive(
                                 .filter(|v| v.peer != Some(me) && valid_visual(v)),
                         );
                         coop.players = players.into_iter().map(|p| (p.peer, p)).collect();
+                        if let Some(p) = coop.players.get(&me).cloned() {
+                            if p.revival > coop.revival {
+                                coop.revival = p.revival;
+                                resurrect(&mut run);
+                            }
+                        }
                         run.elapsed = elapsed;
                         run.kills = kills;
                         run.bosses = bosses;
@@ -598,7 +744,7 @@ fn receive(
                         for (target, raw) in damage {
                             if target == coop.peer {
                                 if raw < 0. && run.dead_t.is_none() {
-                                    run.hp = (run.hp - raw).min(run.stats().max_hp);
+                                    run.heal(-raw);
                                 } else if raw >= 0. && *phase.get() == Phase::Playing {
                                     hero::hurt_hero(&mut run, raw);
                                     run.struck = true;
@@ -835,7 +981,7 @@ fn sync_allies(
             } else {
                 0
             };
-            let hp = p.hp.max(0.) as u32;
+            let hp = p.hp.max(0.).ceil() as u32;
             let changed = store
                 .0
                 .raw_fields()
@@ -845,7 +991,7 @@ fn sync_allies(
             store
                 .0
                 .merge(benilla_protocol::messages::ObjectFields::from_pairs(&[
-                    (22, p.hp.max(0.) as u32),
+                    (22, hp),
                     (28, p.maximum as u32),
                     (34, p.level),
                 ]));
@@ -859,7 +1005,7 @@ fn sync_allies(
                     kind: benilla_protocol::messages::ObjectType::Unit,
                     index: 22,
                     old: 0,
-                    new: p.hp.max(0.) as u32,
+                    new: hp,
                 });
             }
         }
@@ -949,6 +1095,7 @@ fn transmit(
         level: run.level,
         loaded: !entry.0 && !loading.covering() && *phase.get() != Phase::Menu,
         paused: matches!(phase.get(), Phase::LevelUp | Phase::Paused),
+        revival: coop.revival,
     };
     let own_peer = coop.peer;
     coop.players.insert(own_peer, pose.clone());
