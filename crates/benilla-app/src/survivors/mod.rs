@@ -153,8 +153,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(
                 Update,
                 (
-                    hud::apply_ui_scale,
-                    hero::follow_map,
+                    (hud::apply_ui_scale, hero::follow_map).chain(),
                     hud::menu_preview,
                     hud::buttons,
                     hud::keys,
