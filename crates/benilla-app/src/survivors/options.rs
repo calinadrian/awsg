@@ -13,10 +13,14 @@ impl Options {
     pub fn escape(&mut self, phase: Phase, next: &mut NextState<Phase>) {
         if self.settings {
             self.settings = false;
+            if phase == Phase::Menu {
+                self.open = false;
+            }
         } else if self.open || phase == Phase::Paused {
             self.resume(phase, next);
         } else {
             self.open = true;
+            self.settings = phase == Phase::Menu;
             if phase == Phase::Playing {
                 next.set(Phase::Paused);
             }
@@ -311,6 +315,7 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
 
 fn clicks(
     mut options: ResMut<Options>,
+    phase: Res<State<Phase>>,
     mut cvars: ResMut<crate::cvars::Cvars>,
     mut commands: Commands,
     mut buttons: Query<(&Interaction, &Action, &mut BackgroundColor), Changed<Interaction>>,
@@ -330,7 +335,12 @@ fn clicks(
         match *action {
             Action::Graphics => options.audio = false,
             Action::Audio => options.audio = true,
-            Action::Back => options.settings = false,
+            Action::Back => {
+                options.settings = false;
+                if *phase.get() == Phase::Menu {
+                    options.open = false;
+                }
+            }
             Action::Adjust(i, delta) => {
                 let s = &SETTINGS[i];
                 if s.audio != options.audio {

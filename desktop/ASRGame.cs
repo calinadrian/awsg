@@ -220,6 +220,13 @@ namespace ASRDesktop {
             // Do not touch a live game's save file; it will save its in-memory book at exit.
             if (!RunningGame(root)) { try { RecoverSaves(root); } catch (Exception error) { Log("Save recovery: " + error.Message); } }
             Directory.CreateDirectory(home);
+            if (!RunningGame(root)) {
+                try { OriginalTalents.Import(home); }
+                catch (Exception error) {
+                    Log("Original talent import: " + error.Message);
+                    MessageBox.Show("Your original talents could not be imported: " + error.Message + "\nYour existing saves have been kept.", Title);
+                }
+            }
             var info = new ProcessStartInfo(Path.Combine(folder, "warcraft-survivors.exe")) { WorkingDirectory = root, UseShellExecute = false };
             info.EnvironmentVariables["WOW_DATA"] = data;
             info.EnvironmentVariables["BENILLA_HOME"] = home;

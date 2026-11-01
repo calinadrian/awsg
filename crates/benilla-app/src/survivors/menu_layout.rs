@@ -2,7 +2,7 @@
 use super::{
     data, front_end as skin,
     hud::{HudFont, MenuRoot},
-    menu::{MenuAction, MenuBuilt, PickDescription, PickName, RaceFace},
+    menu::{ClassSlot, MenuAction, MenuBuilt, PickDescription, PickName, RaceFace},
     menu_icons::icon_button,
     races::{race_tc, RACES},
 };
@@ -160,13 +160,16 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
         })
         .with_children(|grid| {
             for (i, class) in data::CLASSES.iter().enumerate() {
-                grid.spawn(Node {
-                    width: Val::Px(70.),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(4.),
-                    ..default()
-                })
+                grid.spawn((
+                    ClassSlot(i),
+                    Node {
+                        width: Val::Px(70.),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(4.),
+                        ..default()
+                    },
+                ))
                 .with_children(|p| {
                     let face = art.classes.as_ref().and_then(|(sheet, size)| {
                         class_tc(class.id).map(|tc| (sheet.clone(), tc_rect(*size, tc)))

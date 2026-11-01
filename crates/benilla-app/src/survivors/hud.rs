@@ -1114,7 +1114,7 @@ pub(super) fn buttons(
                         options.settings = true
                     }
                     (UiAction::MainMenu, _)
-                        if options.open
+                        if (*phase.get() != Phase::Menu && options.open)
                             || matches!(*phase.get(), Phase::Paused | Phase::GameOver) =>
                     {
                         options.open = false;
@@ -2274,7 +2274,7 @@ pub(super) fn show_panels(
     for root in &mut roots.p3() {
         set(
             root,
-            (p == Phase::Paused || options.open) && !options.settings,
+            p != Phase::Menu && (p == Phase::Paused || options.open) && !options.settings,
         );
     }
     for root in &mut roots.p4() {

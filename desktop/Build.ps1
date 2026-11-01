@@ -64,7 +64,7 @@ using System.Reflection;
 namespace ASRDesktop { static class ReleaseInfo { internal const string Version = "$Version"; internal const string Repository = "calinadrian/awsg"; } }
 "@ | Set-Content -LiteralPath $releaseInfo -Encoding UTF8
 $launcher = Join-Path $output 'ASRGame.exe'
-& $compiler /nologo /target:winexe /platform:x64 /optimize+ "/out:$launcher" "/win32icon:$iconPath" "/win32manifest:$(Join-Path $PSScriptRoot 'ASRGame.manifest')" "/reference:System.dll" "/reference:System.Core.dll" "/reference:System.Drawing.dll" "/reference:System.Windows.Forms.dll" "/reference:System.IO.Compression.dll" "/reference:System.IO.Compression.FileSystem.dll" "/reference:System.Web.Extensions.dll" (Join-Path $PSScriptRoot 'ASRGame.cs') $releaseInfo
+& $compiler /nologo /target:winexe /platform:x64 /optimize+ "/out:$launcher" "/win32icon:$iconPath" "/win32manifest:$(Join-Path $PSScriptRoot 'ASRGame.manifest')" "/reference:System.dll" "/reference:System.Core.dll" "/reference:System.Drawing.dll" "/reference:System.Windows.Forms.dll" "/reference:System.IO.Compression.dll" "/reference:System.IO.Compression.FileSystem.dll" "/reference:System.Web.Extensions.dll" (Join-Path $PSScriptRoot 'ASRGame.cs') (Join-Path $PSScriptRoot 'OriginalTalents.cs') $releaseInfo
 if ($LASTEXITCODE -ne 0) { throw 'Installer/updater compilation failed.' }
 
 Add-Type -AssemblyName System.IO.Compression

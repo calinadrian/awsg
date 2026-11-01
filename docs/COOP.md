@@ -97,8 +97,15 @@ per-zone runs, victories, co-op victories, best survival time and best kills.
 Rewards settle once when results open or the player returns to the menu.
 Neither the relay nor another player's host can replace these local files.
 
-The recreation does not import the original binary's character saves,
-collections or difficulty stars. Heroic difficulties and later chapter unlocks
+The Windows launcher imports each player's original class talent XP and ranks
+from their own `%APPDATA%/wenilla-rogue/characters.txt` before starting the game.
+It locates the installed original executable to read the save; portable installs
+may need to select that executable. The original save is read-only. The current
+talent book is backed up, higher local progress is preserved, and an unchanged
+original save is not imported again. No personal saves are distributed in updates.
+
+Other original character saves, collections and difficulty stars are not imported.
+Heroic difficulties and later chapter unlocks
 are not offered by the Elwynn-only build. This is not save-format compatibility
 with `D:\Personal\ASR`.
 

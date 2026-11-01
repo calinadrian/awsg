@@ -41,6 +41,9 @@ pub(super) struct RaceFace(pub(super) u8);
 #[derive(Component)]
 pub(super) struct PickName;
 
+#[derive(Component)]
+pub(super) struct ClassSlot(pub usize);
+
 /// The saved pick, `benilla-config/survivors-pick.txt` (`localStorage` on the page):
 /// `class race sex map`, restored at the menu so a reload keeps the last hero and zone.
 fn pick_path() -> Option<std::path::PathBuf> {
@@ -172,13 +175,11 @@ pub(super) fn menu_clicks(
                 set(&mut selection, &all, c, l);
             }
         }
-        // The class keeps the race and gender where it can.
+        // A class choice must keep the selected race.
         MenuAction::Class(c) => {
             let looks = &all[c];
             let l = find(looks, race, Some(sex))
-                .or_else(|| find(looks, race, None))
-                .or_else(|| find(looks, None, Some(sex)))
-                .or_else(|| find(looks, None, None));
+                .or_else(|| find(looks, race, None));
             if let Some(l) = l {
                 set(&mut selection, &all, c, l);
             }
@@ -225,6 +226,7 @@ pub(super) fn refresh_menu_ui(
     mut name: Query<(&mut Text, &mut TextColor), With<PickName>>,
     mut descriptions: Query<&mut Text, (With<PickDescription>, Without<PickName>)>,
     mut styles: Query<(&MenuAction, &mut skin::Control)>,
+    mut class_slots: Query<(&ClassSlot, &mut Node)>,
     mut cache: Local<(Option<u32>, bool, Vec<Vec<(u32, u8, u8)>>)>,
 ) {
     let have = creatures.is_some();
@@ -240,6 +242,18 @@ pub(super) fn refresh_menu_ui(
         .look
         .and_then(|i| selection.looks.get(i))
         .map(|&(_, r, s)| (r, s));
+
+    for (slot, mut node) in &mut class_slots {
+        let available = cur.is_none_or(|(race, _)| {
+            all.get(slot.0)
+                .is_some_and(|looks| find(looks, Some(race), None).is_some())
+        });
+        node.display = if available {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
 
     for (action, interaction, children, lock, disabled, mut vis) in &mut buttons {
         let selected = match *action {
