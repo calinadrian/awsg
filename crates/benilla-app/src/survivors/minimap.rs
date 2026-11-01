@@ -15,14 +15,14 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use benilla_assets::{LockRecover, MapCatalogRes, WorldAssets};
-use benilla_formats::{tile_to_world, world_to_tile, MinimapTranslate};
+use benilla_formats::{MinimapTranslate, tile_to_world, world_to_tile};
 use benilla_world::world_map::CurrentMap;
 use benilla_world::world_point::WorldPoint;
 
+use super::Run;
 use super::enemies::Enemy;
 use super::hero::Hero;
 use super::hud::UiArt;
-use super::Run;
 use crate::area::AreaTableRes;
 
 /// The composite's edge in texels; the 140-unit widget is ~200 px at 1080p.
@@ -421,7 +421,24 @@ pub(super) fn compose(
             map.tiles.entry((tx, ty)).or_insert_with(|| {
                 let hash = art.translate.tile(&dir, tx, ty)?;
                 let tile = Rgba::decode(&mut assets, &format!("textures\\Minimap\\{hash}"))?;
-                (tile.w == TILE_PX && tile.h == TILE_PX).then_some(tile.px)
+                if tile.w == TILE_PX && tile.h == TILE_PX {
+                    return Some(tile.px);
+                }
+                // Retail replacement tiles are 512². The compositor uses a 256²
+                // geographic grid, so normalize decoded art instead of rejecting it.
+                let mut pixels = Vec::with_capacity(TILE_PX * TILE_PX * 4);
+                for y in 0..TILE_PX {
+                    for x in 0..TILE_PX {
+                        pixels.extend(
+                            tile.sample(
+                                (x as f32 + 0.5) * tile.w as f32 / TILE_PX as f32,
+                                (y as f32 + 0.5) * tile.h as f32 / TILE_PX as f32,
+                            )
+                            .map(|c| c.round() as u8),
+                        );
+                    }
+                }
+                Some(pixels)
             });
         }
     }

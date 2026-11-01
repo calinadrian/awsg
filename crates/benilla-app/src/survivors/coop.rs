@@ -355,6 +355,7 @@ fn receive(
     )>,
     mut lairs: ResMut<super::guardians::Lairs>,
     mut pickups: Query<(Entity, &PickupReplica, &mut Transform), Without<Replica>>,
+    emitters: Query<(Entity, &benilla_world::particles::ParticleEmitter)>,
     mut telegraphs: ResMut<super::telegraphs::Telegraphs>,
 ) {
     if coop.running {
@@ -590,6 +591,13 @@ fn receive(
                             let present: HashSet<_> = loot.iter().map(|p| p.id).collect();
                             for (entity, id, _) in &pickups {
                                 if !present.contains(&id.0) {
+                                    for (emitter_entity, emitter) in &emitters {
+                                        if emitter.emit_host() == Some(entity)
+                                            || emitter.anchor() == Some(entity)
+                                        {
+                                            commands.entity(emitter_entity).despawn();
+                                        }
+                                    }
                                     commands.entity(entity).despawn();
                                 }
                             }

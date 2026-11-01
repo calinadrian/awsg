@@ -1,9 +1,10 @@
-//! Unit frames using the owner's retail WoW art, prepared by retail_unit_frames.py.
+//! Classic unit frames using art from the installed patch chain.
+mod classic;
 use super::{
+    Run,
     enemies::Enemy,
     frame_settings::{self, FrameSettings},
     hud::{HudFont, HudRoot, UiArt},
-    Run,
 };
 use crate::portrait::{PortraitImages, PortraitSource};
 use bevy::prelude::*;
@@ -30,7 +31,14 @@ pub(super) fn plugin(app: &mut App) {
         .add_plugins(frame_settings::plugin)
         .add_systems(
             Update,
-            (spawn, refresh, refresh_portraits, refresh_power).chain(),
+            (
+                spawn,
+                refresh,
+                refresh_portraits,
+                classic::refresh_portraits,
+                refresh_power,
+            )
+                .chain(),
         );
     #[cfg(all(feature = "dev", not(target_arch = "wasm32")))]
     if std::env::var_os("WOW_SURVIVORS_FRAME_PREVIEW").is_some() {
@@ -87,16 +95,6 @@ fn label(font: &Handle<Font>, size: f32, color: Color) -> impl Bundle {
     )
 }
 
-fn art(path: &'static str) -> impl Bundle {
-    (
-        ImageNode {
-            color: Color::NONE,
-            ..default()
-        },
-        UiArt::crop(path, [0., 1., 0., 1.]),
-    )
-}
-
 fn spawn(
     mut commands: Commands,
     roots: Query<Entity, Added<HudRoot>>,
@@ -125,7 +123,15 @@ fn spawn(
                     .with_children(|frame| {
                         for design in 0..3u8 {
                             frame
-                                .spawn((DesignRoot(target, design), seat(0., 0., 0., 0.)))
+                                .spawn((
+                                    DesignRoot(target, design),
+                                    seat(0., 0., 0., 0.),
+                                    UiTransform::from_scale(Vec2::splat(if design == 2 {
+                                        0.85
+                                    } else {
+                                        1.
+                                    })),
+                                ))
                                 .with_children(|skin| {
                                     spawn_design(skin, &font.0, target, design, &mut materials)
                                 });
@@ -153,156 +159,13 @@ fn spawn_design(
     design: u8,
     materials: &mut Assets<PortraitMaterial>,
 ) {
-    let compact = design == 2;
-    let silver = design == 1;
-    let rim = if silver {
-        Color::srgb(0.57, 0.62, 0.67)
-    } else {
-        Color::srgb(0.63, 0.49, 0.22)
-    };
-    let gold = Color::srgb(1., 0.83, 0.23);
-    let diameter = if compact { 56. } else { 72. };
-    let portrait_x = if target { 240. - diameter } else { 0. };
-    let portrait_y = (76. - diameter) / 2.;
-    let panel_x = if target { 8. } else { diameter - 14. };
-    let panel_w = 232. - (diameter - 14.);
-    let panel_y = if compact { 15. } else { 11. };
-    let panel_h = if compact { 49. } else { 56. };
-    // One joined panel holds the name, level, and health. Nothing floats outside it.
-    frame.spawn((
-        PowerNode(target, 0, compact),
-        Node {
-            border: UiRect::all(Val::Px(1.)),
-            border_radius: BorderRadius::all(Val::Px(3.)),
-            ..seat(panel_x, panel_y, panel_w, panel_h)
-        },
-        BackgroundColor(Color::srgba(0.025, 0.03, 0.035, 0.96)),
-        BorderColor::all(rim),
-    ));
-    let inset = 14.;
-    let name_x = panel_x + inset + if target { 16. } else { 0. };
-    let name_w = panel_w - inset - 30.;
-    frame
-        .spawn(Node {
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            overflow: Overflow::clip(),
-            ..seat(name_x, panel_y + 2., name_w, 18.)
-        })
-        .with_children(|name| {
-            name.spawn((
-                FrameName(target),
-                label(font, if compact { 11. } else { 12. }, gold),
-            ));
-        });
-    let level_x = if target {
-        panel_x + 3.
-    } else {
-        panel_x + panel_w - 26.
-    };
-    frame
-        .spawn((
-            Node {
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..seat(level_x, panel_y + 2., 23., 18.)
-            },
-            BackgroundColor(Color::srgba(0.15, 0.12, 0.05, 0.65)),
-        ))
-        .with_children(|level| {
-            level.spawn((FrameLevel(target), label(font, 11., gold)));
-        });
-    let bar_h = if compact { 13. } else { 19. };
-    let bar_x = panel_x + 3.;
-    let bar_y = panel_y + 22.;
-    let bar_w = panel_w - 6.;
-    frame
-        .spawn((
-            seat(bar_x, bar_y, bar_w, bar_h),
-            BackgroundColor(Color::srgb(0.015, 0.035, 0.015)),
-        ))
-        .with_children(|bar| {
-            bar.spawn((
-                FrameFill(target),
-                Node {
-                    width: Val::Percent(100.),
-                    height: Val::Percent(100.),
-                    ..default()
-                },
-                art("ASR\\UI\\UnitFrames\\HealthFill.blp"),
-            ));
-            bar.spawn(Node {
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..seat(0., 0., bar_w, bar_h)
-            })
-            .with_children(|text| {
-                text.spawn((
-                    FrameHealth(target),
-                    label(font, if compact { 11. } else { 13. }, Color::WHITE),
-                ));
-            });
-        });
-    let power_height = if compact { 8. } else { 10. };
-    frame
-        .spawn((
-            PowerNode(target, 1, compact),
-            seat(bar_x, bar_y + bar_h + 2., bar_w, power_height),
-            BackgroundColor(Color::srgb(0.015, 0.02, 0.035)),
-        ))
-        .with_children(|power| {
-            power.spawn((
-                PowerNode(target, 2, compact),
-                Node {
-                    width: Val::Percent(100.),
-                    height: Val::Percent(100.),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0., 0.25, 0.95)),
-            ));
-            power
-                .spawn(Node {
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..seat(0., -1., bar_w, power_height + 2.)
-                })
-                .with_children(|text| {
-                    text.spawn((
-                        FramePowerText(target),
-                        label(font, if compact { 8. } else { 9. }, Color::WHITE),
-                    ));
-                });
-        });
-    let face = materials.add(PortraitMaterial {
-        image: Handle::default(),
-    });
-    let face_diameter = diameter * 0.83;
-    let pad = (diameter - face_diameter) / 2.;
-    frame.spawn((
-        FramePortrait(target, face.clone()),
-        seat(
-            portrait_x + pad,
-            portrait_y + pad,
-            face_diameter,
-            face_diameter,
-        ),
-        MaterialNode(face),
-        ZIndex(2),
-    ));
-    frame.spawn((
-        seat(portrait_x, portrait_y, diameter, diameter),
-        art(if silver {
-            "ASR\\UI\\UnitFrames\\SilverRing.blp"
-        } else {
-            "ASR\\UI\\UnitFrames\\GoldRing.blp"
-        }),
-        ZIndex(3),
-    ));
+    classic::spawn(frame, font, target, design, materials);
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn refresh(
     run: Res<Run>,
+    coop: Res<super::coop::Coop>,
     selection: Res<crate::target::Selection>,
     enemies: Query<&Enemy>,
     mut frames: Query<
@@ -386,7 +249,11 @@ fn refresh(
         let value = if name.0 {
             target.map_or("Select a target", |e| e.def.name)
         } else {
-            run.class.name
+            if coop.running && !coop.name.trim().is_empty() {
+                coop.name.trim()
+            } else {
+                run.class.name
+            }
         };
         if text.0 != value {
             text.0 = value.to_string();
@@ -518,11 +385,7 @@ fn refresh_power(
         match part.1 {
             0 => {
                 node.height = Val::Px(if maximum > 0 {
-                    if part.2 {
-                        49.
-                    } else {
-                        56.
-                    }
+                    if part.2 { 49. } else { 56. }
                 } else if part.2 {
                     39.
                 } else {

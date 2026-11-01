@@ -293,7 +293,7 @@ fn paint_menu(
     let labels: Vec<String> = if settings.draft.is_some() {
         vec![
             "Preview design".into(),
-            format!("{} WoW Gold", if p.design == 0 { "[x]" } else { "[ ]" }),
+            format!("{} Classic", if p.design == 0 { "[x]" } else { "[ ]" }),
             format!(
                 "{} Classic Silver",
                 if p.design == 1 { "[x]" } else { "[ ]" }
@@ -320,7 +320,7 @@ fn paint_menu(
             "Lock both frames".into(),
             format!(
                 "Design: {} >",
-                ["WoW Gold", "Classic Silver", "Compact"][p.design as usize]
+                ["Classic", "Classic Silver", "Compact"][p.design as usize]
             ),
             "Close".into(),
         ]
