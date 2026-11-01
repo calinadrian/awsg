@@ -49,6 +49,17 @@ struct Approach {
     goal: Vec3,
 }
 
+impl Enemy {
+    pub(super) fn relocated(&mut self, pos: Vec3, center: Vec3) {
+        if let Some(approach) = self.approach.as_mut() {
+            let side = flat(pos - center);
+            approach.angle = side.z.atan2(side.x);
+            approach.goal = pos;
+            approach.next = 0.0;
+        }
+    }
+}
+
 /// A scripted charge down a marked lane.
 #[derive(Clone, Copy)]
 pub(super) struct Charge {
@@ -117,6 +128,7 @@ pub(super) struct Dying(f32);
 #[derive(Resource, Default)]
 pub(super) struct Spawner {
     timer: f32,
+    source: super::horde_spawning::Spawner,
 }
 
 /// An enemy died here, worth this much.
@@ -125,6 +137,8 @@ pub(super) struct Loot {
     pub pos: Vec3,
     pub xp: u32,
     pub boss: bool,
+    pub spawn_cost: f32,
+    pub roaming_elite: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -168,6 +182,14 @@ pub(super) fn spawn_enemy(
     hero: Vec3,
     boss: bool,
 ) -> Entity {
+    if !boss && (super::elwynn::is_regular(def) || super::elwynn::is_roaming_elite(def)) {
+        if let Some(slots) = run.horde_spawn_slots.as_mut() {
+            if *slots == 0 {
+                return Entity::PLACEHOLDER;
+            }
+            *slots -= 1;
+        }
+    }
     // The old ASR's own numbers for its bosses and guardians stand as they are.
     let scale = if def.phases.is_empty() && !boss {
         data::hp_scale(run.elapsed)
@@ -187,6 +209,9 @@ pub(super) fn spawn_guardian(
     slain: u32,
 ) -> Entity {
     let home = Home { pos, awake: false };
+    if let Some(slots) = run.horde_spawn_slots.as_mut() {
+        *slots = slots.saturating_sub(1);
+    }
     let e = spawn_with(commands, run, def, pos, face, false, 1.0, Some(home));
     let (hp, damage) = super::guardian_behavior::stats(def, run.elapsed, slain);
     commands.queue(move |world: &mut World| {
@@ -230,6 +255,8 @@ fn spawn_with(
     // Sample once at spawn so enemies already fighting do not gain health with the clock.
     let (hp, damage, speed) = if !boss && home.is_none() && super::elwynn::is_regular(def) {
         super::elwynn_behavior::regular_stats(def.hp, def.damage, def.speed, run.elapsed)
+    } else if !boss && home.is_none() && super::elwynn::is_roaming_elite(def) {
+        super::elwynn_behavior::roaming_elite_stats(def.hp, def.damage, def.speed, run.elapsed)
     } else {
         let damage = if home.is_some() {
             def.damage * scale
@@ -264,7 +291,7 @@ fn spawn_with(
             dead: false,
             home,
             charge: None,
-            approach: (home.is_some() || super::elwynn::is_regular(def)).then(|| {
+            approach: (home.is_some() || super::elwynn::is_regular(def) || super::elwynn::is_roaming_elite(def)).then(|| {
                 let side = flat(pos - hero);
                 Approach {
                     angle: side.z.atan2(side.x),
@@ -275,7 +302,7 @@ fn spawn_with(
         },
         Marks::debuffs(),
     ));
-    if !def.phases.is_empty() || home.is_some() {
+    if !def.phases.is_empty() || home.is_some() || super::elwynn::is_roaming_elite(def) {
         commands.entity(e).insert(Script::default());
     }
     e
@@ -336,7 +363,7 @@ pub(super) fn spawn_enemies(
     mut spawner: ResMut<Spawner>,
     selection: Res<Selection>,
     hero: Query<&Transform, With<Hero>>,
-    enemies: Query<&Enemy>,
+    mut enemies: Query<(&mut Enemy, &mut Transform), Without<Hero>>,
     ground: super::dungeon::Ground,
     coop: Res<super::coop::Coop>,
 ) {
@@ -365,6 +392,7 @@ pub(super) fn spawn_enemies(
     } else {
         ((elapsed / data::BOSS_EVERY_SECS) as u32).min(roster.bosses.len() as u32)
     };
+    let first_boss = run.bosses as usize;
     while run.bosses < due_bosses {
         let def = &roster.bosses[run.bosses as usize];
         let a = rng.range(0.0, std::f32::consts::TAU);
@@ -378,12 +406,30 @@ pub(super) fn spawn_enemies(
         });
     }
 
+    if roster.enemies.first().is_some_and(|e| e.name == "Kobold Vermin") {
+        let new_bosses = &roster.bosses[first_boss..run.bosses as usize];
+        super::horde_spawning::spawn(
+            &mut commands,
+            time.delta_secs(),
+            &mut run,
+            &mut rng,
+            &mut spawner.source,
+            roster,
+            new_bosses,
+            h.translation,
+            &mut enemies,
+            &ground,
+            &coop,
+        );
+        return;
+    }
+
     spawner.timer -= time.delta_secs();
     if spawner.timer > 0.0 {
         return;
     }
     spawner.timer = 0.12;
-    let alive = enemies.iter().filter(|e| !e.dead).count();
+    let alive = enemies.iter().filter(|(e, _)| !e.dead).count();
     let target = data::target_alive(elapsed);
     if alive >= target {
         return;
@@ -554,7 +600,7 @@ pub(super) fn move_enemies(
                     continue;
                 }
             }
-        } else if dist > 75.0 {
+        } else if dist > 75.0 && selection.stage_def().name != "Elwynn Forest" {
             // Strays far behind are brought back in front, as the reference genre does.
             let back = hpos + to_hero.normalize_or_zero() * 38.0;
             tf.translation = ground.spawn_spot(back, hpos.y);
@@ -581,7 +627,11 @@ pub(super) fn move_enemies(
                     fx.cast(ent, c.spell, &[], None);
                 }
             } else {
-                speed = if e.home.is_some() { 40.0 } else { CHARGE_SPEED };
+                speed = if e.home.is_some() || super::elwynn::is_roaming_elite(e.def) {
+                    40.0
+                } else {
+                    CHARGE_SPEED
+                };
                 let stride = (speed * dt).min(way.length());
                 next = ground.at(pos + way.normalize_or_zero() * stride, pos.y);
                 c.left -= dt;
@@ -593,8 +643,9 @@ pub(super) fn move_enemies(
             mv.speed = speed;
             mv.flags = if speed > 0.0 { move_flags::FORWARD } else { 0 };
             if c.windup <= 0.0 && !c.hit && {
-                let reach = if e.home.is_some() {
-                    (e.def.scale * 1.35 * 1.2).clamp(4.0, 7.0)
+                let reach = if e.home.is_some() || super::elwynn::is_roaming_elite(e.def) {
+                    let scale = if e.home.is_some() { 1.35 } else { 1.0 };
+                    (e.def.scale * scale * 1.2).clamp(4.0, 7.0)
                 } else {
                     HERO_RADIUS + e.radius + 0.6
                 };
@@ -780,6 +831,7 @@ pub(super) fn drop_loot(
     mut run: ResMut<Run>,
     gems: Query<(Entity, &Transform, &Gem)>,
     mut coop: ResMut<super::coop::Coop>,
+    mut spawner: ResMut<Spawner>,
 ) {
     if drops.is_empty() {
         return;
@@ -795,9 +847,10 @@ pub(super) fn drop_loot(
         .collect();
     let mut xp_changed = false;
     for d in drops.read() {
+        spawner.source.killed(d.spawn_cost);
         // Regular mobs pay 1.65x, stochastically rounded; bosses pay their table XP
         // unchanged (RVA 0x5c03cd9..0x5c03dc3). No global 2x multiplier.
-        let xp = if d.boss {
+        let xp = if d.boss || d.roaming_elite {
             d.xp
         } else {
             let scaled = d.xp as f32 * 1.65;
@@ -924,7 +977,7 @@ pub(super) fn run_scripts(
             &allies,
         );
         run.coop_target = peer;
-        if en.home.is_some() {
+        if en.home.is_some() || super::elwynn::is_roaming_elite(en.def) {
             super::guardian_behavior::tick(
                 &mut script.guardian,
                 &mut en,

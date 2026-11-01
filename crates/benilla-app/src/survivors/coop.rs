@@ -41,6 +41,8 @@ struct Foe {
     speed: f32,
     moving: bool,
     dead: bool,
+    #[serde(default)]
+    lair: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Pickup {
@@ -822,7 +824,7 @@ fn receive(
                                     });
                                     e.hp = f.hp;
                                     e.max_hp = f.maximum;
-                                    if f.group == 2 {
+                                    if f.lair {
                                         e.home = Some(enemies::Home {
                                             pos: Vec3::from_array(f.pos),
                                             awake: true,
@@ -860,7 +862,7 @@ fn receive(
                                         if let Some(mut e) = world.get_mut::<Enemy>(entity) {
                                             e.hp = f.hp;
                                             e.max_hp = f.maximum;
-                                            if f.group == 2 {
+                                            if f.lair {
                                                 e.home = Some(enemies::Home {
                                                     pos: Vec3::from_array(f.pos),
                                                     awake: true,
@@ -1134,6 +1136,7 @@ fn transmit(
                 speed: e.speed,
                 moving: mv.speed > 0.,
                 dead: e.dead,
+                lair: e.home.is_some(),
             });
         }
         let paused = coop.room.as_ref().is_some_and(|r| {
@@ -1309,6 +1312,12 @@ pub(super) fn apply_guest_hits(
                 pos: tf.translation,
                 xp: enemy.xp,
                 boss: enemy.boss,
+                spawn_cost: if enemy.home.is_none() {
+                    super::horde_spawning::cost(enemy.def)
+                } else {
+                    0.0
+                },
+                roaming_elite: enemy.home.is_none() && super::elwynn::is_roaming_elite(enemy.def),
             });
             units::kill_unit(&mut store);
             marks.clear();

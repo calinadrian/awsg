@@ -129,11 +129,44 @@ AI design or describe current approximations as verified source behavior.
 | Elite behavior | Availability, aggro, leash, return/healing, summons, death rewards and any respawn |
 | Encounter scripts | Phase thresholds, action order, first-use delays, repeats, summons, dialogue and cleanup |
 
-Current code inspection identifies specific comparisons, not proven defects:
-`enemies.rs` spawns the regular horde on a 34–42 yard ring, refills at 0.12-second intervals,
-and relocates non-lair enemies beyond 75 yards to roughly 38 yards from the
-player. Its chase uses local separation. These rules still need comparison with the
-reference instead of assuming they explain the user's observation.
+Normal-mode chasers use `horde_spawning.rs`, derived from the installed
+reference's update at RVA 0x5c143e0 and constructor at 0x5c00340:
+
+- Four opening Kobold Vermin; budget income is
+  `0.6 * (0.9 + 0.32m + 0.025m²)` credits/second, with `m` in run minutes.
+- Ordinary kills add their table cost to a pressure accumulator. It decays
+  with `exp(-dt/12)` and scales income by
+  `clamp(1.25 * pressure / 12 / max(base_income, 0.001), 1, 3)`.
+- A living boss multiplies income and the ordinary population floor by 0.45;
+  the final boss uses 0.3. The solo floor is
+  `floor(min((4 + 1.6m) * boss_multiplier, 36))`.
+- At most eight paid spawns and three unpriced floor replacements per update.
+  Paid spawns consume their table cost. An unaffordable draw waits; a failed
+  capped spawn retains at most that draw's cost instead of banking a burst.
+- The ordinary constructor counts all living enemies against a normal solo
+  limit of 50. Boss/lair creation remains separate. Ordinary summons reserve
+  slots alongside the horde's deferred Bevy spawns.
+- Placement uses a 26–36 yard annulus. Half the draws favor smoothed movement
+  within ±1.2 radians above two yards/second. At most four non-boss, non-lair,
+  non-charging strays beyond 55 yards from every living hero are relocated per
+  update, with full movement bias.
+- Roaming elite rows unlock at their table times and are selected uniformly
+  every `max(55 - 2.5m, 25)` seconds, independently of lair guardians.
+
+The native executable's online count is rebuilt at 0x5bd91a0, excluding dead
+players. Its Elwynn density multiplier is
+`1 + (living_players - 1) * 0.7 * 0.48` (0x5c15588 and 0x5c0048c); the patched
+chapter lookup at 0x9dc2c70 selects 0.7 for chapters below three. It multiplies
+budget income after the pressure calculation and the population floor before
+integer conversion. The constructor rounds `50 * multiplier`, yielding caps
+of 50/67/84/100 for one through four living players. The older Python co-op
+adapter's separation bonus is not stacked on the native formula. Co-op spawns
+are distributed round-robin across living heroes, as in that adapter.
+
+Terrain placement still uses this engine's streamed terrain and dungeon floor
+cells, and random draws use this engine's RNG. Original terrain-search retries,
+event wave patterns, difficulty/endless modifiers and live timing equivalence
+are not established by this port. Chase uses this engine's collision/separation.
 
 Source-derived selection and approach rules are implemented in
 `elwynn_behavior.rs`: all unlocked regular mobs retain weighted eligibility,
@@ -152,8 +185,11 @@ The regular Elwynn horde samples the reference's base scaling at spawn
 Movement speed is `base_speed * 1.05`, and model size stays at its table value.
 Regular enemies already alive are not rescaled. These formulas apply to the
 nine regular entries, including summoned copies; bosses, lair guardians and
-other maps retain their separate rules. Difficulty, co-op and endless modifiers
-are excluded from this base-mode port.
+other maps retain their separate rules. Difficulty, co-op stat scaling and
+endless modifiers are excluded from these base stat curves. Roaming elites use
+the constructor's 4.8 health multiplier and 0.00594 cubic health coefficient,
+without the regular-mob 1.25 damage multiplier. Their lair counterparts retain
+the separate guardian curves.
 
 The agreed four-boss/four-elite roster is implemented, with Hogger's source
 3:00 entry and 3,600 base HP. The three source lair guardians first become available at 0:20,

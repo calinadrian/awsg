@@ -28,6 +28,7 @@ mod grade;
 mod guardian_behavior;
 mod guardians;
 mod hero;
+mod horde_spawning;
 mod hud;
 mod jewelry;
 mod loot_ground;
@@ -414,6 +415,8 @@ pub(super) struct Run {
     pub coop_damage: Vec<(u32, f32)>,
     pub coop_run: bool,
     pub coop_unavailable: std::collections::HashSet<u32>,
+    /// This update's ordinary-spawn reservations, including deferred entities and summons.
+    pub horde_spawn_slots: Option<usize>,
     /// Key, native effect, strength, and remaining seconds of active spell buffs.
     pub buffs: Vec<(&'static str, u32, f32, f32)>,
     passives: spell_passives::State,
@@ -463,6 +466,7 @@ impl Default for Run {
             coop_damage: Vec::new(),
             coop_run: false,
             coop_unavailable: Default::default(),
+            horde_spawn_slots: None,
             buffs: Vec::new(),
             passives: spell_passives::State::default(),
         }

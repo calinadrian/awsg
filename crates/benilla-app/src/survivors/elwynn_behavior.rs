@@ -20,6 +20,21 @@ pub(super) fn regular_stats(hp: f32, damage: f32, speed: f32, elapsed: f32) -> (
     )
 }
 
+/// Roaming elite rows use 4.8x health and the 0.00594 cubic; damage has no regular 1.25x.
+/// Native 0x5c0062d and leaf 0x5c6a2e0; lair guardians retain their separate curves.
+pub(super) fn roaming_elite_stats(hp: f32, damage: f32, speed: f32, elapsed: f32) -> (f32, f32, f32) {
+    let minute = elapsed.max(0.0) / 60.0;
+    let health_curve =
+        1.0 + 0.10 * minute + 0.036 * minute * minute + 0.00594 * minute * minute * minute;
+    let damage_curve =
+        1.0 + 0.07 * minute + 0.015 * minute * minute + 0.0002 * minute * minute * minute;
+    (
+        hp * 4.8 * 0.82 * health_curve,
+        damage * 0.82_f32.sqrt() * damage_curve,
+        speed * 1.05,
+    )
+}
+
 /// Older unlocked enemies retain weight; their cost reduces how often they are selected.
 pub(super) fn weight(elapsed: f32, from: f32, cost: f32) -> f32 {
     if elapsed < from {

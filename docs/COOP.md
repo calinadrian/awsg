@@ -82,6 +82,14 @@ player at half health. Leaving range resets progress; reward and pause menus
 suspend it. The host ends the run in defeat when everyone falls. A quitting or
 crashing host ends the party.
 
+Elwynn's ordinary chasers use the original native game's time-based spawn
+budget, kill-pressure feedback, boss suppression and separate population floor.
+Living party size scales density and the ordinary constructor's total living
+enemy limit: 50 solo, 67 with two, 84 with three and 100 with four. Spawn centers
+rotate across living heroes. Timed roaming elites are separate from the fixed
+lair guardians. These source-derived rules do not establish full terrain,
+scripted event-wave, difficulty/endless or combat-stat parity.
+
 Party frames show names, levels, health and choosing/loading status beneath
 the player frame. Remote heroes also have overhead names and health bars.
 Remote enemy and player movement is interpolated between 10 Hz snapshots;

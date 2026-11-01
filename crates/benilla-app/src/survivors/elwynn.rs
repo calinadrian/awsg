@@ -311,9 +311,20 @@ pub(super) fn roster(map: &MapDef) -> Option<Roster> {
 
 /// Whether a definition belongs to Elwynn's regular horde.
 pub(super) fn is_regular(def: &EnemyDef) -> bool {
+    regular_index(def).is_some()
+}
+
+pub(super) fn regular_index(def: &EnemyDef) -> Option<usize> {
     HORDE
         .iter()
-        .any(|entry| entry.name == def.name && entry.display == def.display)
+        .position(|entry| entry.name == def.name && entry.display == def.display)
+}
+
+/// The three elite enemy-table rows also spawn as roaming chasers, independently of lairs.
+pub(super) fn is_roaming_elite(def: &EnemyDef) -> bool {
+    [0, 1, 3].iter().any(|&i| {
+        GUARDIANS[i].name == def.name && GUARDIANS[i].display == def.display
+    })
 }
 
 #[cfg(test)]

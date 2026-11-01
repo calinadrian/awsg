@@ -203,7 +203,8 @@ fn charge(
     let way = flat(target - pos);
     let distance = (way.length() + 6.0).max(4.0);
     let to = ground.at(pos + way.normalize_or(Vec3::X) * distance, pos.y);
-    let half = (en.def.scale * 1.35 * 1.2).clamp(4.0, 7.0);
+    let scale = if en.home.is_some() { 1.35 } else { 1.0 };
+    let half = (en.def.scale * scale * 1.2).clamp(4.0, 7.0);
     let rush = distance / 40.0;
     tele.lane(pos, to, half, now, 1.0, 1.0 + rush);
     fx.cast(entity, 100, &[], None);
@@ -244,7 +245,7 @@ pub(super) fn tick(
         script.impacts.clear();
         return;
     }
-    if !en.home.is_some_and(|h| h.awake) {
+    if en.home.is_some_and(|h| !h.awake) {
         script.reset(en.def.name);
         return;
     }

@@ -904,6 +904,12 @@ pub(super) fn apply_hits(
                 pos,
                 xp: en.xp,
                 boss: en.boss,
+                spawn_cost: if en.home.is_none() {
+                    super::horde_spawning::cost(en.def)
+                } else {
+                    0.0
+                },
+                roaming_elite: en.home.is_none() && super::elwynn::is_roaming_elite(en.def),
             });
             run.kills += 1;
             let healing = run.talents.stat(15) + run.jewel_stat(15);
