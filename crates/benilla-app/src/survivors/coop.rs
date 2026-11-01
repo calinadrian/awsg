@@ -1120,6 +1120,26 @@ fn receive(
         } else {
             clock.unpause();
         }
+        // A party wait freezes this hero too: say who it is waiting on. Renewed every frame,
+        // so it lapses a moment after the wait ends.
+        if waiting && !local_wait {
+            let loading: Vec<&str> = coop.room.as_ref().map_or_else(Vec::new, |r| {
+                r.members
+                    .iter()
+                    .filter(|m| m.peer != coop.peer)
+                    .filter(|m| coop.players.get(&m.peer).is_none_or(|p| !p.loaded))
+                    .map(|m| m.name.as_str())
+                    .collect()
+            });
+            let text = if coop.guest() && coop.since_host > 2. {
+                "Waiting for the host…".to_string()
+            } else if loading.is_empty() {
+                "Waiting for the party…".to_string()
+            } else {
+                format!("Waiting for {} to finish loading…", loading.join(", "))
+            };
+            run.banner = Some((text, 0.25));
+        }
         if coop.guest() && coop.since_host > 15. {
             coop.status = "The host stopped responding.".into();
             coop.leave();
