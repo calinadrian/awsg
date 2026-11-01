@@ -14,10 +14,21 @@ cargo build --release -p asr-coop
 .\target\release\asr-coop.exe --bind 0.0.0.0:47771
 ```
 
-The default bind, when omitted, is `127.0.0.1:47771`. For internet access,
-forward TCP 47771 to the operator's PC and allow that listener through its
-firewall. Set the game's server field to `ws://YOUR-HOSTNAME:47771`.
-The operator playing on the same PC can use `ws://127.0.0.1:47771`.
+The game defaults to `ws://hassian.duckdns.org:47771`. Existing saved localhost
+addresses from the initial installer migrate to this address; custom server
+addresses and `WOW_ASR_COOP_URL` overrides are preserved.
+
+The relay's default bind, when omitted, is `127.0.0.1:47771`; use the explicit
+`--bind 0.0.0.0:47771` above for outside connections. Forward **TCP 47771** on
+the router to the operator PC (`192.168.100.10:47771` on the current network)
+and allow that listener through Windows Firewall. Keep the PC's LAN address
+reserved in the router and DuckDNS pointed at the router's public address.
+DNS supplies the address; it does not create the router forwarding rule.
+
+If the router cannot connect to its own public address (NAT loopback), the
+operator can set `WOW_ASR_COOP_URL=ws://127.0.0.1:47771` before launching the
+game. Friends on other networks keep the default DuckDNS address. Other PCs
+on the operator's LAN can use `ws://192.168.100.10:47771` in connection settings.
 
 For TLS, put the relay behind a reverse proxy with a valid certificate, then use
 its `wss://` address. For example, an existing Caddy site can route a separate

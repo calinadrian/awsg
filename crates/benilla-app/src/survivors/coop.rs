@@ -13,6 +13,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+const DEFAULT_SERVER: &str = "ws://hassian.duckdns.org:47771";
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(super) struct Pose {
     pub peer: u32,
@@ -133,7 +135,15 @@ impl Default for Coop {
         let saved = crate::local_state::home()
             .and_then(|h| crate::local_state::read_to_string(&h.join("survivors-coop.txt")).ok());
         let mut lines = saved.as_deref().unwrap_or("").lines();
-        let saved_url = lines.next().unwrap_or("ws://127.0.0.1:47771");
+        let saved_url = lines.next().unwrap_or(DEFAULT_SERVER).trim();
+        // Earlier installers saved a loopback address on every player's PC.
+        // Move those clients to the shared directory while keeping custom servers.
+        let saved_url = match saved_url.trim_end_matches('/') {
+            "" | "ws://127.0.0.1:47771" | "ws://localhost:47771" | "ws://[::1]:47771" => {
+                DEFAULT_SERVER
+            }
+            _ => saved_url,
+        };
         let url = crate::webenv::var("WOW_ASR_COOP_URL").unwrap_or_else(|| saved_url.to_string());
         Self {
             #[cfg(not(target_arch = "wasm32"))]
