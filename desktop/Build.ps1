@@ -4,10 +4,14 @@ param(
     [string]$GameDirectory = '',
     [string]$OutputDirectory = '',
     [switch]$EmbedData,
-    [switch]$SkipGameBuild
+    [switch]$SkipGameBuild,
+    # A separate Cargo target folder builds a release while a copy from `target` is running.
+    [string]$TargetDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+if (!$TargetDirectory) { $TargetDirectory = Join-Path $projectRoot 'target' }
+$targetRoot = [IO.Path]::GetFullPath($TargetDirectory)
 if (!$GameDirectory) { $GameDirectory = Join-Path $projectRoot 'out/elwynn-playable' }
 if (!$OutputDirectory) { $OutputDirectory = Join-Path $projectRoot "out/desktop/$Version" }
 $parsedVersion = [Version]$Version
@@ -24,11 +28,11 @@ if (!(Test-Path -LiteralPath $compiler)) { throw 'The Windows .NET Framework C# 
 if (!$SkipGameBuild) {
     Push-Location $projectRoot
     try {
-        & cargo build --release -p warcraft-survivors -p asr-coop --no-default-features
+        & cargo build --release -p warcraft-survivors -p asr-coop --no-default-features --target-dir $targetRoot
         if ($LASTEXITCODE -ne 0) { throw 'The Windows game build failed.' }
     } finally { Pop-Location }
 }
-$gameExe = Join-Path $projectRoot 'target/release/warcraft-survivors.exe'
+$gameExe = Join-Path $targetRoot 'release/warcraft-survivors.exe'
 if (!(Test-Path -LiteralPath $gameExe)) { throw 'Build warcraft-survivors first.' }
 
 # A small, original shield monogram gives setup, shortcuts and maintenance one Windows icon.
@@ -77,7 +81,7 @@ $runtimeFiles = [ordered]@{
     'LICENSE-MIT' = (Join-Path $projectRoot 'LICENSE-MIT')
     'LICENSE-APACHE' = (Join-Path $projectRoot 'LICENSE-APACHE')
 }
-$relay = Join-Path $projectRoot 'target/release/asr-coop.exe'
+$relay = Join-Path $targetRoot 'release/asr-coop.exe'
 if (Test-Path -LiteralPath $relay) { $runtimeFiles['asr-coop.exe'] = $relay }
 # App-local VC++ runtime avoids a separate administrator-level prerequisite installer.
 $crtDirectory = $null
