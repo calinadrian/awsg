@@ -330,7 +330,10 @@ impl Store {
                                     .or_default();
                                 *entry = entry.saturating_add(table.materials[kind]);
                             }
-                            if weight > 0
+                            // Ordinary enemies never award equipment; their row remains in the
+                            // shared table for materials, while elites and bosses use this zone's pool.
+                            if kind != "normal"
+                                && weight > 0
                                 && account.inventory.items.len() < 5000
                                 && random(10_000) < table.equipment_chance_bp[kind]
                             {

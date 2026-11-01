@@ -1,5 +1,6 @@
-//! The horde: spawning on a ring outside the view, the chase, contact damage, the casters' bolts,
-//! the bosses' and guardians' scripts, and death with its experience and the odd meal it leaves.
+//! The horde: spawning on a ring outside the view, the chase, contact damage and dodgeable caster
+//! spells, the bosses' and guardians' scripts, and death with its experience and the odd meal it
+//! leaves.
 
 use std::collections::HashMap;
 
@@ -25,8 +26,8 @@ pub(super) struct Enemy {
     pub xp: u32,
     pub boss: bool,
     pub attack_cd: f32,
-    /// Native Elwynn ranged attacks wind up before releasing their bolt.
-    cast_until: Option<f32>,
+    /// A ranged cast warns at its target point; moving clear of the circle avoids the hit.
+    cast: Option<RangedCast>,
     pub slow: f32,
     pub slow_t: f32,
     pub root_t: f32,
@@ -53,7 +54,7 @@ struct Approach {
 
 impl Enemy {
     pub(super) fn relocated(&mut self, pos: Vec3, center: Vec3) {
-        self.cast_until = None;
+        self.cast = None;
         if let Some(approach) = self.approach.as_mut() {
             let side = flat(pos - center);
             approach.angle = side.z.atan2(side.x);
@@ -61,6 +62,15 @@ impl Enemy {
             approach.next = 0.0;
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct RangedCast {
+    until: f32,
+    center: Vec3,
+    damage: f32,
+    spell: u32,
+    radius: f32,
 }
 
 /// A scripted charge down a marked lane.
@@ -103,8 +113,8 @@ pub(super) struct Home {
 const WAKE: f32 = 20.0;
 /// How far from its lair a guardian follows him before it goes home and heals.
 const LAIR_LEASH: f32 = 97.5;
-/// Yards a second a caster's bolt flies.
-const BOLT_SPEED: f32 = 24.0;
+/// The warning footprint for a ranged spell; the same 3.5-yard circle used by Taskmaster bombs.
+const RANGED_BLAST_RADIUS: f32 = 3.5;
 
 /// A boss's or a guardian's script: the next turn of [`EnemyDef::phases`] it waits on, and the
 /// turns it has taken, each with its clock.
@@ -289,7 +299,7 @@ fn spawn_with(
             } else {
                 0.5
             },
-            cast_until: None,
+            cast: None,
             slow: 1.0,
             slow_t: 0.0,
             root_t: 0.0,
@@ -467,7 +477,7 @@ pub(super) fn move_enemies(
     mut hits: MessageWriter<Hit>,
     selection: Res<Selection>,
     lairs: Res<super::guardians::Lairs>,
-    mut bolts: Local<Vec<(f32, f32, u32)>>,
+    mut tele: ResMut<super::telegraphs::Telegraphs>,
     coop: Res<super::coop::Coop>,
     allies: Query<(Entity, &super::coop::Ally)>,
 ) {
@@ -475,29 +485,14 @@ pub(super) fn move_enemies(
     if dt <= 0.0 {
         return;
     }
-    let Ok((hero_e, htf)) = hero.single() else {
+    let Ok((local_hero_e, htf)) = hero.single() else {
         return;
     };
     let hpos = htf.translation;
     let hero_down = run.dead_t.is_some();
     let elwynn = selection.stage_def().name == "Elwynn Forest";
 
-    // Casters' bolts in flight land when due.
     let now = run.elapsed;
-    let landed: Vec<(f32, u32)> = bolts
-        .iter()
-        .filter(|b| b.0 <= now)
-        .map(|b| (b.1, b.2))
-        .collect();
-    bolts.retain(|b| b.0 > now);
-    for (raw, peer) in landed {
-        run.coop_target = peer;
-        let taken = hero::hurt_hero(&mut run, raw);
-        if taken > 0.0 {
-            fx.number(hero_e, taken, false, COLOR_HURT);
-        }
-    }
-    run.coop_target = 0;
 
     // Separation over a coarse grid: only neighbours in the same or adjacent cells push.
     const CELL: f32 = 3.0;
@@ -565,7 +560,8 @@ pub(super) fn move_enemies(
             e.weaken = 1.0;
         }
         let pos = tf.translation;
-        let (hero_e, hpos, peer, hero_down) = coop.target(pos, (hero_e, hpos), !hero_down, &allies);
+        let (hero_e, hpos, peer, hero_down) =
+            coop.target(pos, (local_hero_e, hpos), !hero_down, &allies);
         run.coop_target = peer;
         let to_hero = flat(hpos - pos);
         let dist = to_hero.length();
@@ -683,20 +679,49 @@ pub(super) fn move_enemies(
             continue;
         }
 
-        if let Some(until) = e.cast_until {
+        if let Some(cast) = e.cast {
             mv.speed = 0.0;
             mv.flags = 0;
             if homing.is_some() || e.stun_t > 0.0 || e.fear_t > 0.0 || hero_down {
-                e.cast_until = None;
+                e.cast = None;
             } else {
-                if now >= until {
-                    e.cast_until = None;
-                    if let Some(r) = e.def.ranged {
-                        fx.cast(ent, r.spell, &[hero_e], None);
-                        // Native spell-speed lookup: Fireball 24, Frostbolt 28 yd/s.
-                        let bolt_speed = if r.spell == 116 { 28.0 } else { BOLT_SPEED };
-                        bolts.push((now + dist / bolt_speed, e.damage * e.weaken, peer));
+                if now >= cast.until {
+                    e.cast = None;
+                    fx.cast(ent, cast.spell, &[], Some(cast.center));
+                    let in_blast = |target: Vec3| {
+                        flat(target - cast.center).length() <= cast.radius
+                    };
+                    let local_alive = run.dead_t.is_none()
+                        && (!coop.running
+                            || coop.players.get(&0).is_none_or(|p| !p.paused));
+                    if local_alive && in_blast(hpos) {
+                        run.coop_target = 0;
+                        let taken = hero::hurt_hero(&mut run, cast.damage);
+                        if taken > 0.0 {
+                            fx.number(local_hero_e, taken, false, COLOR_HURT);
+                        }
                     }
+                    if coop.running {
+                        for player in coop
+                            .players
+                            .values()
+                            .filter(|p| p.peer != 0 && p.loaded && !p.paused && p.hp > 0.0)
+                        {
+                            if !in_blast(Vec3::from_array(player.pos)) {
+                                continue;
+                            }
+                            run.coop_target = player.peer;
+                            let taken = hero::hurt_hero(&mut run, cast.damage);
+                            if taken > 0.0 {
+                                if let Some((target, _)) =
+                                    allies.iter().find(|(_, ally)| ally.0 == player.peer)
+                                {
+                                    fx.number(target, taken, false, COLOR_HURT);
+                                }
+                            }
+                        }
+                    }
+                    run.coop_target = 0;
                 }
                 continue;
             }
@@ -794,16 +819,27 @@ pub(super) fn move_enemies(
             }
         });
         if let Some(r) = e.def.ranged.filter(|_| free && cast_reach) {
+            let cast_time = if native_caster {
+                r.cooldown
+            } else {
+                1.0
+            };
             if native_caster {
                 // RVA 0x5c0bf27 uses the table swing interval (3.2 seconds), while
                 // +0x0c in the ranged record is the cast duration, not a cooldown.
                 e.attack_cd = e.def.attack;
-                e.cast_until = Some(now + r.cooldown);
             } else {
                 e.attack_cd = r.cooldown;
-                fx.cast(ent, r.spell, &[hero_e], None);
-                bolts.push((now + dist / BOLT_SPEED, e.damage * e.weaken, peer));
             }
+            tele.circle(hpos, RANGED_BLAST_RADIUS, now, cast_time);
+            fx.cast(ent, r.spell, &[], None);
+            e.cast = Some(RangedCast {
+                until: now + cast_time,
+                center: hpos,
+                damage: e.damage * e.weaken,
+                spell: r.spell,
+                radius: RANGED_BLAST_RADIUS,
+            });
         } else if contact && free {
             let swing = if e.def.attack > 0.0 {
                 e.def.attack
@@ -926,7 +962,8 @@ pub(super) fn drop_loot(
             );
             info!("survivors gold: dropped base={amount} balance={}", run.gold);
         }
-        if d.boss {
+        if d.boss || d.elite {
+            // The elite/boss reward is a physical free cache; only picking it opens its reward.
             coop.cache(d.pos);
             super::caches::spawn(&mut commands, run.guid(), d.pos, false);
         }

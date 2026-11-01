@@ -1,7 +1,5 @@
-//! Nameplates over the guardians and bosses, drawn as the client draws its V-key plates
-//! ([`crate::vplates`]): the hostile red bar under the plate border, the name above it and the
-//! level in the border's seat, over the unit's head and sized from the screen diagonal. The
-//! horde goes without, so the field stays readable.
+//! Nameplates for major encounters and optional V-key plates for enemies in view, drawn like the
+//! client plates ([`crate::vplates`]): a hostile bar, name and level over each unit's head.
 
 use std::collections::HashMap;
 
@@ -14,12 +12,61 @@ use super::hud::{HudFont, UiArt};
 use super::{Phase, RunEntity};
 use crate::entities::{mount::MountChild, overhead_anchor, BoneAttach, OverheadFallback};
 
-/// How far off a plate still shows.
-const PLATE_RANGE: f32 = 70.0;
 /// The client's lift over the head anchor (`[0x80abfc]`).
 const LIFT: f32 = 2.0 / 3.0;
 /// The name's height in gx units, as the client's plate prints it.
 const NAME_H: f32 = 0.01;
+
+/// The settings page's equivalent of the two FrameXML nameplate toggles. The Survivors world does
+/// not load FrameXML, so these are persisted alongside the client's CVars.
+#[derive(Resource, Default)]
+pub(super) struct NameplateSettings {
+    pub enemies: bool,
+    pub friends: bool,
+}
+
+pub(super) fn load_nameplate_settings(
+    cvars: Res<crate::cvars::Cvars>,
+    mut settings: ResMut<NameplateSettings>,
+) {
+    settings.enemies = cvars.flag("SurvivorNameplateEnemies").unwrap_or(false);
+    settings.friends = cvars.flag("SurvivorNameplateFriends").unwrap_or(true);
+}
+
+pub(super) fn toggle_nameplates(settings: &mut NameplateSettings, control: bool, shift: bool) {
+    if control {
+        let show_both = !(settings.enemies && settings.friends);
+        settings.enemies = show_both;
+        settings.friends = show_both;
+    } else if shift {
+        let show_friends = !(settings.friends && !settings.enemies);
+        settings.enemies = false;
+        settings.friends = show_friends;
+    } else {
+        let show_enemies = !(settings.enemies && !settings.friends);
+        settings.enemies = show_enemies;
+        settings.friends = false;
+    }
+}
+
+pub(super) fn persist_nameplate_settings(
+    settings: &NameplateSettings,
+    cvars: &mut crate::cvars::Cvars,
+    commands: &mut Commands,
+) {
+    cvars.set(
+        "SurvivorNameplateEnemies",
+        if settings.enemies { "1" } else { "0" },
+    );
+    cvars.set(
+        "SurvivorNameplateFriends",
+        if settings.friends { "1" } else { "0" },
+    );
+    cvars.commit_latched();
+    for event in cvars.take_events() {
+        commands.trigger(event);
+    }
+}
 
 /// One plate's root, and the parts it moves and fills.
 #[derive(Component)]
@@ -130,12 +177,12 @@ fn spawn_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy) -> Entity 
         .id()
 }
 
-/// Give every guardian and boss a plate, seat it over the head and fill its bar; take it away
-/// when the unit dies or the run ends.
+/// Keep encounter plates visible and add ordinary enemy plates while the WoW-style V toggle is on.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn enemy_plates(
     mut commands: Commands,
     phase: Res<State<Phase>>,
+    settings: Res<NameplateSettings>,
     font: Option<Res<HudFont>>,
     ui_scale: Res<UiScale>,
     enemies: Query<(Entity, &Transform, &Enemy)>,
@@ -152,15 +199,20 @@ pub(super) fn enemy_plates(
         Query<(), With<MountChild>>,
     ),
     mut by_unit: Local<HashMap<Entity, Entity>>,
+    mut bucket: Local<crate::smart_rect::SmartBucket>,
 ) {
     use crate::vplates::{
         gx_px, plate_basis, text_px, BAR_H, BAR_OFF_X, BAR_OFF_Y, BAR_W, LEVEL_H, LEVEL_OFF_X,
         LEVEL_OFF_Y, PLATE_H, PLATE_W,
     };
     // Plates whose unit fell or left (or whose run ended) go.
+    bucket.clear();
     let in_run = *phase.get() != Phase::Menu;
     by_unit.retain(|unit, plate| {
-        let live = in_run && enemies.get(*unit).is_ok_and(|(_, _, e)| !e.dead);
+        let live = in_run
+            && enemies
+                .get(*unit)
+                .is_ok_and(|(_, _, e)| !e.dead && (e.boss || e.home.is_some() || settings.enemies));
         if !live {
             if let Ok(mut c) = commands.get_entity(*plate) {
                 c.despawn();
@@ -168,6 +220,11 @@ pub(super) fn enemy_plates(
         }
         live && plates.contains(*plate)
     });
+    // Start hidden and reveal only this frame's projected candidates; otherwise an off-screen or
+    // temporarily unprojectable unit leaves its last frame's plate stranded at stale coordinates.
+    for mut visibility in &mut vis {
+        *visibility = Visibility::Hidden;
+    }
     if !in_run {
         return;
     }
@@ -183,11 +240,30 @@ pub(super) fn enemy_plates(
     let gx = |v: f32| gx_px(v, basis) / s;
     let (pw, ph) = (gx(PLATE_W), gx(PLATE_H));
     let bar_top = ph - gx(BAR_OFF_Y) - gx(BAR_H);
-
+    let ui_viewport = viewport / s;
+    let mut candidates = Vec::new();
     for (unit, tf, en) in &enemies {
-        if en.dead || !(en.boss || en.home.is_some()) {
+        let encounter = en.boss || en.home.is_some();
+        if en.dead || !(encounter || settings.enemies) {
             continue;
         }
+        let head = overhead_anchor(
+            unit, tf, &anchors.0, &anchors.1, &anchors.2, &anchors.3, &anchors.4,
+        ) + Vec3::Y * LIFT;
+        let Some(screen) = cam
+            .world_to_viewport(&cam_g, head)
+            .ok()
+            .filter(|p| p.x >= 0.0 && p.y >= 0.0 && p.x <= viewport.x && p.y <= viewport.y)
+        else {
+            continue;
+        };
+        candidates.push((unit, en, screen));
+    }
+    // Entity order makes the overlap solver's priority stable; query iteration order cannot
+    // reshuffle a packed group from frame to frame.
+    candidates.sort_by_key(|(unit, _, _)| unit.index());
+
+    for (unit, en, screen) in candidates {
         let Some(&plate) = by_unit.get(&unit) else {
             let p = spawn_plate(&mut commands, &font.0, en);
             by_unit.insert(unit, p);
@@ -196,27 +272,23 @@ pub(super) fn enemy_plates(
         let Ok((_, parts)) = plates.get(plate) else {
             continue;
         };
-        let head = overhead_anchor(
-            unit, tf, &anchors.0, &anchors.1, &anchors.2, &anchors.3, &anchors.4,
-        ) + Vec3::Y * LIFT;
-        let near = cam_tf.translation.distance(tf.translation) <= PLATE_RANGE;
-        let seat = cam
-            .world_to_viewport(&cam_g, head)
-            .ok()
-            .filter(|p| near && p.x >= 0.0 && p.y >= 0.0 && p.x <= viewport.x && p.y <= viewport.y);
         let Ok(mut v) = vis.get_mut(plate) else {
             continue;
         };
-        let Some(seat) = seat else {
-            *v = Visibility::Hidden;
-            continue;
-        };
+        let desired = Rect::new(
+            screen.x / s - pw * 0.5,
+            screen.y / s,
+            screen.x / s + pw * 0.5,
+            screen.y / s + ph,
+        );
+        let seated = bucket.resolve(desired, ui_viewport);
+        bucket.claim(seated);
         *v = Visibility::Inherited;
         if let Ok(mut n) = nodes.get_mut(plate) {
             n.width = Val::Px(pw);
             n.height = Val::Px(ph);
-            n.left = Val::Px(seat.x / s - pw / 2.0);
-            n.top = Val::Px(seat.y / s);
+            n.left = Val::Px(seated.min.x);
+            n.top = Val::Px(seated.min.y);
         }
         if let Ok(mut n) = nodes.get_mut(parts.bar) {
             n.left = Val::Px(gx(BAR_OFF_X));

@@ -97,16 +97,20 @@ def convert_layers(parts, effects=None):
     return b''.join(struct.pack('<4I', *r) for r in layers), bytes(alpha)
 
 
-def liquid_block(mh2o, index, formats):
+def liquid_block(mh2o, index, formats, liquid_classes=None):
     if not mh2o:
         return b''
     pos, count, _ = struct.unpack_from('<3I', mh2o, index * 12)
     if count == 0:
         return b''
-    if count != 1:
-        raise ValueError('Overlapping retail water layers need explicit conversion')
-    kind, fmt, low, high, ox, oy, width, height, maskpos, vertices = struct.unpack_from(
-        '<HHff4BII', mh2o, pos)
+    if count > 1:
+        # Vanilla MCLQ stores one surface per chunk; retain the uppermost retail layer.
+        layers = [struct.unpack_from('<HHff4BII', mh2o, pos + n * 24) for n in range(count)]
+        kind, fmt, low, high, ox, oy, width, height, maskpos, vertices = max(
+            layers, key=lambda layer: (layer[3], layer[6] * layer[7]))
+    else:
+        kind, fmt, low, high, ox, oy, width, height, maskpos, vertices = struct.unpack_from(
+            '<HHff4BII', mh2o, pos)
     if fmt >= 42:
         ox, oy, width, height = 0, 0, 8, 8
         fmt = formats[kind]
@@ -128,20 +132,27 @@ def liquid_block(mh2o, index, formats):
                     offset = {0: n * 4 + k, 2: k, 3: n * 8 + k, 4: k * 8}[fmt]
                     depth = mh2o[vertices + offset]
             struct.pack_into('<If', out, 8 + 8 * (y * 9 + x), min(255, depth), z)
-    # Elwynn's imported surfaces are fresh water, not ocean or magma.
-    if kind not in (1, 5, 41):
-        raise ValueError(f'Unexpected Elwynn liquid type {kind}')
+    if liquid_classes is None:
+        if kind not in (1, 5, 41):
+            raise ValueError(f'Unexpected liquid type {kind}')
+        liquid_class = 0
+    else:
+        liquid_class = liquid_classes.get(kind)
+        if liquid_class not in (0, 1, 2, 3):
+            raise ValueError(f'Unsupported vanilla liquid class for retail liquid type {kind}')
     for y in range(height):
         for x in range(width):
             if mask & (1 << (y * width + x)):
-                out[8 + 81 * 8 + (y + oy) * 8 + x + ox] = 0
+                out[8 + 81 * 8 + (y + oy) * 8 + x + ox] = liquid_class
     return bytes(out)
 
 
 class Importer:
-    def __init__(self, source, listfile):
-        from casc import Casc
-        self.storage = Casc(source)
+    def __init__(self, source, listfile, storage=None):
+        if storage is None:
+            from casc import Casc
+            storage = Casc(source)
+        self.storage = storage
         self.ids = {}
         for line in listfile.read_text(encoding='utf-8').splitlines():
             ident, name = line.split(';', 1)
@@ -149,12 +160,15 @@ class Importer:
         self.entries, self.models, self.wmos = {}, {}, {}
         self.provenance, self.model_reports = {}, {}
         self.effects, self.detail_models, self.absent_effects = {}, {}, set()
+        self.effect_base = 1000000
+        self.detail_prefix = 'RetailElwynn'
         from db2 import Table
         types, materials = self.read(1371380), self.read(1132538)
         if struct.unpack_from('<I', types, 156)[0] != 0xD1ECEEC9 or struct.unpack_from('<I', materials, 156)[0] != 0x98E5D7AA:
             raise ValueError('Unsupported retail liquid DB2 schema')
         tr, mr = Table(types).rows, Table(materials).rows
         self.liquid_formats = {kind: mr[row[14]][1] for kind, row in tr.items() if row[14] in mr}
+        self.liquid_classes = {kind: row[3] for kind, row in tr.items() if row[3] in (0, 1, 2, 3)}
         effect_data, doodad_data = self.read(1308499), self.read(1308057)
         if struct.unpack_from('<I', effect_data, 156)[0] != 0xD93D5678 or struct.unpack_from('<I', doodad_data, 156)[0] != 0xCFD94A21:
             raise ValueError('Unsupported retail ground-effect DB2 schema')
@@ -176,20 +190,20 @@ class Importer:
                 if doodad not in self.detail_models:
                     fd = self.doodad_rows[doodad][0]
                     model = self.model(fd)
-                    name = f'RetailElwynnDetail{fd}'
+                    name = f'{self.detail_prefix}Detail{fd}'
                     self.entries[f'World\\NoDXT\\Detail\\{name}.m2'] = self.entries[model]
                     self.detail_models[doodad] = name
-                slots.append(1000000 + doodad)
-            self.effects[ident] = [1000000 + ident, *slots, row[0], row[1]]
-        return 1000000 + ident
+                slots.append(self.effect_base + doodad)
+            self.effects[ident] = [self.effect_base + ident, *slots, row[0], row[1]]
+        return self.effect_base + ident
 
-    def ground_tables(self, data_dir):
+    def ground_tables(self, data_dir, exclude=('patch-Q.MPQ',)):
         from durotar_assets import Chain
-        game = Chain(data_dir, exclude=('patch-Q.MPQ',))
+        game = Chain(data_dir, exclude=exclude)
         try:
             for table, extra in (
                 ('GroundEffectTexture', list(self.effects.values())),
-                ('GroundEffectDoodad', [[1000001 + ident, 1000000 + ident, name + '.mdx']
+                ('GroundEffectDoodad', [[self.effect_base + 1 + ident, self.effect_base + ident, name + '.mdx']
                                        for ident, name in self.detail_models.items()]),
             ):
                 path = f'DBFilesClient\\{table}.dbc'
@@ -223,6 +237,12 @@ class Importer:
         return data
 
     def texture(self, ident):
+        if ident == 0:
+            name = PREFIX + 'white.blp'
+            if name not in self.entries:
+                self.entries[name] = struct.pack('<4sI4BII16I16I', b'BLP2', 1, 3, 8, 0, 0,
+                                                 1, 1, 1172, *([0] * 15), 4, *([0] * 15)) + bytes(1024) + bytes([255] * 4)
+            return name
         name = PREFIX + f'{ident}.blp'
         if name not in self.entries:
             data = self.read(ident)
@@ -316,8 +336,8 @@ class Importer:
         self.wmos[ident] = name
         return name
 
-    def tile(self, x, y):
-        path = f'world/maps/azeroth/azeroth_{x}_{y}'
+    def tile(self, x, y, map_name='azeroth', label='Elwynn'):
+        path = f'world/maps/{map_name}/{map_name}_{x}_{y}'
         parts = list(chunks(self.read(path + '.adt')))
         root = dict(parts)
         texparts = list(chunks(self.read(path + '_tex0.adt')))
@@ -382,30 +402,31 @@ class Importer:
                 add(b'MCAL', alpha, 36, 40)
             if texture.get(b'MCSH'):
                 add(b'MCSH', texture[b'MCSH'], 44, 48)
-            water = liquid_block(root.get(b'MH2O'), index, self.liquid_formats)
+            water = liquid_block(root.get(b'MH2O'), index, self.liquid_formats, self.liquid_classes)
             if water:
                 struct.pack_into('<I', h, 0, (flags & 3) | 4)
                 add(b'MCLQ', water, 96, 100)
             out += chunk(b'MCNK', h + body)
         name = path.replace('/', '\\') + '.adt'
         self.entries[name] = out
-        print(f'Converted Elwynn tile {x},{y}: {len(models)} props, {len(wmos)} buildings', flush=True)
+        print(f'Converted {label} tile {x},{y}: {len(models)} props, {len(wmos)} buildings', flush=True)
 
-    def minimaps(self, data_dir):
+    def minimaps(self, data_dir, map_name='azeroth', private_name='retail-elwynn', tiles=TILES,
+                 exclude=('patch-Q.MPQ',)):
         from durotar_assets import Chain
-        game = Chain(data_dir, exclude=('patch-Q.MPQ',))
+        game = Chain(data_dir, exclude=exclude)
         try:
             original = game.read('Textures\\Minimap\\md5translate.trs').decode('ascii')
         finally:
             game.close()
-        wanted = {f'azeroth\\map{x}_{y}.blp': (x, y) for x, y in TILES}
+        wanted = {f'{map_name}\\map{x}_{y}.blp': (x, y) for x, y in tiles}
         lines, replaced = [], set()
         for line in original.splitlines():
             key = line.split('\t', 1)[0].lower()
             if key in wanted:
                 x, y = wanted[key]
-                image = self.read(f'world/minimaps/azeroth/map{x}_{y}.blp')
-                name = f'asr-retail-elwynn-{x}-{y}.blp'
+                image = self.read(f'world/minimaps/{map_name}/map{x}_{y}.blp')
+                name = f'asr-{private_name}-{x}-{y}.blp'
                 self.entries['Textures\\Minimap\\' + name] = image
                 line = line.split('\t', 1)[0] + '\t' + name
                 replaced.add(key)

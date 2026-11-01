@@ -1,7 +1,7 @@
 //! The four guardians: each sleeps in a lair at the battleground's
 //! edge, north, east, south and west, wakes when the hero comes near and goes home when he runs.
-//! A slain guardian's lair yields its treasure (a free jewelry choice) and its
-//! strength (the others grow tougher); a while later another guardian claims it once more.
+//! A slain guardian drops a free cache and lends its strength to the others; after a while another
+//! guardian claims the lair again.
 
 use bevy::prelude::*;
 
@@ -51,8 +51,7 @@ pub(super) fn keep_lairs(
     ground: super::dungeon::Ground,
     hero: Query<&Transform, With<Hero>>,
     guardians: Query<&Enemy>,
-    mut next: ResMut<NextState<super::Phase>>,
-    mut coop: ResMut<super::coop::Coop>,
+    coop: Res<super::coop::Coop>,
 ) {
     let roster = data::roster(selection.map);
     if roster.guardians.is_empty() || (run.dead_t.is_some() && !coop.living_guests()) {
@@ -134,8 +133,5 @@ pub(super) fn keep_lairs(
             ),
             5.0,
         ));
-        run.pending_chests += 1;
-        coop.cache(lairs.lairs[i].pos);
-        next.set(super::Phase::LevelUp);
     }
 }

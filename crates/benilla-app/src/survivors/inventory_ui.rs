@@ -33,6 +33,7 @@ struct Root;
 struct ItemIcon(String);
 #[derive(Component)]
 struct ScrollColumn;
+const BAG_PAGE_SLOTS: usize = 16;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
@@ -166,7 +167,11 @@ fn filter_slots() -> impl Iterator<Item = (usize, &'static str)> {
         .map(|(i, s)| (i, *s))
 }
 fn slot_matches(filter: Option<usize>, slot: &str) -> bool {
-    filter.is_none_or(|i| SLOTS.get(i).is_some_and(|s| slot_kind(s) == slot_kind(slot)))
+    filter.is_none_or(|i| {
+        SLOTS
+            .get(i)
+            .is_some_and(|s| slot_kind(s) == slot_kind(slot))
+    })
 }
 #[allow(clippy::too_many_arguments)]
 fn doll_slot(
@@ -469,61 +474,84 @@ fn input(
     }
     gear.revision += 1;
 }
-fn item_row(
+fn item_slot(
     p: &mut ChildSpawnerCommands,
     font: &Handle<Font>,
-    item: &Item,
-    d: &Definition,
-    action: Action,
-    extra: &str,
+    item: Option<(&Item, &Definition)>,
+    action: Option<Action>,
+    caption: &str,
     selected: bool,
 ) {
-    p.spawn((
-        Button,
-        action,
-        skin::Control {
-            primary: false,
-            selected,
-            enabled: true,
-        },
-        Node {
-            width: Val::Percent(100.),
-            min_height: Val::Px(47.),
-            padding: UiRect::all(Val::Px(5.)),
-            column_gap: Val::Px(8.),
-            border: UiRect::all(Val::Px(1.)),
-            flex_shrink: 0.,
-            ..default()
-        },
-        BackgroundColor(skin::SURFACE),
-        BorderColor::all(if selected { skin::GOLD } else { skin::EDGE }),
-    ))
-    .with_children(|p| {
+    let icon = item.map_or_else(
+        || "Interface\\PaperDoll\\UI-Backpack-EmptySlot".to_owned(),
+        |(_, d)| d.icon.clone(),
+    );
+    let node = Node {
+        width: Val::Px(50.),
+        height: Val::Px(58.),
+        padding: UiRect::all(Val::Px(2.)),
+        row_gap: Val::Px(1.),
+        align_items: AlignItems::Center,
+        flex_direction: FlexDirection::Column,
+        border: UiRect::all(Val::Px(1.)),
+        flex_shrink: 0.,
+        ..default()
+    };
+    let contents = |p: &mut ChildSpawnerCommands| {
         p.spawn((
-            ItemIcon(d.icon.clone()),
+            ItemIcon(icon),
             ImageNode::default(),
             Node {
-                width: Val::Px(34.),
-                height: Val::Px(34.),
+                width: Val::Px(42.),
+                height: Val::Px(42.),
                 flex_shrink: 0.,
                 ..default()
             },
         ));
-        p.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            ..default()
-        })
-        .with_children(|p| {
+        if !caption.is_empty() {
             skin::label(
                 p,
                 font,
-                format!("{} +{}", d.name, item.level),
-                13.,
-                skin::TEXT,
+                caption,
+                10.,
+                if caption.ends_with('g') {
+                    skin::GOLD
+                } else {
+                    skin::MUTED
+                },
             );
-            skin::label(p, font, extra, 11., skin::MUTED);
-        });
-    });
+        } else if let Some((item, _)) = item {
+            skin::label(p, font, format!("+{}", item.level), 10., skin::MUTED);
+        } else {
+            p.spawn(Node {
+                height: Val::Px(10.),
+                ..default()
+            });
+        }
+    };
+    let border = if selected { skin::GOLD } else { skin::EDGE };
+    if let Some(action) = action {
+        p.spawn((
+            Button,
+            action,
+            skin::Control {
+                primary: false,
+                selected,
+                enabled: true,
+            },
+            node,
+            BackgroundColor(skin::SURFACE),
+            BorderColor::all(border),
+        ))
+        .with_children(contents);
+    } else {
+        p.spawn((
+            node,
+            BackgroundColor(skin::SURFACE),
+            BorderColor::all(border),
+        ))
+        .with_children(contents);
+    }
 }
 fn detail(
     p: &mut ChildSpawnerCommands,
@@ -803,25 +831,53 @@ fn draw(
                         }
                         slot_strip(p, f, gear.slot_filter);
                         let mut total = 0;
+                        let page_count = |total: usize| total.div_ceil(BAG_PAGE_SLOTS).max(1);
+                        let mut page = gear.page;
                         if gear.market && gear.filter < 2 {
                             let entries: Vec<_> = gear.listings.iter().filter(|l| gear.filter == 0 || l.seller == "self").filter(|l| gear.catalog.definition(&l.item.definition).is_some_and(|d| slot_matches(gear.slot_filter, &d.slot))).collect();
                             total = entries.len();
-                            for sale in entries.into_iter().skip(gear.page * 8).take(8) { if let Some(d) = gear.catalog.definition(&sale.item.definition) {
-                                item_row(p, f, &sale.item, d, Action::Listing(sale.id), &format!("{} · {} gold · {}", slot_info(&d.slot).0, sale.price, sale.seller_name), gear.listing == Some(sale.id));
-                            } }
+                            page = page.min(page_count(total) - 1);
+                            p.spawn(Node { width: Val::Px(224.), flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.), row_gap: Val::Px(5.), ..default() }).with_children(|grid| {
+                                for index in 0..BAG_PAGE_SLOTS {
+                                    if let Some(sale) = entries.get(page * BAG_PAGE_SLOTS + index).copied() {
+                                        if let Some(d) = gear.catalog.definition(&sale.item.definition) {
+                                            item_slot(grid, f, Some((&sale.item, d)), Some(Action::Listing(sale.id)), &format!("{}g", sale.price), gear.listing == Some(sale.id));
+                                        } else {
+                                            item_slot(grid, f, None, None, "", false);
+                                        }
+                                    } else {
+                                        item_slot(grid, f, None, None, "", false);
+                                    }
+                                }
+                            });
                         } else if let Some(hero) = hero {
                             let entries: Vec<_> = hero.inventory.items.iter().filter(|i| {
                                 let Some(d) = gear.catalog.definition(&i.definition) else { return false };
-                                slot_matches(gear.slot_filter, &d.slot) && (gear.market || match gear.filter { 1 => matches!(d.slot.as_str(), "main_hand" | "off_hand" | "ranged"), 2 => !matches!(d.slot.as_str(), "main_hand" | "off_hand" | "ranged" | "neck" | "finger_1" | "trinket_1"), 3 => matches!(d.slot.as_str(), "neck" | "finger_1" | "trinket_1"), _ => true })
+                                i.slot.is_none() && slot_matches(gear.slot_filter, &d.slot) && (gear.market || match gear.filter { 1 => matches!(d.slot.as_str(), "main_hand" | "off_hand" | "ranged"), 2 => !matches!(d.slot.as_str(), "main_hand" | "off_hand" | "ranged" | "neck" | "finger_1" | "trinket_1"), 3 => matches!(d.slot.as_str(), "neck" | "finger_1" | "trinket_1"), _ => true })
                             }).collect();
                             total = entries.len();
-                            for item in entries.into_iter().skip(gear.page * 8).take(8) { if let Some(d) = gear.catalog.definition(&item.definition) {
-                                let state = if item.listed { "On auction" } else if item.slot.is_some() { "Equipped" } else if item.locked { "Locked" } else { "In bags" };
-                                item_row(p, f, item, d, Action::Select(item.id), &format!("{} · {state}", item.slot.as_deref().map_or_else(|| slot_info(&d.slot).0.to_string(), slot_title)), gear.selected == Some(item.id));
-                            } }
+                            page = page.min(page_count(total) - 1);
+                            p.spawn(Node { width: Val::Px(224.), flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.), row_gap: Val::Px(5.), ..default() }).with_children(|grid| {
+                                for index in 0..BAG_PAGE_SLOTS {
+                                    if let Some(item) = entries.get(page * BAG_PAGE_SLOTS + index).copied() {
+                                        if let Some(d) = gear.catalog.definition(&item.definition) {
+                                            item_slot(grid, f, Some((item, d)), Some(Action::Select(item.id)), "", gear.selected == Some(item.id));
+                                        } else {
+                                            item_slot(grid, f, None, None, "", false);
+                                        }
+                                    } else {
+                                        item_slot(grid, f, None, None, "", false);
+                                    }
+                                }
+                            });
+                        } else {
+                            page = 0;
+                            p.spawn(Node { width: Val::Px(224.), flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.), row_gap: Val::Px(5.), ..default() }).with_children(|grid| {
+                                for _ in 0..BAG_PAGE_SLOTS { item_slot(grid, f, None, None, "", false); }
+                            });
                         }
                         if total == 0 { skin::label(p, f, if gear.market && gear.filter < 2 { "No auctions listed yet." } else { "Your bags are empty. Defeat enemies to earn equipment." }, 14., skin::MUTED); }
-                        row(p, |p| { button(p, f, "Previous", Action::Page(-1), gear.page > 0); skin::label(p, f, format!("{} / {}", gear.page + 1, total.div_ceil(8).max(1)), 12., skin::TEXT); button(p, f, "Next", Action::Page(1), (gear.page + 1) * 8 < total); });
+                        row(p, |p| { button(p, f, "Previous", Action::Page(-1), page > 0); skin::label(p, f, format!("{} / {}", page + 1, page_count(total)), 12., skin::TEXT); button(p, f, "Next", Action::Page(1), (page + 1) * BAG_PAGE_SLOTS < total); });
                     });
                     body.spawn((ScrollColumn, ScrollPosition::default(), bevy::ui::RelativeCursorPosition::default(), Node { width: Val::Percent(34.), flex_direction: FlexDirection::Column, row_gap: Val::Px(7.), overflow: Overflow::scroll_y(), ..default() })).with_children(|p| {
                         if let Some(sale) = gear.listing.and_then(|id| gear.listings.iter().find(|l| l.id == id)) { detail(p, f, &gear, class.id, &sale.item, true); }

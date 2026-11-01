@@ -1,5 +1,5 @@
 //! Native Bevy rendering of the approved Classic ornate card format.
-//! Coordinates follow the 420x640 handoff; the game scales them onto its 768-high UI canvas.
+//! Spell cards follow the 420x640 handoff; compact equipment cards use a shorter frame.
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
 use bevy::prelude::*;
@@ -8,6 +8,7 @@ use bevy::text::LineHeight;
 
 pub const WIDTH: f32 = 420.0;
 pub const HEIGHT: f32 = 640.0;
+const COMPACT_HEIGHT: f32 = 520.0;
 pub const GAME_SCALE: f32 = 0.52;
 pub const BODY_SIZE: f32 = 22.0;
 pub const BODY_LINE_HEIGHT: f32 = 26.0;
@@ -306,12 +307,20 @@ pub fn spawn(
 ) -> CardNodes {
     let rc = quality(rarity);
     let divider_y = SEPARATOR_Y;
+    let compact_stats = content.description.is_empty();
+    let card_height = if compact_stats {
+        COMPACT_HEIGHT
+    } else {
+        HEIGHT
+    };
+    let stat_top = if compact_stats { 282.0 } else { 436.0 };
+    let footer_top = if compact_stats { 444.0 } else { 568.0 };
     let root = commands
         .spawn((
             Button,
             Node {
                 width: px(WIDTH * scale),
-                height: px(HEIGHT * scale),
+                height: px(card_height * scale),
                 flex_shrink: 0.0,
                 ..default()
             },
@@ -320,11 +329,11 @@ pub fn spawn(
     let mut icon = Entity::PLACEHOLDER;
     commands.entity(root).with_children(|c| {
         c.spawn((
-            rect(0.0, 0.0, WIDTH, HEIGHT, scale),
+            rect(0.0, 0.0, WIDTH, card_height, scale),
             ImageNode::new(art.background[rarity].clone()),
         ));
         c.spawn((
-            rect(0.0, 0.0, WIDTH, HEIGHT, scale),
+            rect(0.0, 0.0, WIDTH, card_height, scale),
             ImageNode::new(art.border[rarity].clone()),
         ));
         c.spawn((
@@ -459,28 +468,53 @@ pub fn spawn(
             rect(205.0, divider_y - 5.0, 10.0, 12.0, scale),
             ImageNode::new(art.diamond[rarity].clone()),
         ));
-        // Clipped so an unusually long description cannot spill over the stat panel.
-        c.spawn(Node {
-            overflow: Overflow::clip(),
-            ..rect(32.0, 272.0, 356.0, BODY_HEIGHT, scale)
-        })
-            .with_children(|body| {
-                body.spawn((
+        if !compact_stats {
+            // Keep explanatory prose for spells, where it adds context beyond the numeric rows.
+            let mut effect_panel = rect(32.0, 272.0, 356.0, BODY_HEIGHT, scale);
+            effect_panel.flex_direction = FlexDirection::Column;
+            effect_panel.justify_content = JustifyContent::FlexStart;
+            effect_panel.row_gap = px(8.0 * scale);
+            effect_panel.padding = UiRect::all(px(12.0 * scale));
+            effect_panel.border = UiRect::all(px(scale));
+            effect_panel.border_radius = BorderRadius::all(px(4.0 * scale));
+            effect_panel.overflow = Overflow::clip();
+            let description_chars = content.description.chars().count();
+            let (effect_size, effect_line_height) = if description_chars > 112 {
+                (16.0, 21.0)
+            } else if description_chars > 72 {
+                (18.0, 23.0)
+            } else {
+                (BODY_SIZE, BODY_LINE_HEIGHT)
+            };
+            c.spawn((
+                effect_panel,
+                BackgroundColor(Color::srgba(0.025, 0.022, 0.018, 0.82)),
+                BorderColor::all(Color::srgba(0.50, 0.35, 0.12, 0.72)),
+            ))
+            .with_children(|effect| {
+                effect.spawn(text(
+                    &art.label,
+                    "WHAT IT DOES",
+                    11.0 * scale,
+                    Color::srgb(0.84, 0.66, 0.32),
+                ));
+                effect.spawn((
                     weighted_text(
                         &art.value,
                         content.description,
-                        BODY_SIZE * scale,
+                        effect_size * scale,
                         TEXT,
                         FontWeight::SEMIBOLD,
                     ),
-                    LineHeight::Px(BODY_LINE_HEIGHT * scale),
+                    LineHeight::Px(effect_line_height * scale),
                 ));
             });
+        }
         c.spawn((
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: px((if content.rows.is_empty() { 8.0 } else { 0.0 }) * scale),
-                ..rect(24.0, 436.0, 372.0, 116.0, scale)
+                ..rect(24.0, stat_top, 372.0, 116.0, scale)
             },
             ImageNode::new(art.stat[rarity].clone()),
         ))
@@ -580,7 +614,7 @@ pub fn spawn(
                 }
             }
         });
-        c.spawn(rect(32.0, 568.0, 356.0, 24.0, scale))
+        c.spawn(rect(32.0, footer_top, 356.0, 24.0, scale))
             .with_children(|footer| {
                 let size = if content.footer.chars().count() > 42 {
                     16.0

@@ -292,6 +292,16 @@ pub(crate) const REGISTERED: &[Registered] = &[
     same("UnitNamePlayer", "1"),
     same("UnitNameNPC", "0"),
     same("UnitNameOwn", "0"),
+    ours(
+        "SurvivorNameplateEnemies",
+        "0",
+        "Survivors mode's V-key toggle for nearby regular enemies; its boss plates remain visible",
+    ),
+    ours(
+        "SurvivorNameplateFriends",
+        "1",
+        "Survivors mode's V-key toggle for co-op ally plates; defaults on to retain the existing party display",
+    ),
     // `UnitNamePlayerGuild` (`0x86c680`, "1", mask bit `0x10`) is not a show gate: `ShouldShowName`
     // (`0x6070a0`) reads bits `0x1/0x2/0x4`, and this gates the `"\n<%s>"` guild line at
     // `0x609085`. `UnitNamePlayerPVPTitle` (bit `0x20`, "1") has no row: nothing here draws the

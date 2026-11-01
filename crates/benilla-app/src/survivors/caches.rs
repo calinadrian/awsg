@@ -1,4 +1,4 @@
-//! Caches require contact, never magnet pickup. Boss/guardian spoils are free;
+//! Caches require contact, never magnet pickup. Elite/boss/guardian drops are free;
 //! arena caches spend gold once and advance the original 1.3x + 5 price curve.
 use super::{
     hero::{self, Hero},

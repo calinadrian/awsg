@@ -174,7 +174,7 @@ pub(super) fn describe(choice: Choice, run: &Run, card: &CardText) -> Content {
                     after: super::jewelry::amount(stat, value),
                 });
             }
-            result.description = "Strengthens your equipment for this run.".into();
+            result.description.clear();
             result.footer = (if def.ring {
                 "Ring · Run equipment"
             } else {
@@ -211,7 +211,7 @@ pub(super) fn describe(choice: Choice, run: &Run, card: &CardText) -> Content {
                     after: format!("+{}", def.targets),
                 });
             }
-            result.description = "Grants bonuses to your hero while equipped.".into();
+            result.description.clear();
             result.footer = match run.amulet.as_ref() {
                 None => "Fills your amulet slot".into(),
                 Some(owned) if owned.index == index => "Upgrades your equipped amulet".into(),

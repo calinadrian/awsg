@@ -462,7 +462,7 @@ pub(crate) struct EnemyDef {
     pub intro: &'static str,
 }
 
-/// A caster's bolt: the `Spell.dbc` row it looks like, how far it reaches and how often it flies.
+/// A caster's spell: the `Spell.dbc` row it uses, its reach and how often it casts.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Ranged {
     pub spell: u32,
@@ -720,9 +720,9 @@ pub(crate) fn all_maps() -> &'static [MapDef] {
     ALL_MAPS
 }
 
-/// Stable menu/save/co-op indices: Elwynn remains 0; Hall of Thanes is 1.
+/// Stable menu/save/co-op indices: Elwynn remains 0 and Hall of Thanes remains 1.
 pub(crate) static MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::new(|| {
-    ["Elwynn Forest", "Hall of Thanes"]
+    ["Elwynn Forest", "Hall of Thanes", "Durotar"]
         .into_iter()
         .map(|name| {
             *ALL_MAPS

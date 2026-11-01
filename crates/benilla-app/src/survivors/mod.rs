@@ -99,6 +99,7 @@ impl Plugin for SurvivorsPlugin {
             .init_resource::<guardians::Lairs>()
             .init_resource::<talents::TalentBook>()
             .init_resource::<telegraphs::Telegraphs>()
+            .init_resource::<plates::NameplateSettings>()
             .init_resource::<talents::TalentScreen>()
             .init_resource::<hud::Offer>()
             .init_resource::<cards::PendingPick>()
@@ -106,7 +107,15 @@ impl Plugin for SurvivorsPlugin {
             .add_message::<enemies::Loot>()
             .add_plugins(bevy::ui_render::UiMaterialPlugin::<hud::SweepUiMaterial>::default())
             .add_plugins(bevy::ui_render::UiMaterialPlugin::<fill::FillMaterial>::default())
-            .add_systems(Startup, (card_view::setup, hud::setup_hud).chain())
+            .add_systems(
+                Startup,
+                (
+                    plates::load_nameplate_settings.after(crate::cvars::CvarLoad),
+                    card_view::setup,
+                    hud::setup_hud,
+                )
+                    .chain(),
+            )
             .add_plugins(unit_frames::plugin)
             .add_plugins(magnets::plugin)
             .add_plugins(appearance::plugin)

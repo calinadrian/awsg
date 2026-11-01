@@ -7,6 +7,7 @@ pub(super) struct Options {
     pub open: bool,
     pub settings: bool,
     audio: bool,
+    names: bool,
 }
 
 impl Options {
@@ -164,7 +165,70 @@ enum Action {
     Adjust(usize, i32),
     Graphics,
     Audio,
+    Names,
+    Toggle(InterfaceSetting),
     Back,
+}
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+struct InterfaceRow(InterfaceSetting);
+#[derive(Component)]
+struct FlagLabel(InterfaceSetting);
+#[derive(Component)]
+struct InterfaceHint;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InterfaceSetting {
+    PlayerNames,
+    NpcNames,
+    OwnName,
+    GuildNames,
+    EnemyPlates,
+    FriendlyPlates,
+}
+
+impl InterfaceSetting {
+    const ALL: [Self; 6] = [
+        Self::PlayerNames,
+        Self::NpcNames,
+        Self::OwnName,
+        Self::GuildNames,
+        Self::EnemyPlates,
+        Self::FriendlyPlates,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::PlayerNames => "Player names",
+            Self::NpcNames => "NPC names",
+            Self::OwnName => "Your name",
+            Self::GuildNames => "Guild names",
+            Self::EnemyPlates => "Enemy nameplates",
+            Self::FriendlyPlates => "Friendly nameplates",
+        }
+    }
+
+    fn cvar(self) -> Option<&'static str> {
+        match self {
+            Self::PlayerNames => Some("UnitNamePlayer"),
+            Self::NpcNames => Some("UnitNameNPC"),
+            Self::OwnName => Some("UnitNameOwn"),
+            Self::GuildNames => Some("UnitNamePlayerGuild"),
+            Self::EnemyPlates | Self::FriendlyPlates => None,
+        }
+    }
+
+    fn enabled(
+        self,
+        cvars: &crate::cvars::Cvars,
+        plates: &super::plates::NameplateSettings,
+    ) -> bool {
+        match self {
+            Self::EnemyPlates => plates.enemies,
+            Self::FriendlyPlates => plates.friends,
+            _ => self.cvar().and_then(|key| cvars.flag(key)).unwrap_or(false),
+        }
+    }
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -181,6 +245,7 @@ pub(super) fn plugin(app: &mut App) {
             open: true,
             settings: preview != "menu",
             audio: preview == "audio",
+            names: false,
         });
     }
 }
@@ -217,6 +282,29 @@ fn control(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label: &str, 
         ))
         .with_children(|b| {
             b.spawn(text(font, label, 16., skin::GOLD));
+        });
+}
+
+fn flag_control(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, setting: InterfaceSetting) {
+    parent
+        .spawn((
+            Button,
+            Action::Toggle(setting),
+            Node {
+                min_width: Val::Px(66.),
+                height: Val::Px(34.),
+                padding: UiRect::horizontal(Val::Px(12.)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(1.)),
+                border_radius: BorderRadius::all(Val::Px(4.)),
+                ..default()
+            },
+            BackgroundColor(skin::SURFACE),
+            BorderColor::all(skin::EDGE),
+        ))
+        .with_children(|b| {
+            b.spawn((FlagLabel(setting), text(font, "Off", 16., skin::GOLD)));
         });
 }
 
@@ -264,6 +352,7 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                     .with_children(|tabs| {
                         control(tabs, f, "Graphics", Action::Graphics);
                         control(tabs, f, "Sound", Action::Audio);
+                        control(tabs, f, "Names", Action::Names);
                     });
                 skin::rule(panel);
                 for (i, setting) in SETTINGS.iter().enumerate() {
@@ -299,6 +388,42 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                             control(row, f, "+", Action::Adjust(i, 1));
                         });
                 }
+                for setting in InterfaceSetting::ALL {
+                    panel
+                        .spawn((
+                            InterfaceRow(setting),
+                            Node {
+                                width: Val::Percent(100.),
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(8.),
+                                display: Display::None,
+                                ..default()
+                            },
+                        ))
+                        .with_children(|row| {
+                            row.spawn((
+                                Node {
+                                    flex_grow: 1.,
+                                    ..default()
+                                },
+                                text(f, setting.label(), 16., skin::TEXT),
+                            ));
+                            flag_control(row, f, setting);
+                        });
+                }
+                panel.spawn((
+                    InterfaceHint,
+                    Node {
+                        display: Display::None,
+                        ..default()
+                    },
+                    text(
+                        f,
+                        "V: nearby enemies · Shift+V: friends · Ctrl+V: both · boss plates stay visible",
+                        12.,
+                        skin::MUTED,
+                    ),
+                ));
                 skin::rule(panel);
                 panel
                     .spawn(Node {
@@ -324,6 +449,7 @@ fn clicks(
     mut options: ResMut<Options>,
     phase: Res<State<Phase>>,
     mut cvars: ResMut<crate::cvars::Cvars>,
+    mut nameplates: ResMut<super::plates::NameplateSettings>,
     mut commands: Commands,
     mut buttons: Query<(&Interaction, &Action, &mut BackgroundColor), Changed<Interaction>>,
 ) {
@@ -340,8 +466,18 @@ fn clicks(
             continue;
         }
         match *action {
-            Action::Graphics => options.audio = false,
-            Action::Audio => options.audio = true,
+            Action::Graphics => {
+                options.audio = false;
+                options.names = false;
+            }
+            Action::Audio => {
+                options.audio = true;
+                options.names = false;
+            }
+            Action::Names => {
+                options.audio = false;
+                options.names = true;
+            }
             Action::Back => {
                 options.settings = false;
                 if *phase.get() == Phase::Menu {
@@ -350,7 +486,7 @@ fn clicks(
             }
             Action::Adjust(i, delta) => {
                 let s = &SETTINGS[i];
-                if s.audio != options.audio {
+                if options.names || s.audio != options.audio {
                     continue;
                 }
                 let at = nearest(s, cvars.get(s.key).unwrap_or(s.values[0]));
@@ -361,6 +497,33 @@ fn clicks(
                     commands.trigger(event);
                 }
             }
+            Action::Toggle(setting) => {
+                if let Some(key) = setting.cvar() {
+                    let value = if !cvars.flag(key).unwrap_or(false) {
+                        "1"
+                    } else {
+                        "0"
+                    };
+                    cvars.set(key, value);
+                    cvars.commit_latched();
+                    for event in cvars.take_events() {
+                        commands.trigger(event);
+                    }
+                } else {
+                    match setting {
+                        InterfaceSetting::EnemyPlates => nameplates.enemies = !nameplates.enemies,
+                        InterfaceSetting::FriendlyPlates => {
+                            nameplates.friends = !nameplates.friends
+                        }
+                        _ => unreachable!("CVar-backed interface setting"),
+                    }
+                    super::plates::persist_nameplate_settings(
+                        &nameplates,
+                        &mut cvars,
+                        &mut commands,
+                    );
+                }
+            }
         }
     }
 }
@@ -368,15 +531,23 @@ fn clicks(
 fn paint(
     options: Res<Options>,
     cvars: Res<crate::cvars::Cvars>,
+    nameplates: Res<super::plates::NameplateSettings>,
     mut roots: Query<&mut Node, (With<Root>, Without<Row>)>,
     mut rows: Query<(&Row, &mut Node), Without<Root>>,
-    mut labels: Query<(&ValueLabel, &mut Text)>,
+    mut labels: Query<(&ValueLabel, &mut Text), Without<FlagLabel>>,
+    mut interface_rows: Query<
+        (&InterfaceRow, &mut Node),
+        (Without<Row>, Without<Root>, Without<InterfaceHint>),
+    >,
+    mut flag_labels: Query<(&FlagLabel, &mut Text), Without<ValueLabel>>,
+    mut hints: Query<&mut Node, (With<InterfaceHint>, Without<Root>, Without<Row>)>,
     mut tabs: Query<(&Action, &mut BorderColor)>,
 ) {
     for (action, mut border) in &mut tabs {
         let on = match action {
-            Action::Graphics => !options.audio,
+            Action::Graphics => !options.audio && !options.names,
             Action::Audio => options.audio,
+            Action::Names => options.names,
             _ => false,
         };
         let want = BorderColor::all(if on { skin::GOLD } else { skin::EDGE });
@@ -392,7 +563,21 @@ fn paint(
         };
     }
     for (row, mut node) in &mut rows {
-        node.display = if SETTINGS[row.0].audio == options.audio {
+        node.display = if !options.names && SETTINGS[row.0].audio == options.audio {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    for (_, mut node) in &mut interface_rows {
+        node.display = if options.names {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    for mut node in &mut hints {
+        node.display = if options.names {
             Display::Flex
         } else {
             Display::None
@@ -402,6 +587,16 @@ fn paint(
         let s = &SETTINGS[label.0];
         let value = cvars.get(s.key).unwrap_or(s.values[0]);
         let want = s.labels[nearest(s, value)];
+        if text.0 != want {
+            text.0 = want.into();
+        }
+    }
+    for (label, mut text) in &mut flag_labels {
+        let want = if label.0.enabled(&cvars, &nameplates) {
+            "On"
+        } else {
+            "Off"
+        };
         if text.0 != want {
             text.0 = want.into();
         }
@@ -457,7 +652,9 @@ mod tests {
                 open: true,
                 settings: true,
                 audio: true,
+                names: false,
             })
+            .init_resource::<super::plates::NameplateSettings>()
             .add_observer(crate::sound::on_cvar)
             .add_observer(crate::world_backdrop::on_cvar)
             .add_systems(Update, clicks);

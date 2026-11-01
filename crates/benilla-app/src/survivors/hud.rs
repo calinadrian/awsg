@@ -1147,6 +1147,9 @@ pub(super) fn keys(
     mut run: ResMut<Run>,
     mut next: ResMut<NextState<Phase>>,
     mut options: ResMut<super::options::Options>,
+    mut nameplates: ResMut<super::plates::NameplateSettings>,
+    mut cvars: ResMut<crate::cvars::Cvars>,
+    mut commands: Commands,
 ) {
     if inventory.open || atlas.open || coop.open || (*phase.get() == Phase::Menu && coop.in_room()) {
         return;
@@ -1157,6 +1160,12 @@ pub(super) fn keys(
     }
     if options.open {
         return;
+    }
+    if *phase.get() == Phase::Playing && keys.just_pressed(KeyCode::KeyV) {
+        let control = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        super::plates::toggle_nameplates(&mut nameplates, control, shift);
+        super::plates::persist_nameplate_settings(&nameplates, &mut cvars, &mut commands);
     }
     match phase.get() {
         Phase::Menu => {

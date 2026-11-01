@@ -126,6 +126,7 @@ fn sync(
 
 fn position(
     coop: Res<Coop>,
+    nameplates: Res<super::plates::NameplateSettings>,
     ui_scale: Res<UiScale>,
     cameras: Query<(&Camera, &GlobalTransform), With<benilla_world::view::WorldCamera>>,
     allies: Query<(&Ally, &Transform)>,
@@ -138,6 +139,9 @@ fn position(
         let Some(room) = coop.room.as_ref().filter(|_| coop.running) else {
             continue;
         };
+        if frame.overhead && !nameplates.friends {
+            continue;
+        }
         let Some(index) = room.members.iter().position(|m| m.peer == frame.peer) else {
             continue;
         };
