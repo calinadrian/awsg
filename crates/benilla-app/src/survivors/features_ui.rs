@@ -5,11 +5,9 @@
 use bevy::prelude::*;
 
 use super::appearance::{self, DIALS};
-use super::front_end as skin;
+use super::front_end::{self as skin, gap, size};
 use super::menu::MenuAction;
 
-/// The panel's height on the 768-unit canvas: heading, five rows and the Randomize.
-pub(super) const HEIGHT: f32 = 208.;
 const ROW: f32 = 22.;
 
 #[derive(Component)]
@@ -18,23 +16,17 @@ pub(super) struct FeatureLabel(usize);
 #[derive(Component)]
 pub(super) struct FeatureCount(usize);
 
-/// Spawn the panel at `node`'s place.
-pub(super) fn build(
-    ui: &mut ChildSpawnerCommands,
-    f: &Handle<Font>,
-    node: Node,
-    heading: impl Fn(&mut ChildSpawnerCommands, &Handle<Font>, &str),
-) {
+/// Spawn the panel at `node`'s place; it is as tall as its rows, never a fixed height.
+pub(super) fn build(ui: &mut ChildSpawnerCommands, f: &Handle<Font>, node: Node) {
     ui.spawn(skin::panel(Node {
-        height: Val::Px(HEIGHT),
-        padding: UiRect::axes(Val::Px(16.), Val::Px(12.)),
+        padding: UiRect::axes(Val::Px(gap::L), Val::Px(gap::M)),
         flex_direction: FlexDirection::Column,
         align_items: AlignItems::Center,
-        row_gap: Val::Px(4.),
+        row_gap: Val::Px(gap::XS),
         ..node
     }))
     .with_children(|p| {
-        heading(p, f, "FEATURES");
+        skin::heading(p, f, "FEATURES");
         for dial in 0..DIALS {
             p.spawn(Node {
                 width: Val::Percent(100.),
@@ -46,7 +38,7 @@ pub(super) fn build(
                 ..default()
             })
             .with_children(|row| {
-                let label = skin::label(row, f, "", 13., skin::TEXT);
+                let label = skin::label(row, f, "", size::SMALL + 1., skin::TEXT);
                 row.commands().entity(label).insert((
                     FeatureLabel(dial),
                     Node {
@@ -55,11 +47,11 @@ pub(super) fn build(
                     },
                 ));
                 arrow(row, f, "<", MenuAction::Feature(dial, false));
-                let count = skin::label(row, f, "", 12., skin::MUTED);
+                let count = skin::label(row, f, "", size::SMALL, skin::MUTED);
                 row.commands().entity(count).insert((
                     FeatureCount(dial),
                     Node {
-                        width: Val::Px(48.),
+                        width: Val::Px(56.),
                         ..default()
                     },
                     TextLayout::new_with_justify(Justify::Center),
@@ -68,7 +60,7 @@ pub(super) fn build(
             });
         }
         p.spawn(Node {
-            flex_grow: 1.,
+            height: Val::Px(gap::XS),
             ..default()
         });
         skin::tab(p, f, "Randomize features", MenuAction::RandomFeatures);
@@ -99,12 +91,12 @@ fn arrow(row: &mut ChildSpawnerCommands, f: &Handle<Font>, glyph: &str, action: 
         BorderColor::all(skin::EDGE),
     ))
     .with_children(|p| {
-        skin::label(p, f, glyph, 14., skin::GOLD);
+        skin::label(p, f, glyph, size::BODY, skin::GOLD);
     });
 }
 
 /// The rows' labels (the race's own word for the dial) and `n / N` counts, and which arrows can
-/// step: a dial with one value, or a race the tables do not cover, is greyed.
+/// step: a dial with one value, or a race the tables do not cover, is greyed and reads "Default".
 #[allow(clippy::type_complexity)]
 pub(super) fn refresh(
     selection: Res<super::Selection>,
@@ -113,23 +105,26 @@ pub(super) fn refresh(
     catalog: Option<Res<crate::entities::CharCreate>>,
     mut labels: Query<(&FeatureLabel, &mut Text), Without<FeatureCount>>,
     mut counts: Query<(&FeatureCount, &mut Text), Without<FeatureLabel>>,
-    mut arrows: Query<(&MenuAction, &mut skin::Control)>,
+    mut arrows: Query<(&MenuAction, &mut skin::Control, &Children)>,
+    mut glyphs: Query<&mut TextColor>,
     mut seen: Local<Option<(u32, bool, bool)>>,
 ) {
     let key = (selection.version, creatures.is_some(), appearances.is_some());
-    if *seen == Some(key) && labels.iter().all(|(_, t)| !t.0.is_empty()) {
+    if *seen == Some(key) {
         return;
     }
-    *seen = Some(key);
     let cur = creatures
         .as_deref()
         .and_then(|c| appearance::current(&selection, c, appearances.as_deref()));
+    // The hero's display reads its own look only once its model has loaded, which no key here
+    // sees: until then, ask again every frame rather than keep the empty dials.
+    *seen = cur.is_some().then_some(key);
     let race_sex = selection
         .look
         .and_then(|i| selection.looks.get(i))
         .map(|&(_, r, s)| (r, s));
     let mut steps = [0usize; DIALS];
-    let mut text = [String::new(), String::new(), String::new(), String::new(), String::new()];
+    let mut text: [String; DIALS] = Default::default();
     for dial in 0..DIALS {
         let (n, total) = cur.as_ref().map_or((0, 0), |(_, f, ranges)| {
             let opts = ranges.options(dial, f);
@@ -137,8 +132,8 @@ pub(super) fn refresh(
             (at + 1, opts.len())
         });
         steps[dial] = total;
-        text[dial] = if total == 0 {
-            "-".into()
+        text[dial] = if total <= 1 {
+            "Default".into()
         } else {
             format!("{n} / {total}")
         };
@@ -161,7 +156,7 @@ pub(super) fn refresh(
             t.0.clone_from(&text[count.0]);
         }
     }
-    for (action, mut control) in &mut arrows {
+    for (action, mut control, children) in &mut arrows {
         let enabled = match *action {
             MenuAction::Feature(dial, _) => steps[dial] > 1,
             MenuAction::RandomFeatures => steps.iter().any(|&n| n > 1),
@@ -169,6 +164,13 @@ pub(super) fn refresh(
         };
         if control.enabled != enabled {
             control.enabled = enabled;
+        }
+        if matches!(action, MenuAction::Feature(..)) {
+            for &child in children {
+                if let Ok(mut color) = glyphs.get_mut(child) {
+                    color.0 = if enabled { skin::GOLD } else { skin::EDGE };
+                }
+            }
         }
     }
 }

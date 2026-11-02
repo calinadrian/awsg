@@ -1,5 +1,11 @@
 //! Inventory, equipment and shared auctions in the character menu.
-use super::{coop::Coop, front_end as skin, hud::HudFont, inventory::Equipment, Phase, Selection};
+use super::{
+    coop::Coop,
+    front_end::{self as skin, gap, size},
+    hud::HudFont,
+    inventory::{Equipment, Pane},
+    Phase, Selection,
+};
 use crate::glue::GlueClicks;
 use asr_coop::economy::{Action as Trade, Definition, Item, SLOTS};
 use bevy::input::{keyboard::KeyboardInput, ButtonState};
@@ -7,9 +13,9 @@ use bevy::prelude::*;
 
 #[derive(Component, Clone)]
 pub(super) enum Action {
-    Open(bool),
+    Open(Pane),
     Close,
-    Tab(bool),
+    Tab(Pane),
     Select(u64),
     Listing(u64),
     Filter(usize),
@@ -26,8 +32,6 @@ pub(super) enum Action {
     Confirm,
     Keep,
     Refresh,
-    LootTable,
-    Journal,
     Redeem(bool),
     LootClass(Option<u8>),
     LootSlot,
@@ -35,11 +39,22 @@ pub(super) enum Action {
     LootSource,
     Search,
     ClearSearch,
+    /// Keep the bags in the solo economy (true) or on the online realm (false).
+    Realm(bool),
+    /// Open a quest in the quest log.
+    QuestPick(String),
+    /// Offer quests from one economy zone, or from all the hero's zones.
+    QuestZone(Option<String>),
+    Accept(String),
+    Abandon(String),
+    TurnIn(String),
+    /// Show an achievement category; 0 is the summary.
+    Category(usize),
 }
 #[derive(Component)]
 struct Root;
 #[derive(Component)]
-struct ItemIcon(String);
+pub(super) struct ItemIcon(pub String);
 #[derive(Component)]
 struct ScrollColumn(usize);
 #[derive(Component)]
@@ -52,13 +67,20 @@ struct ItemTip(Option<Item>);
 struct ItemTipRoot;
 #[derive(Resource, Default)]
 struct ScrollMemory {
-    positions: [Vec2; 4],
-    query: Option<(Option<usize>, bool, usize, Option<usize>, String, (bool, bool, Option<u8>, Option<usize>, usize, usize))>,
+    positions: [Vec2; 8],
+    #[allow(clippy::type_complexity)]
+    query: Option<(Option<usize>, Pane, usize, Option<usize>, String, (Option<u8>, Option<usize>, usize, usize), (Option<String>, usize))>,
 }
 const BAG_MIN_SLOTS: usize = 72;
+/// A bag slot's target size and the gap between slots, in canvas units.
+const BAG_CELL: f32 = 46.;
+const BAG_GAP: f32 = 5.;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ScrollMemory>();
+    if let Some(wanted) = Preview::from_env() {
+        app.insert_resource(wanted).add_systems(Update, preview.before(draw));
+    }
     app.add_systems(
         Update,
         (
@@ -94,6 +116,9 @@ fn button(
             padding: UiRect::axes(Val::Px(10.), Val::Px(6.)),
             min_height: Val::Px(29.),
             border: UiRect::all(Val::Px(1.)),
+            border_radius: BorderRadius::all(Val::Px(3.)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
             flex_shrink: 0.,
             ..default()
         },
@@ -111,7 +136,7 @@ fn button(
     })
     .id()
 }
-fn choice(
+pub(super) fn choice(
     p: &mut ChildSpawnerCommands,
     f: &Handle<Font>,
     title: &str,
@@ -377,7 +402,7 @@ fn input(
     else {
         return;
     };
-    let view = gear.view(&coop.url, class);
+    let view = gear.view(&gear.realm(&coop), class);
     let item = gear.selected.and_then(|id| {
         view.as_ref()?
             .inventory
@@ -392,33 +417,48 @@ fn input(
     let mut trade = None;
     gear.search_active = matches!(action, Action::Search);
     match action {
-        Action::Open(market) => {
-            gear.show_journal = false;
+        Action::Open(pane) => {
             gear.open = true;
-            gear.market = market;
+            gear.pane = pane;
             gear.confirm = None;
             gear.slot_filter = None;
             gear.filter = 0;
             gear.search.clear();
-            gear.show_loot = false;
+            if pane == Pane::Drops {
+                gear.loot_class = Some(class);
+            }
+            open_journal(&mut gear, &selection, pane);
         }
         Action::Close => {
             gear.open = false;
             gear.confirm = None;
         }
-        Action::Tab(market) => {
-            gear.show_journal = false;
-            gear.market = market;
+        Action::Realm(solo) => gear.set_solo(solo),
+        Action::Tab(pane) => {
+            gear.pane = pane;
             gear.filter = 0;
             gear.confirm = None;
             gear.selected = None;
             gear.listing = None;
-            gear.show_loot = false;
             gear.search.clear();
+            if pane == Pane::Drops {
+                gear.loot_class = Some(class);
+            }
+            open_journal(&mut gear, &selection, pane);
         }
+        Action::QuestPick(id) => gear.quest = Some(id),
+        Action::QuestZone(zone) => {
+            gear.quest_zone = zone;
+            gear.quest = None;
+        }
+        Action::Accept(quest) => {
+            gear.quest = Some(quest.clone());
+            trade = Some(Trade::AcceptQuest { quest });
+        }
+        Action::Abandon(quest) => trade = Some(Trade::AbandonQuest { quest }),
+        Action::TurnIn(quest) => trade = Some(Trade::TurnInQuest { quest }),
+        Action::Category(category) => gear.category = category,
         Action::Select(id) => {
-            gear.show_journal = false;
-            gear.show_loot = false;
             gear.selected = Some(id);
             gear.listing = None;
             gear.confirm = None;
@@ -473,20 +513,6 @@ fn input(
                 *last_pick = Some((id, now));
             }
         }
-        Action::LootTable => {
-            gear.show_journal = false;
-            gear.show_loot = true;
-            gear.loot_class = Some(class);
-            gear.selected = None;
-            gear.listing = None;
-            gear.confirm = None;
-        }
-        Action::Journal => {
-            gear.open = true;
-            gear.show_journal = true;
-            gear.show_loot = false;
-            gear.market = false;
-        }
         Action::Redeem(gear_reward) => trade = Some(Trade::RedeemAchievement { gear: gear_reward }),
         Action::LootClass(class) => gear.loot_class = class,
         Action::LootSlot => {
@@ -499,7 +525,6 @@ fn input(
         Action::LootQuality => gear.loot_quality = (gear.loot_quality + 1) % 4,
         Action::LootSource => gear.loot_source = (gear.loot_source + 1) % 3,
         Action::Listing(id) => {
-            gear.show_loot = false;
             gear.listing = Some(id);
             gear.selected = None;
             gear.confirm = None;
@@ -603,10 +628,127 @@ fn input(
             return;
         }
         if !gear.busy() {
-            gear.action(&coop.url, class, trade);
+            let url = gear.realm(&coop);
+            gear.action(&url, class, trade);
         }
     }
     gear.revision += 1;
+}
+/// `WOW_SURVIVORS_ACCOUNT_PREVIEW=quests,achievements` opens the account window on each named
+/// tab in turn once the menu has settled, for layout checks, and closes it after the last; with
+/// `WOW_SURVIVORS_SHOTS=<dir>` each tab is saved there. It takes a few of the zone's quests
+/// first so the log has something in it: point `BENILLA_HOME` at a scratch folder.
+#[derive(Resource)]
+struct Preview {
+    panes: Vec<(Pane, String)>,
+    index: usize,
+    t: f32,
+    shots: Option<std::path::PathBuf>,
+    opened: bool,
+    accepted: bool,
+}
+impl Preview {
+    fn from_env() -> Option<Self> {
+        let want = crate::webenv::var("WOW_SURVIVORS_ACCOUNT_PREVIEW")?;
+        let panes = want
+            .split(',')
+            .filter_map(|name| {
+                let name = name.trim().to_ascii_lowercase();
+                let pane = match name.as_str() {
+                    "inventory" => Pane::Inventory,
+                    "auction" => Pane::Auction,
+                    "drops" => Pane::Drops,
+                    "quests" => Pane::Quests,
+                    "achievements" => Pane::Achievements,
+                    _ => return None,
+                };
+                Some((pane, name))
+            })
+            .collect();
+        Some(Self {
+            panes,
+            index: 0,
+            t: -3.,
+            shots: std::env::var_os("WOW_SURVIVORS_SHOTS").map(std::path::PathBuf::from),
+            opened: false,
+            accepted: false,
+        })
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn preview(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    phase: Res<State<Phase>>,
+    font: Option<Res<HudFont>>,
+    selection: Res<Selection>,
+    coop: Res<Coop>,
+    mut gear: ResMut<Equipment>,
+    mut preview: ResMut<Preview>,
+) {
+    if *phase.get() != Phase::Menu || font.is_none() || preview.index > preview.panes.len() {
+        return;
+    }
+    let Some(class) = selection.class_def().map(|c| c.id) else { return };
+    preview.t += time.delta_secs();
+    if preview.t < 0. {
+        return;
+    }
+    let Some((pane, name)) = preview.panes.get(preview.index).cloned() else {
+        gear.open = false;
+        gear.revision += 1;
+        preview.index += 1;
+        return;
+    };
+    if !preview.opened {
+        preview.opened = true;
+        gear.open = true;
+        gear.pane = pane;
+        open_journal(&mut gear, &selection, pane);
+        gear.revision += 1;
+    }
+    if !preview.accepted && gear.view(&gear.realm(&coop), class).is_some() {
+        preview.accepted = true;
+        let url = gear.realm(&coop);
+        let zone = super::quests::zone_id(&gear.catalog, selection.stage_def().name).map(str::to_owned);
+        let quests: Vec<_> = gear
+            .catalog
+            .quests
+            .quests
+            .iter()
+            .filter(|q| Some(&q.zone) == zone.as_ref() && q.requires.is_empty())
+            .take(3)
+            .map(|q| q.id.clone())
+            .collect();
+        for quest in quests {
+            gear.action(&url, class, Trade::AcceptQuest { quest });
+        }
+    }
+    if preview.t >= 4. {
+        if let Some(dir) = &preview.shots {
+            let _ = std::fs::create_dir_all(dir);
+            commands
+                .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+                .observe(bevy::render::view::screenshot::save_to_disk(dir.join(format!("account-{name}.png"))));
+        }
+        preview.index += 1;
+        preview.t = 0.;
+        preview.opened = false;
+    }
+}
+/// Opening the quest log starts on the zone the hero is set to play; achievements on the
+/// summary.
+fn open_journal(gear: &mut Equipment, selection: &Selection, pane: Pane) {
+    match pane {
+        Pane::Quests => {
+            gear.quest = None;
+            gear.quest_zone = super::quests::zone_id(&gear.catalog, selection.map_def().name)
+                .filter(|zone| journal_zones(gear, selection).any(|(id, _)| id == zone))
+                .map(str::to_owned);
+        }
+        Pane::Achievements => gear.category = 0,
+        _ => {}
+    }
 }
 fn search_input(
     mut keyboard: MessageReader<KeyboardInput>,
@@ -678,8 +820,8 @@ fn item_slot(
         |(_, d)| d.icon.clone(),
     );
     let node = Node {
-        width: Val::Px(46.),
-        height: Val::Px(46.),
+        width: Val::Percent(100.),
+        aspect_ratio: Some(1.),
         padding: UiRect::all(Val::Px(2.)),
         row_gap: Val::Px(1.),
         align_items: AlignItems::Center,
@@ -989,7 +1131,7 @@ fn detail(
             Action::Scrap,
             enabled && !item.locked && !item.listed && item.slot.is_none(),
         );
-        if gear.market {
+        if gear.pane == Pane::Auction {
             skin::rule(p);
             skin::label(
                 p,
@@ -1036,6 +1178,8 @@ fn detail(
         });
     }
 }
+/// The filters' column beside the drop list.
+const DROPS_FILTERS: f32 = 300.;
 fn zone_loot(
     p: &mut ChildSpawnerCommands,
     f: &Handle<Font>,
@@ -1043,145 +1187,204 @@ fn zone_loot(
     zone_name: &str,
 ) {
     let catalog = &gear.catalog;
-    skin::label(p, f, format!("{zone_name} drops"), 18., skin::GOLD);
-    let Some(zone) = catalog.zones.values().find(|zone| zone.name == zone_name) else {
-        skin::label(p, f, "This zone has no equipment drop table yet.", 12., skin::MUTED);
-        return;
-    };
-    skin::label(p, f, format!(
-        "Equipment chance · Elite {:.0}% · Boss {:.0}%\nUp to {} elite drops per run. Bosses roll their assigned item separately.",
-        zone.equipment_chance_bp.get("elite").copied().unwrap_or(0) as f32 / 100.,
-        zone.equipment_chance_bp.get("boss").copied().unwrap_or(0) as f32 / 100.,
-        asr_coop::economy::MAX_EQUIPMENT_PER_RUN,
-    ), 11., skin::MUTED);
+    let zone = catalog.zones.values().find(|zone| zone.name == zone_name);
     p.spawn(Node {
-        flex_wrap: FlexWrap::Wrap,
-        column_gap: Val::Px(4.),
-        row_gap: Val::Px(4.),
+        flex_grow: 1.,
+        min_height: Val::Px(0.),
+        column_gap: Val::Px(PANE_GAP),
         ..default()
-    }).with_children(|p| {
-        choice(p, f, "All classes", Action::LootClass(None), gear.loot_class.is_none());
-        for class in super::data::CLASSES {
-            choice(p, f, class.name, Action::LootClass(Some(class.id)), gear.loot_class == Some(class.id));
-        }
-    });
-    p.spawn(Node {
-        flex_wrap: FlexWrap::Wrap,
-        column_gap: Val::Px(4.),
-        row_gap: Val::Px(4.),
-        ..default()
-    }).with_children(|p| {
-        let slot = gear.loot_slot.and_then(|i| SLOTS.get(i)).map_or("All slots".into(), |slot| label_slot(slot));
-        button(p, f, &format!("Slot: {slot}"), Action::LootSlot, true);
-        button(p, f, ["Quality: All", "Common", "Uncommon", "Rare"][gear.loot_quality], Action::LootQuality, true);
-        button(p, f, ["Source: All", "Elites", "Bosses"][gear.loot_source], Action::LootSource, true);
-    });
-    let eligible = |item: &Definition| gear.loot_class.is_none_or(|class| item.can_use(class));
-    if let Some(map) = super::data::MAPS.iter().position(|map| map.name == zone_name) {
-        let names = super::data::roster(map).guardians.iter().map(|elite| elite.name).collect::<Vec<_>>();
-        if !names.is_empty() {
-            skin::label(p, f, format!("Shared elite pool: {}", names.join(", ")), 11., skin::MUTED);
-        }
-    }
-    let total: u64 = zone.equipment.iter().filter_map(|drop| {
-        let item = catalog.definition(&drop.item)?;
-        eligible(item).then_some(u64::from(drop.weight))
-    }).sum();
-    let mut items: Vec<_> = zone.equipment.iter().map(|drop| drop.item.as_str())
-        .chain(zone.boss_drops.iter().map(|drop| drop.item.as_str()))
-        .filter_map(|id| catalog.definition(id)).filter(|item| eligible(item)).collect();
-    items.sort_by(|a, b| a.slot.cmp(&b.slot).then_with(|| a.name.cmp(&b.name)));
-    items.dedup_by(|a, b| a.id == b.id);
-    let quality = ["", "common", "uncommon", "rare"][gear.loot_quality];
-    items.retain(|item| {
-        let elite = zone.equipment.iter().any(|drop| drop.item == item.id && drop.weight > 0);
-        let boss = zone.boss_drops.iter().any(|drop| drop.item == item.id);
-        slot_matches(gear.loot_slot, &item.slot)
-            && (quality.is_empty() || item.quality == quality)
-            && match gear.loot_source { 1 => elite, 2 => boss, _ => true }
-    });
-    skin::label(p, f, format!("{} items · Hover an item for its full tooltip", items.len()), 11., skin::MUTED);
-    if items.is_empty() {
-        skin::label(p, f, "No drops match these filters.", 13., skin::TEXT);
-    }
-    for item in items {
-        let weight: u64 = zone.equipment.iter().filter(|drop| drop.item == item.id)
-            .map(|drop| u64::from(drop.weight)).sum();
-        let bosses: Vec<_> = zone.boss_drops.iter().filter(|drop| drop.item == item.id)
-            .map(|drop| drop.boss.as_str()).collect();
-        let color = item_color(item);
-        p.spawn((
-            Interaction::None,
-            ItemTip(Some(Item { definition: item.id.clone(), ..Item::default() })),
-            Node {
-                width: Val::Percent(100.),
-                padding: UiRect::all(Val::Px(9.)),
-                border: UiRect::left(Val::Px(3.)),
-                border_radius: BorderRadius::all(Val::Px(4.)),
-                column_gap: Val::Px(10.),
-                align_items: AlignItems::Start,
+    })
+    .with_children(|p| {
+        // Left: what the zone drops at all, and the filters.
+        p.spawn(Node {
+            width: Val::Px(DROPS_FILTERS),
+            flex_shrink: 0.,
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(gap::S),
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .with_children(|p| {
+            skin::label(p, f, zone_name, size::HEADING, skin::GOLD);
+            let Some(zone) = zone else {
+                skin::label(p, f, "This zone has no equipment drop table yet.", size::SMALL, skin::MUTED);
+                return;
+            };
+            p.spawn(Node {
+                column_gap: Val::Px(6.),
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(gap::XS),
+                ..default()
+            })
+            .with_children(|p| {
+                let chance = |kind: &str| zone.equipment_chance_bp.get(kind).copied().unwrap_or(0) as f32 / 100.;
+                skin::chip(p, f, format!("Elite {:.0}%", chance("elite")), skin::TEXT);
+                skin::chip(p, f, format!("Boss {:.0}%", chance("boss")), skin::GOLD);
+            });
+            skin::label(
+                p,
+                f,
+                format!(
+                    "Up to {} elite drops a run. Bosses roll their own item separately.",
+                    asr_coop::economy::MAX_EQUIPMENT_PER_RUN
+                ),
+                size::SMALL,
+                skin::MUTED,
+            );
+            skin::rule(p);
+            skin::label(p, f, "CLASS", size::CAPTION, skin::MUTED);
+            p.spawn(Node {
+                display: Display::Grid,
+                grid_template_columns: RepeatedGridTrack::flex(2, 1.),
+                column_gap: Val::Px(gap::XS),
+                row_gap: Val::Px(gap::XS),
                 flex_shrink: 0.,
                 ..default()
-            },
-            BackgroundColor(Color::srgb(0.065, 0.06, 0.045)),
-            BorderColor::all(color),
-        )).with_children(|row| {
-            row.spawn((
-                ItemIcon(item.icon.clone()),
-                ImageNode::default(),
-                Node { width: Val::Px(36.), height: Val::Px(36.), flex_shrink: 0., ..default() },
-            ));
-            row.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.,
-                min_width: Val::Px(0.),
-                row_gap: Val::Px(4.),
-                ..default()
-            }).with_children(|text| {
-                skin::label(text, f, &item.name, 14., color);
-                skin::label(text, f, format!("{} · {}", label_slot(&item.slot), item.quality), 10., skin::MUTED);
-                skin::label(text, f, amounts(&item.base_bonuses).replace('\n', " · "), 11., skin::GREEN);
-                for (spell, value) in &item.spell_damage_bp {
-                    skin::label(text, f, format!("+{:.0}% {} damage", *value as f32 / 100., spell_title(spell)), 11., color);
-                }
-                if let Some(set) = &item.set_name {
-                    skin::label(text, f, format!("Set: {set}"), 11., skin::GOLD);
-                }
-                if weight > 0 {
-                    skin::label(text, f, format!("Any zone elite · {:.1}% of successful elite gear rolls", weight as f64 * 100. / total.max(1) as f64), 10., skin::MUTED);
-                }
-                if !bosses.is_empty() {
-                    skin::label(text, f, format!("Boss: {} · {:.0}% equipment chance", bosses.join(", "), zone.equipment_chance_bp.get("boss").copied().unwrap_or(0) as f32 / 100.), 11., skin::GOLD);
+            })
+            .with_children(|p| {
+                choice(p, f, "All classes", Action::LootClass(None), gear.loot_class.is_none());
+                for class in super::data::CLASSES {
+                    choice(p, f, class.name, Action::LootClass(Some(class.id)), gear.loot_class == Some(class.id));
                 }
             });
+            skin::label(p, f, "SHOW", size::CAPTION, skin::MUTED);
+            p.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(gap::XS),
+                flex_shrink: 0.,
+                ..default()
+            })
+            .with_children(|p| {
+                let slot = gear.loot_slot.and_then(|i| SLOTS.get(i)).map_or("All slots".into(), |slot| label_slot(slot));
+                button(p, f, &format!("Slot: {slot}"), Action::LootSlot, true);
+                button(p, f, ["Quality: All", "Quality: Common", "Quality: Uncommon", "Quality: Rare"][gear.loot_quality], Action::LootQuality, true);
+                button(p, f, ["Source: All", "Source: Elites", "Source: Bosses"][gear.loot_source], Action::LootSource, true);
+            });
+            if let Some(map) = super::data::MAPS.iter().position(|map| map.name == zone_name) {
+                let names = super::data::roster(map).guardians.iter().map(|elite| elite.name).collect::<Vec<_>>();
+                if !names.is_empty() {
+                    skin::rule(p);
+                    skin::label(p, f, "ELITES", size::CAPTION, skin::MUTED);
+                    skin::label(p, f, names.join(", "), size::SMALL, skin::TEXT);
+                }
+            }
         });
-    }
+        // Right: the matching items, two to a row.
+        p.spawn(pane_node(1.)).with_children(|p| {
+            let Some(zone) = zone else { return };
+            let eligible = |item: &Definition| gear.loot_class.is_none_or(|class| item.can_use(class));
+            let total: u64 = zone.equipment.iter().filter_map(|drop| {
+                let item = catalog.definition(&drop.item)?;
+                eligible(item).then_some(u64::from(drop.weight))
+            }).sum();
+            let mut items: Vec<_> = zone.equipment.iter().map(|drop| drop.item.as_str())
+                .chain(zone.boss_drops.iter().map(|drop| drop.item.as_str()))
+                .filter_map(|id| catalog.definition(id)).filter(|item| eligible(item)).collect();
+            items.sort_by(|a, b| a.slot.cmp(&b.slot).then_with(|| a.name.cmp(&b.name)));
+            items.dedup_by(|a, b| a.id == b.id);
+            let quality = ["", "common", "uncommon", "rare"][gear.loot_quality];
+            items.retain(|item| {
+                let elite = zone.equipment.iter().any(|drop| drop.item == item.id && drop.weight > 0);
+                let boss = zone.boss_drops.iter().any(|drop| drop.item == item.id);
+                slot_matches(gear.loot_slot, &item.slot)
+                    && (quality.is_empty() || item.quality == quality)
+                    && match gear.loot_source { 1 => elite, 2 => boss, _ => true }
+            });
+            skin::label(
+                p,
+                f,
+                format!("{}  ·  hover an item for its full tooltip", skin::plural(items.len() as u32, "item")),
+                size::SMALL,
+                skin::MUTED,
+            );
+            p.spawn(scroller(4)).with_children(|p| {
+                if items.is_empty() {
+                    skin::label(p, f, "No drops match these filters.", size::BODY, skin::TEXT);
+                    return;
+                }
+                p.spawn(Node {
+                    width: Val::Percent(100.),
+                    display: Display::Grid,
+                    grid_template_columns: RepeatedGridTrack::flex(2, 1.),
+                    column_gap: Val::Px(gap::S),
+                    row_gap: Val::Px(gap::S),
+                    padding: UiRect::right(Val::Px(gap::S)),
+                    flex_shrink: 0.,
+                    ..default()
+                })
+                .with_children(|p| {
+                    for item in items {
+                        let weight: u64 = zone.equipment.iter().filter(|drop| drop.item == item.id)
+                            .map(|drop| u64::from(drop.weight)).sum();
+                        let bosses: Vec<_> = zone.boss_drops.iter().filter(|drop| drop.item == item.id)
+                            .map(|drop| drop.boss.as_str()).collect();
+                        let color = item_color(item);
+                        p.spawn((
+                            Interaction::None,
+                            ItemTip(Some(Item { definition: item.id.clone(), ..Item::default() })),
+                            Node {
+                                min_width: Val::Px(0.),
+                                padding: UiRect::all(Val::Px(gap::S + 1.)),
+                                border: UiRect::left(Val::Px(3.)),
+                                border_radius: BorderRadius::all(Val::Px(4.)),
+                                column_gap: Val::Px(10.),
+                                align_items: AlignItems::Start,
+                                ..default()
+                            },
+                            BackgroundColor(skin::SURFACE),
+                            BorderColor::all(color),
+                        )).with_children(|row| {
+                            row.spawn((
+                                ItemIcon(item.icon.clone()),
+                                ImageNode::default(),
+                                Node { width: Val::Px(36.), height: Val::Px(36.), flex_shrink: 0., ..default() },
+                            ));
+                            row.spawn(Node {
+                                flex_direction: FlexDirection::Column,
+                                flex_grow: 1.,
+                                min_width: Val::Px(0.),
+                                row_gap: Val::Px(3.),
+                                ..default()
+                            }).with_children(|text| {
+                                skin::label(text, f, &item.name, size::BODY, color);
+                                skin::label(text, f, format!("{}  ·  {}", label_slot(&item.slot), item.quality), size::CAPTION, skin::MUTED);
+                                skin::label(text, f, amounts(&item.base_bonuses).replace('\n', "  ·  "), size::SMALL, skin::GREEN);
+                                for (spell, value) in &item.spell_damage_bp {
+                                    skin::label(text, f, format!("+{:.0}% {} damage", *value as f32 / 100., spell_title(spell)), size::SMALL, color);
+                                }
+                                if let Some(set) = &item.set_name {
+                                    skin::label(text, f, format!("Set: {set}"), size::SMALL, skin::GOLD);
+                                }
+                                if weight > 0 {
+                                    skin::label(text, f, format!("Any elite  ·  {:.1}% of elite gear rolls", weight as f64 * 100. / total.max(1) as f64), size::CAPTION, skin::MUTED);
+                                }
+                                if !bosses.is_empty() {
+                                    skin::label(text, f, format!("Boss: {}", bosses.join(", ")), size::SMALL, skin::GOLD);
+                                }
+                            });
+                        });
+                    }
+                });
+            });
+        });
+    });
 }
 
-fn journal(p: &mut ChildSpawnerCommands, f: &Handle<Font>, gear: &Equipment, selection: &Selection, inventory: Option<&asr_coop::economy::Inventory>) {
-    let points = inventory.map_or(0, |inventory| inventory.achievement_points);
-    skin::label(p, f, "QUESTS & ACHIEVEMENTS", 22., skin::GOLD);
-    skin::label(p, f, format!("{points} Achievement Points · Rewards are shared across your linked classes"), 14., skin::TEXT);
-    skin::label(p, f, "First-clear quests award 100 gold, 5 of each zone material, and one usable equipment item. Each zone achievement awards 10 points. Defeat the final boss to earn both rewards once.", 13., skin::MUTED);
-    skin::rule(p);
-    skin::label(p, f, "Achievement rewards", 17., skin::GOLD);
-    button(p, f, "20 cloth, leather, iron and wood · 10 AP", Action::Redeem(false), points >= 10 && gear.online());
-    button(p, f, "Usable equipment from your best cleared tier · 30 AP", Action::Redeem(true), points >= 30 && gear.online());
-    skin::rule(p);
-    for map in super::data::MAPS.iter().filter(|map| super::races::can_enter(selection.look.and_then(|i| selection.looks.get(i)).map_or(1, |look| look.1), map.name)) {
-        let Some((id, zone)) = gear.catalog.zones.iter().find(|(_, zone)| zone.name == map.name) else { continue; };
-        let completed = inventory.is_some_and(|inventory| inventory.cleared_zones.contains(id));
-        let Some(boss) = zone.boss_drops.last() else { continue; };
-        skin::label(p, f, format!("{} · {}", zone.name, if completed { "Completed" } else { "Available" }), 17., if completed { skin::GREEN } else { skin::GOLD });
-        skin::label(p, f, format!("Quest: defeat {}\nAchievement: Conquer {} · 10 AP", boss.boss, zone.name), 13., skin::TEXT);
-        skin::label(p, f, format!("Rewards: 100 gold · 5 each {} · 1 usable gear piece", zone.material_pool.join(", ")), 12., skin::MUTED);
-        let unlocks: Vec<_> = super::races::RACES.iter().filter(|race| super::races::unlock_zone(race.id) == Some(zone.name.as_str())).map(|race| race.name).collect();
-        if !unlocks.is_empty() { skin::label(p, f, format!("Unlocks: {}", unlocks.join(", ")), 13., skin::GOLD); }
-        skin::rule(p);
-    }
+// The zones the shown race may enter, with their economy id and table.
+pub(super) fn journal_zones<'a>(
+    gear: &'a Equipment,
+    selection: &Selection,
+) -> impl Iterator<Item = (&'a String, &'a asr_coop::economy::Zone)> {
+    let race = selection
+        .look
+        .and_then(|i| selection.looks.get(i))
+        .map_or(1, |look| look.1);
+    super::data::MAPS
+        .iter()
+        .filter(move |map| super::races::can_enter(race, map.name))
+        .filter_map(move |map| gear.catalog.zones.iter().find(|(_, zone)| zone.name == map.name))
 }
-
-fn pane_node(weight: f32) -> Node {
+pub(super) fn pane_node(weight: f32) -> Node {
     Node {
         flex_grow: weight,
         flex_basis: Val::Px(0.),
@@ -1192,7 +1395,7 @@ fn pane_node(weight: f32) -> Node {
         ..default()
     }
 }
-fn scroller(key: usize) -> impl Bundle {
+pub(super) fn scroller(key: usize) -> impl Bundle {
     (
         ScrollColumn(key),
         ScrollPosition::default(),
@@ -1207,12 +1410,17 @@ fn scroller(key: usize) -> impl Bundle {
         },
     )
 }
+/// How many bag columns fit `width` canvas units at about [`BAG_CELL`] each.
+fn bag_columns(width: f32) -> usize {
+    ((width + BAG_GAP) / (BAG_CELL + BAG_GAP)).floor().max(4.) as usize
+}
 fn bag_grid(
     p: &mut ChildSpawnerCommands,
     f: &Handle<Font>,
     gear: &Equipment,
     hero: Option<&super::inventory::HeroSave>,
     market: bool,
+    columns: usize,
 ) {
     let query = gear.search.to_lowercase();
     let items: Vec<_> = hero
@@ -1235,13 +1443,17 @@ fn bag_grid(
             .then_some((i, d))
         })
         .collect();
+    // Whole rows only: the empty slots round the bag up to a full last row.
+    let slots = items.len().max(BAG_MIN_SLOTS).div_ceil(columns) * columns;
     p.spawn(scroller(1)).with_children(|p| {
         p.spawn(Node {
             width: Val::Percent(100.),
-            flex_wrap: FlexWrap::Wrap,
+            display: Display::Grid,
+            grid_template_columns: RepeatedGridTrack::flex(columns as u16, 1.),
             flex_shrink: 0.,
-            column_gap: Val::Px(5.),
-            row_gap: Val::Px(5.),
+            column_gap: Val::Px(BAG_GAP),
+            row_gap: Val::Px(BAG_GAP),
+            padding: UiRect::right(Val::Px(8.)),
             ..default()
         })
         .with_children(|grid| {
@@ -1255,7 +1467,7 @@ fn bag_grid(
                     gear.selected == Some(item.id),
                 );
             }
-            for _ in items.len()..BAG_MIN_SLOTS {
+            for _ in items.len()..slots {
                 item_slot(grid, f, None, None, "", false);
             }
         });
@@ -1265,7 +1477,7 @@ fn bag_grid(
         |slot| format!("{} items fit {}", items.len(), slot_title(slot)),
     );
     row(p, |p| {
-        skin::label(p, f, label, 11., skin::MUTED);
+        skin::label(p, f, label, size::SMALL, skin::MUTED);
         if gear.slot_filter.is_some() {
             button(p, f, "All slots", Action::SlotFilter(None), true);
         }
@@ -1562,7 +1774,7 @@ fn search_box(p: &mut ChildSpawnerCommands, f: &Handle<Font>, gear: &Equipment) 
         ))
         .with_children(|p| {
             let label = if gear.search.is_empty() {
-                "Search"
+                "Search items by name..."
             } else {
                 &gear.search
             };
@@ -1584,6 +1796,19 @@ fn search_box(p: &mut ChildSpawnerCommands, f: &Handle<Font>, gear: &Equipment) 
         }
     });
 }
+/// The account window's tabs, in bar order.
+const PANES: [(Pane, &str); 5] = [
+    (Pane::Inventory, "Inventory"),
+    (Pane::Auction, "Auction House"),
+    (Pane::Drops, "Zone Drops"),
+    (Pane::Quests, "Quests"),
+    (Pane::Achievements, "Achievements"),
+];
+/// The window's frame inside the canvas: 94% wide up to this, padded by [`WINDOW_PAD`].
+const WINDOW_MAX: f32 = 1420.;
+const WINDOW_PAD: f32 = 18.;
+const PANE_GAP: f32 = 18.;
+#[allow(clippy::too_many_arguments)]
 fn draw(
     mut commands: Commands,
     font: Option<Res<HudFont>>,
@@ -1592,10 +1817,15 @@ fn draw(
     coop: Res<Coop>,
     phase: Res<State<Phase>>,
     roots: Query<Entity, With<Root>>,
-    mut last: Local<Option<(u64, u32, bool)>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    ui_scale: Res<UiScale>,
+    mut last: Local<Option<(u64, u32, bool, u32)>>,
 ) {
     let show = gear.open && *phase.get() == Phase::Menu;
-    let key = (gear.revision, selection.version, show);
+    let canvas = windows
+        .single()
+        .map_or(1365., |w| w.width() / ui_scale.0.max(0.01));
+    let key = (gear.revision, selection.version, show, canvas as u32);
     if *last == Some(key) {
         return;
     }
@@ -1614,8 +1844,14 @@ fn draw(
         return;
     };
     let f = &font.0;
-    let shared_view = gear.view(&coop.url, class.id);
+    let realm = gear.realm(&coop);
+    let solo = realm == super::inventory::SOLO;
+    let shared_view = gear.view(&realm, class.id);
     let hero = shared_view.as_ref();
+    // The panes share the window's inner width by weight, so the bags know their columns.
+    let inner = (canvas * 0.94).min(WINDOW_MAX) - 2. * WINDOW_PAD - 2.;
+    let share = |weight: f32, total: f32, panes: f32| (inner - PANE_GAP * (panes - 1.)) * weight / total;
+    let pane = gear.pane;
     commands
         .spawn((
             Root,
@@ -1631,179 +1867,238 @@ fn draw(
             GlobalZIndex(400),
         ))
         .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: Val::Percent(94.),
-                    height: Val::Percent(90.),
-                    max_width: Val::Px(1420.),
-                    padding: UiRect::all(Val::Px(18.)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.),
-                    border: UiRect::all(Val::Px(1.)),
-                    border_radius: BorderRadius::all(Val::Px(7.)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.0745, 0.0667, 0.051)),
-                BorderColor::all(Color::srgb(0.43, 0.33, 0.145)),
-            ))
+            root.spawn(skin::panel(Node {
+                width: Val::Percent(94.),
+                height: Val::Percent(90.),
+                max_width: Val::Px(WINDOW_MAX),
+                padding: UiRect::all(Val::Px(WINDOW_PAD)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(gap::M),
+                ..default()
+            }))
             .with_children(|p| {
+                // The tab bar never moves: no per-tab title in front of it.
                 p.spawn(Node {
                     align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.),
+                    column_gap: Val::Px(gap::S),
                     flex_shrink: 0.,
                     ..default()
                 })
                 .with_children(|p| {
-                    skin::label(
-                        p,
-                        f,
-                        if gear.show_journal {
-                            "JOURNAL"
-                        } else if gear.market {
-                            "AUCTION HOUSE"
-                        } else {
-                            "INVENTORY"
-                        },
-                        24.,
-                        skin::GOLD,
-                    );
-                    choice(p, f, "Inventory", Action::Tab(false), !gear.market && !gear.show_journal);
-                    choice(p, f, "Auction House", Action::Tab(true), gear.market);
-                    button(p, f, "Zone drops", Action::LootTable, true);
-                    choice(p, f, "Quests & Achievements", Action::Journal, gear.show_journal);
+                    for (tab, title) in PANES {
+                        skin::tab_state(p, f, title, Action::Tab(tab), pane == tab);
+                    }
                     p.spawn(Node {
                         flex_grow: 1.,
+                        ..default()
+                    });
+                    // Which economy these bags are: the player's own, or the shared realm.
+                    if cfg!(target_arch = "wasm32") {
+                        skin::chip(p, f, "Solo", skin::GREEN);
+                    } else {
+                        let solo = gear.solo();
+                        skin::tab_state(p, f, "Solo", Action::Realm(true), solo);
+                        skin::tab_state(p, f, "Online", Action::Realm(false), !solo);
+                    }
+                    p.spawn(Node {
+                        width: Val::Px(gap::M),
                         ..default()
                     });
                     skin::label(
                         p,
                         f,
-                        format!("{} gold · {} AP", hero.map_or(0, |h| h.inventory.gold), hero.map_or(0, |h| h.inventory.achievement_points)),
-                        17.,
+                        format!(
+                            "{} gold  ·  {} AP",
+                            hero.map_or(0, |h| h.inventory.gold),
+                            hero.map_or(0, |h| h.inventory.achievement_points)
+                        ),
+                        size::LEAD,
                         skin::GOLD,
                     );
-                    button(p, f, "Close", Action::Close, true);
+                    skin::tab(p, f, "Close", Action::Close);
                 });
+                skin::rule(p);
                 p.spawn(Node {
                     flex_grow: 1.,
                     min_height: Val::Px(0.),
-                    column_gap: Val::Px(18.),
+                    column_gap: Val::Px(PANE_GAP),
                     ..default()
                 })
-                .with_children(|body| {
-                    if gear.show_journal {
-                        body.spawn(pane_node(1.)).with_children(|p| {
-                            p.spawn(scroller(3)).with_children(|p| journal(p, f, &gear, &selection, hero.map(|hero| &hero.inventory)));
+                .with_children(|body| match pane {
+                    Pane::Auction if solo => {
+                        body.spawn(Node {
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..pane_node(1.)
+                        })
+                        .with_children(|p| {
+                            p.spawn(skin::panel(Node {
+                                max_width: Val::Px(520.),
+                                padding: UiRect::all(Val::Px(gap::XL)),
+                                flex_direction: FlexDirection::Column,
+                                align_items: AlignItems::Center,
+                                row_gap: Val::Px(gap::M),
+                                ..default()
+                            }))
+                            .with_children(|p| {
+                                skin::label(p, f, "The Auction House is for online realms", size::HEADING, skin::GOLD);
+                                let note = skin::label(
+                                    p,
+                                    f,
+                                    "Solo heroes keep everything they find; trading needs other players. Your solo bags, drops, quests and achievements are saved on this device.",
+                                    size::BODY,
+                                    skin::TEXT,
+                                );
+                                p.commands().entity(note).insert(TextLayout::new_with_justify(Justify::Center));
+                                if !cfg!(target_arch = "wasm32") {
+                                    skin::tab(p, f, "Play online instead", Action::Realm(false));
+                                }
+                            });
                         });
-                        return;
                     }
-                    if !gear.market {
+                    Pane::Drops => {
+                        body.spawn(pane_node(1.)).with_children(|p| {
+                            zone_loot(p, f, &gear, selection.map_def().name);
+                        });
+                    }
+                    Pane::Quests => {
+                        super::journal_ui::quests(body, f, &gear, &selection, hero.map(|hero| &hero.inventory));
+                    }
+                    Pane::Achievements => {
+                        super::journal_ui::achievements(body, f, &gear, hero.map(|hero| &hero.inventory), inner);
+                    }
+                    Pane::Inventory | Pane::Auction => {
+                        let market = pane == Pane::Auction;
+                        if !market {
+                            body.spawn((
+                                Node {
+                                    overflow: Overflow::scroll_y(),
+                                    ..pane_node(27.)
+                                },
+                                ScrollColumn(0),
+                                ScrollPosition::default(),
+                                bevy::ui::RelativeCursorPosition::default(),
+                            ))
+                            .with_children(|p| {
+                                paper_doll(p, f, &gear, hero, class);
+                            });
+                        }
+                        let bags = if market { share(32., 95., 3.) } else { share(45., 100., 3.) };
+                        body.spawn(pane_node(if market { 32. } else { 45. }))
+                            .with_children(|p| {
+                                if market {
+                                    skin::label(
+                                        p,
+                                        f,
+                                        "YOUR BAGS  ·  select an item to sell",
+                                        size::SMALL,
+                                        skin::MUTED,
+                                    );
+                                } else {
+                                    row(p, |p| {
+                                        for (i, name) in ["All", "Cloth", "Leather", "Mail", "Plate"]
+                                            .iter()
+                                            .enumerate()
+                                        {
+                                            choice(p, f, name, Action::Filter(i), gear.filter == i);
+                                        }
+                                    });
+                                    search_box(p, f, &gear);
+                                }
+                                bag_grid(p, f, &gear, hero, market, bag_columns(bags - 8.));
+                            });
+                        if market {
+                            body.spawn(pane_node(35.)).with_children(|p| {
+                                search_box(p, f, &gear);
+                                auction_list(p, f, &gear);
+                            });
+                        }
                         body.spawn((
                             Node {
-                                overflow: Overflow::scroll_y(),
-                                ..pane_node(27.)
+                                padding: UiRect::all(Val::Px(gap::M)),
+                                border: UiRect::all(Val::Px(1.)),
+                                border_radius: BorderRadius::all(Val::Px(4.)),
+                                ..pane_node(28.)
                             },
-                            ScrollColumn(0),
-                            ScrollPosition::default(),
-                            bevy::ui::RelativeCursorPosition::default(),
+                            BackgroundColor(skin::WELL),
+                            BorderColor::all(skin::EDGE),
                         ))
                         .with_children(|p| {
-                            paper_doll(p, f, &gear, hero, class);
+                            p.spawn(scroller(3)).with_children(|p| {
+                                if let Some(sale) = gear
+                                    .listing
+                                    .and_then(|id| gear.listings.iter().find(|l| l.id == id))
+                                {
+                                    detail(p, f, &gear, class.id, &sale.item, true);
+                                } else if let Some(item) = gear
+                                    .selected
+                                    .and_then(|id| hero?.inventory.items.iter().find(|i| i.id == id))
+                                {
+                                    detail(p, f, &gear, class.id, item, false);
+                                } else {
+                                    skin::label(
+                                        p,
+                                        f,
+                                        "Select an item to see its details.",
+                                        size::BODY,
+                                        skin::MUTED,
+                                    );
+                                }
+                            });
                         });
                     }
-                    body.spawn(pane_node(if gear.market { 32. } else { 45. }))
-                        .with_children(|p| {
-                            if gear.market {
-                                skin::label(
-                                    p,
-                                    f,
-                                    "YOUR BAGS · select an item to sell",
-                                    12.,
-                                    skin::MUTED,
-                                );
-                            } else {
-                                row(p, |p| {
-                                    for (i, name) in ["All", "Cloth", "Leather", "Mail", "Plate"]
-                                        .iter()
-                                        .enumerate()
-                                    {
-                                        choice(p, f, name, Action::Filter(i), gear.filter == i);
-                                    }
-                                });
-                                search_box(p, f, &gear);
-                            }
-                            bag_grid(p, f, &gear, hero, gear.market);
-                        });
-                    if gear.market {
-                        body.spawn(pane_node(35.)).with_children(|p| {
-                            search_box(p, f, &gear);
-                            auction_list(p, f, &gear);
-                        });
-                    }
-                    body.spawn((
-                        pane_node(28.),
-                        BackgroundColor(Color::srgb(0.035, 0.031, 0.022)),
-                        BorderColor::all(Color::srgb(0.24, 0.20, 0.13)),
-                    ))
-                    .insert(Node {
-                        padding: UiRect::all(Val::Px(12.)),
-                        border: UiRect::all(Val::Px(1.)),
-                        border_radius: BorderRadius::all(Val::Px(4.)),
-                        ..pane_node(28.)
+                });
+                // Materials and the server's state belong to the bags; the other tabs go
+                // without the footer.
+                if matches!(pane, Pane::Inventory | Pane::Auction) {
+                    skin::rule(p);
+                    p.spawn(Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(gap::L),
+                        flex_shrink: 0.,
+                        ..default()
                     })
                     .with_children(|p| {
-                        p.spawn(scroller(3)).with_children(|p| {
-                            if gear.show_loot {
-                                zone_loot(p, f, &gear, selection.map_def().name);
-                            } else if let Some(sale) = gear
-                                .listing
-                                .and_then(|id| gear.listings.iter().find(|l| l.id == id))
-                            {
-                                detail(p, f, &gear, class.id, &sale.item, true);
-                            } else if let Some(item) = gear
-                                .selected
-                                .and_then(|id| hero?.inventory.items.iter().find(|i| i.id == id))
-                            {
-                                detail(p, f, &gear, class.id, item, false);
-                            } else {
-                                skin::label(
-                                    p,
-                                    f,
-                                    "Select an item to see its details.",
-                                    15.,
-                                    skin::GOLD,
-                                );
-                            }
-                        });
-                    });
-                });
-                row(p, |p| {
-                    if let Some(hero) = hero {
-                        for (name, count) in &hero.inventory.materials {
-                            let glyph = match name.as_str() {
-                                "cloth" => "INV_Fabric_Linen_01",
-                                "leather" => "INV_Misc_LeatherScrap_03",
-                                "iron" => "INV_Ingot_Iron",
-                                "wood" => "INV_Misc_Branch_01",
-                                _ => "INV_Misc_QuestionMark",
-                            };
-                            p.spawn((
-                                ItemIcon(format!("Interface\\Icons\\{glyph}")),
-                                ImageNode::default(),
-                                Node {
-                                    width: Val::Px(20.),
-                                    height: Val::Px(20.),
+                        if let Some(hero) = hero {
+                            for (name, count) in &hero.inventory.materials {
+                                p.spawn(Node {
+                                    align_items: AlignItems::Center,
+                                    column_gap: Val::Px(6.),
                                     ..default()
-                                },
-                            ));
-                            skin::label(p, f, format!("{count} {name}  "), 12., skin::TEXT);
+                                })
+                                .with_children(|p| {
+                                    p.spawn((
+                                        ItemIcon(format!("Interface\\Icons\\{}", material_icon(name))),
+                                        ImageNode::default(),
+                                        Node {
+                                            width: Val::Px(20.),
+                                            height: Val::Px(20.),
+                                            ..default()
+                                        },
+                                    ));
+                                    skin::label(p, f, format!("{count} {name}"), size::SMALL, skin::TEXT);
+                                });
+                            }
                         }
-                    }
-                    button(p, f, "Refresh", Action::Refresh, !gear.busy());
-                });
-                skin::label(p, f, &gear.status, 10., skin::MUTED);
+                        p.spawn(Node {
+                            flex_grow: 1.,
+                            ..default()
+                        });
+                        skin::label(p, f, &gear.status, size::CAPTION, skin::MUTED);
+                        button(p, f, "Refresh", Action::Refresh, !gear.busy());
+                    });
+                }
             });
         });
+}
+pub(super) fn material_icon(name: &str) -> &'static str {
+    match name {
+        "cloth" => "INV_Fabric_Linen_01",
+        "leather" => "INV_Misc_LeatherScrap_03",
+        "iron" => "INV_Ingot_Iron",
+        "wood" => "INV_Misc_Branch_01",
+        _ => "INV_Misc_QuestionMark",
+    }
 }
 fn icons(
     mut assets: ResMut<benilla_assets::WorldAssets>,
@@ -1852,15 +2147,16 @@ fn scroll(
         .sum();
     let query = (
         selection.class,
-        gear.market,
+        gear.pane,
         gear.filter,
         gear.slot_filter,
         gear.search.clone(),
-        (gear.show_loot, gear.show_journal, gear.loot_class, gear.loot_slot, gear.loot_quality, gear.loot_source),
+        (gear.loot_class, gear.loot_slot, gear.loot_quality, gear.loot_source),
+        (gear.quest_zone.clone(), gear.category),
     );
     let reset = memory.query.as_ref() != Some(&query);
     if reset {
-        memory.positions = [Vec2::ZERO; 4];
+        memory.positions = [Vec2::ZERO; 8];
         memory.query = Some(query);
     }
     for (column, mut scroll, node, cursor) in &mut columns {

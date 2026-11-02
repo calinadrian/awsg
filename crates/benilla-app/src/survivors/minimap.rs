@@ -169,10 +169,11 @@ pub(super) fn spawn_cluster(root: &mut ChildSpawnerCommands, font: &Handle<Font>
             UiArt::crop(path, coords),
         )
     };
+    // Inset so the clock (to x 196) and the minimize button (from y -3) stay on screen.
     root.spawn(Node {
         position_type: PositionType::Absolute,
-        right: Val::Px(0.0),
-        top: Val::Px(0.0),
+        right: Val::Px(6.0),
+        top: Val::Px(4.0),
         width: Val::Px(192.0),
         height: Val::Px(192.0),
         ..default()

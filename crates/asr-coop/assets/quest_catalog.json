@@ -1,0 +1,3583 @@
+{
+ "revision": 1,
+ "quests": [
+  {
+   "id": "elwynn.story",
+   "zone": "elwynn",
+   "title": "Hogger’s Raiders",
+   "giver": "Marshal Dughan",
+   "text": "Gnolls raid the farms south of Goldshire, and Hogger grows bolder every night. Bring the brute down and break the raiders who follow him.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Hogger",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Hogger"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 40,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "elwynn.bounty",
+   "zone": "elwynn",
+   "title": "Bounty: Murloc Streamrunners",
+   "giver": "Marshal Dughan",
+   "text": "Murloc Streamrunners keep coming at Goldshire. Marshal Dughan pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Murloc Streamrunner",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Murloc Streamrunners"
+    }
+   ],
+   "reward": {
+    "gold": 25,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "elwynn.lairs",
+   "zone": "elwynn",
+   "title": "Break the Lairs",
+   "giver": "Marshal Dughan",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Goldshire sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 30,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "elwynn.hold",
+   "zone": "elwynn",
+   "title": "Hold the Line",
+   "giver": "Marshal Dughan",
+   "text": "Marshal Dughan needs the field held while Goldshire regroups. Survive ten minutes in Elwynn Forest, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "elwynn.finale",
+   "zone": "elwynn",
+   "title": "The Collector",
+   "giver": "Marshal Dughan",
+   "text": "Morgan the Collector runs the racket that bleeds Elwynn dry, and every thug on the road answers to him. End it.",
+   "requires": [
+    "elwynn.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Morgan the Collector",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Morgan the Collector"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 4,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "elwynn.proven",
+   "zone": "elwynn",
+   "title": "Proven in Elwynn Forest",
+   "giver": "Marshal Dughan",
+   "text": "Marshal Dughan trusts only those who have grown strong in the field. Reach level 15 in a single run in Elwynn Forest.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 15,
+     "text": "Reach level 15"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "dun-morogh.story",
+   "zone": "dun-morogh",
+   "title": "The Howler",
+   "giver": "Senir Whitebeard",
+   "text": "Edan the Howler hunts the passes above Kharanos, and the whole pack follows its call. Silence it and thin the pack.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Edan the Howler",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Edan the Howler"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 40,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "dun-morogh.bounty",
+   "zone": "dun-morogh",
+   "title": "Bounty: Wendigos",
+   "giver": "Senir Whitebeard",
+   "text": "Wendigos keep coming at Kharanos. Senir Whitebeard pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Wendigo",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Wendigos"
+    }
+   ],
+   "reward": {
+    "gold": 25,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "dun-morogh.lairs",
+   "zone": "dun-morogh",
+   "title": "Break the Lairs",
+   "giver": "Senir Whitebeard",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Kharanos sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 30,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "dun-morogh.hold",
+   "zone": "dun-morogh",
+   "title": "Hold the Line",
+   "giver": "Senir Whitebeard",
+   "text": "Senir Whitebeard needs the field held while Kharanos regroups. Survive ten minutes in Dun Morogh, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "dun-morogh.finale",
+   "zone": "dun-morogh",
+   "title": "The White Bear",
+   "giver": "Senir Whitebeard",
+   "text": "Bjarn, the great white bear, has come down from the peaks. Nothing in the valley is safe while it roams.",
+   "requires": [
+    "dun-morogh.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Bjarn",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Bjarn"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 4,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "dun-morogh.proven",
+   "zone": "dun-morogh",
+   "title": "Proven in Dun Morogh",
+   "giver": "Senir Whitebeard",
+   "text": "Senir Whitebeard trusts only those who have grown strong in the field. Reach level 15 in a single run in Dun Morogh.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 15,
+     "text": "Reach level 15"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "teldrassil.story",
+   "zone": "teldrassil",
+   "title": "Shadows in the Glen",
+   "giver": "Conservator Ilthalaine",
+   "text": "Corruption creeps through the Shadowglen and Threggil feeds on it. Root out the grell and whatever follows in its wake.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Threggil",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Threggil"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 40,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "teldrassil.bounty",
+   "zone": "teldrassil",
+   "title": "Bounty: Nightsabers",
+   "giver": "Conservator Ilthalaine",
+   "text": "Nightsabers keep coming at the Shadowglen. Conservator Ilthalaine pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Nightsaber",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Nightsabers"
+    }
+   ],
+   "reward": {
+    "gold": 25,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "teldrassil.lairs",
+   "zone": "teldrassil",
+   "title": "Break the Lairs",
+   "giver": "Conservator Ilthalaine",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the Shadowglen sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 30,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "teldrassil.hold",
+   "zone": "teldrassil",
+   "title": "Hold the Line",
+   "giver": "Conservator Ilthalaine",
+   "text": "Conservator Ilthalaine needs the field held while the Shadowglen regroups. Survive ten minutes in Teldrassil, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "teldrassil.finale",
+   "zone": "teldrassil",
+   "title": "The Augur’s Poison",
+   "giver": "Conservator Ilthalaine",
+   "text": "The Gnarlpine Augur poisons the furbolg tribe from within. Silence the Augur and the tribe may yet heal.",
+   "requires": [
+    "teldrassil.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Gnarlpine Augur",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Gnarlpine Augur"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 4,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "teldrassil.proven",
+   "zone": "teldrassil",
+   "title": "Proven in Teldrassil",
+   "giver": "Conservator Ilthalaine",
+   "text": "Conservator Ilthalaine trusts only those who have grown strong in the field. Reach level 15 in a single run in Teldrassil.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 15,
+     "text": "Reach level 15"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "durotar.story",
+   "zone": "durotar",
+   "title": "The Geolord",
+   "giver": "Gornek",
+   "text": "Geolord Mottle’s quilboar dig in along the Valley of Trials. Break his warband before it reaches Razor Hill.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Geolord Mottle",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Geolord Mottle"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "durotar",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 40,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "durotar.bounty",
+   "zone": "durotar",
+   "title": "Bounty: Dire Mottled Boars",
+   "giver": "Gornek",
+   "text": "Dire Mottled Boars keep coming at Razor Hill. Gornek pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Dire Mottled Boar",
+     "zone": "durotar",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Dire Mottled Boars"
+    }
+   ],
+   "reward": {
+    "gold": 25,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "durotar.lairs",
+   "zone": "durotar",
+   "title": "Break the Lairs",
+   "giver": "Gornek",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Razor Hill sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "durotar",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 30,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "durotar.hold",
+   "zone": "durotar",
+   "title": "Hold the Line",
+   "giver": "Gornek",
+   "text": "Gornek needs the field held while Razor Hill regroups. Survive ten minutes in Durotar, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "durotar",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "durotar.finale",
+   "zone": "durotar",
+   "title": "Cult of the Burning Blade",
+   "giver": "Gornek",
+   "text": "The Burning Blade gathers in Skull Rock. Its cultist must fall before the demons answer the call.",
+   "requires": [
+    "durotar.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Burning Blade Cultist",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Burning Blade Cultist"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 4,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "durotar.proven",
+   "zone": "durotar",
+   "title": "Proven in Durotar",
+   "giver": "Gornek",
+   "text": "Gornek trusts only those who have grown strong in the field. Reach level 15 in a single run in Durotar.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "durotar",
+     "class": 0,
+     "count": 15,
+     "text": "Reach level 15"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "mulgore.story",
+   "zone": "mulgore",
+   "title": "Stalkers of the Plain",
+   "giver": "Grull Hawkwind",
+   "text": "Stalkers circle the plains below Red Cloud Mesa. Hunt the boldest of them and drive the rest away.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Prairie Stalker",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Prairie Stalker"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 40,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "mulgore.bounty",
+   "zone": "mulgore",
+   "title": "Bounty: Venture Co. Hirelings",
+   "giver": "Grull Hawkwind",
+   "text": "Venture Co. Hirelings keep coming at Bloodhoof Village. Grull Hawkwind pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Venture Co. Hireling",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Venture Co. Hirelings"
+    }
+   ],
+   "reward": {
+    "gold": 25,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "mulgore.lairs",
+   "zone": "mulgore",
+   "title": "Break the Lairs",
+   "giver": "Grull Hawkwind",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Bloodhoof Village sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 30,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "mulgore.hold",
+   "zone": "mulgore",
+   "title": "Hold the Line",
+   "giver": "Grull Hawkwind",
+   "text": "Grull Hawkwind needs the field held while Bloodhoof Village regroups. Survive ten minutes in Mulgore, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "mulgore.finale",
+   "zone": "mulgore",
+   "title": "The Pale Wolf",
+   "giver": "Grull Hawkwind",
+   "text": "Ghost Howl walks Mulgore at night, and the herds will not graze while it does. Put the spirit to rest.",
+   "requires": [
+    "mulgore.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Ghost Howl",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Ghost Howl"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 4,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "mulgore.proven",
+   "zone": "mulgore",
+   "title": "Proven in Mulgore",
+   "giver": "Grull Hawkwind",
+   "text": "Grull Hawkwind trusts only those who have grown strong in the field. Reach level 15 in a single run in Mulgore.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 15,
+     "text": "Reach level 15"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "tirisfal.story",
+   "zone": "tirisfal",
+   "title": "The Farmer’s Field",
+   "giver": "Executor Arren",
+   "text": "Farmer Solliden still guards his fields, long after the plague took him. The Forsaken need that land.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Farmer Solliden",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Farmer Solliden"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 40,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "tirisfal.bounty",
+   "zone": "tirisfal",
+   "title": "Bounty: Rot Hide Graverobbers",
+   "giver": "Executor Arren",
+   "text": "Rot Hide Graverobbers keep coming at Brill. Executor Arren pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Rot Hide Graverobber",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Rot Hide Graverobbers"
+    }
+   ],
+   "reward": {
+    "gold": 25,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "tirisfal.lairs",
+   "zone": "tirisfal",
+   "title": "Break the Lairs",
+   "giver": "Executor Arren",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Brill sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 30,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "tirisfal.hold",
+   "zone": "tirisfal",
+   "title": "Hold the Line",
+   "giver": "Executor Arren",
+   "text": "Executor Arren needs the field held while Brill regroups. Survive ten minutes in Tirisfal Glades, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "tirisfal.finale",
+   "zone": "tirisfal",
+   "title": "Gorefang",
+   "giver": "Executor Arren",
+   "text": "Gorefang, the great worg, haunts the glades between Brill and the Scarlet border. Bring the beast down.",
+   "requires": [
+    "tirisfal.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Gorefang",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Gorefang"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 4,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "tirisfal.proven",
+   "zone": "tirisfal",
+   "title": "Proven in Tirisfal Glades",
+   "giver": "Executor Arren",
+   "text": "Executor Arren trusts only those who have grown strong in the field. Reach level 15 in a single run in Tirisfal Glades.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 15,
+     "text": "Reach level 15"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "westfall.story",
+   "zone": "westfall",
+   "title": "The Brotherhood’s Voice",
+   "giver": "Gryan Stoutmantle",
+   "text": "The Defias Brotherhood holds Westfall in its fist. Start with the Brainwashed Noble who preaches their cause.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Brainwashed Noble",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Brainwashed Noble"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "westfall",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 80,
+    "materials": 4,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "westfall.bounty",
+   "zone": "westfall",
+   "title": "Bounty: Defias Trappers",
+   "giver": "Gryan Stoutmantle",
+   "text": "Defias Trappers keep coming at Sentinel Hill. Gryan Stoutmantle pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Defias Trapper",
+     "zone": "westfall",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Defias Trappers"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "westfall.lairs",
+   "zone": "westfall",
+   "title": "Break the Lairs",
+   "giver": "Gryan Stoutmantle",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Sentinel Hill sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "westfall",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "westfall.hold",
+   "zone": "westfall",
+   "title": "Hold the Line",
+   "giver": "Gryan Stoutmantle",
+   "text": "Gryan Stoutmantle needs the field held while Sentinel Hill regroups. Survive ten minutes in Westfall, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "westfall",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 100,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "westfall.finale",
+   "zone": "westfall",
+   "title": "Carrion Skies",
+   "giver": "Gryan Stoutmantle",
+   "text": "Vultros picks the Brotherhood’s leavings clean and nests above the Dagger Hills. Clear the skies over Westfall.",
+   "requires": [
+    "westfall.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Vultros",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Vultros"
+    }
+   ],
+   "reward": {
+    "gold": 240,
+    "materials": 5,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "westfall.proven",
+   "zone": "westfall",
+   "title": "Proven in Westfall",
+   "giver": "Gryan Stoutmantle",
+   "text": "Gryan Stoutmantle trusts only those who have grown strong in the field. Reach level 18 in a single run in Westfall.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "westfall",
+     "class": 0,
+     "count": 18,
+     "text": "Reach level 18"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "barrens.story",
+   "zone": "barrens",
+   "title": "Echeyakee",
+   "giver": "Thork",
+   "text": "Echeyakee prowls the tall grass outside the Crossroads. Hunt the great cat before it takes another caravan.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Echeyakee",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Echeyakee"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "barrens",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 80,
+    "materials": 4,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "barrens.bounty",
+   "zone": "barrens",
+   "title": "Bounty: Kolkar Wranglers",
+   "giver": "Thork",
+   "text": "Kolkar Wranglers keep coming at the Crossroads. Thork pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Kolkar Wrangler",
+     "zone": "barrens",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Kolkar Wranglers"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "barrens.lairs",
+   "zone": "barrens",
+   "title": "Break the Lairs",
+   "giver": "Thork",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the Crossroads sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "barrens",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "barrens.hold",
+   "zone": "barrens",
+   "title": "Hold the Line",
+   "giver": "Thork",
+   "text": "Thork needs the field held while the Crossroads regroups. Survive ten minutes in The Barrens, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "barrens",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 100,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "barrens.finale",
+   "zone": "barrens",
+   "title": "Bloodmark",
+   "giver": "Thork",
+   "text": "Hezrul Bloodmark leads the Kolkar against the Crossroads. Cut the head from the snake.",
+   "requires": [
+    "barrens.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Hezrul Bloodmark",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Hezrul Bloodmark"
+    }
+   ],
+   "reward": {
+    "gold": 240,
+    "materials": 5,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "barrens.proven",
+   "zone": "barrens",
+   "title": "Proven in The Barrens",
+   "giver": "Thork",
+   "text": "Thork trusts only those who have grown strong in the field. Reach level 18 in a single run in The Barrens.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "barrens",
+     "class": 0,
+     "count": 18,
+     "text": "Reach level 18"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "deadmines.story",
+   "zone": "deadmines",
+   "title": "The Foreman",
+   "giver": "Captain Danuvin",
+   "text": "Rhahk’Zor drives the Brotherhood’s miners under Moonbrook. Smash through the foreman and the tunnels are open.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Rhahk'Zor",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Rhahk'Zor"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 5,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "deadmines.bounty",
+   "zone": "deadmines",
+   "title": "Bounty: Defias Watchmen",
+   "giver": "Captain Danuvin",
+   "text": "Defias Watchmen keep coming at Moonbrook. Captain Danuvin pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Defias Watchman",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Defias Watchmen"
+    }
+   ],
+   "reward": {
+    "gold": 75,
+    "materials": 4,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "deadmines.lairs",
+   "zone": "deadmines",
+   "title": "Break the Lairs",
+   "giver": "Captain Danuvin",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Moonbrook sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 90,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "deadmines.hold",
+   "zone": "deadmines",
+   "title": "Hold the Line",
+   "giver": "Captain Danuvin",
+   "text": "Captain Danuvin needs the field held while Moonbrook regroups. Survive ten minutes in The Deadmines, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 150,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "deadmines.finale",
+   "zone": "deadmines",
+   "title": "VanCleef",
+   "giver": "Captain Danuvin",
+   "text": "Edwin VanCleef commands the Defias from a ship hidden deep in the mine. Finish the Brotherhood for good.",
+   "requires": [
+    "deadmines.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Edwin VanCleef",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Edwin VanCleef"
+    }
+   ],
+   "reward": {
+    "gold": 360,
+    "materials": 6,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "deadmines.proven",
+   "zone": "deadmines",
+   "title": "Proven in The Deadmines",
+   "giver": "Captain Danuvin",
+   "text": "Captain Danuvin trusts only those who have grown strong in the field. Reach level 20 in a single run in The Deadmines.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 20,
+     "text": "Reach level 20"
+    }
+   ],
+   "reward": {
+    "gold": 180,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "wailing.story",
+   "zone": "wailing",
+   "title": "The Fanglords",
+   "giver": "Nalpak",
+   "text": "The Druids of the Fang twisted Naralex’s dream into a nightmare. Lady Anacondra leads them; begin with her.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Lady Anacondra",
+     "zone": "wailing",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Lady Anacondra"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "wailing",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 5,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "wailing.bounty",
+   "zone": "wailing",
+   "title": "Bounty: Deviate Slayers",
+   "giver": "Nalpak",
+   "text": "Deviate Slayers keep coming at the Lushwater Oasis. Nalpak pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Deviate Slayer",
+     "zone": "wailing",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Deviate Slayers"
+    }
+   ],
+   "reward": {
+    "gold": 75,
+    "materials": 4,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "wailing.lairs",
+   "zone": "wailing",
+   "title": "Break the Lairs",
+   "giver": "Nalpak",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the Lushwater Oasis sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "wailing",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 90,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "wailing.hold",
+   "zone": "wailing",
+   "title": "Hold the Line",
+   "giver": "Nalpak",
+   "text": "Nalpak needs the field held while the Lushwater Oasis regroups. Survive ten minutes in Wailing Caverns, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "wailing",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 150,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "wailing.finale",
+   "zone": "wailing",
+   "title": "The Devourer",
+   "giver": "Nalpak",
+   "text": "Mutanus the Devourer rises from the nightmare itself. Slay it, and Naralex may finally wake.",
+   "requires": [
+    "wailing.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Mutanus the Devourer",
+     "zone": "wailing",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Mutanus the Devourer"
+    }
+   ],
+   "reward": {
+    "gold": 360,
+    "materials": 6,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "wailing.proven",
+   "zone": "wailing",
+   "title": "Proven in Wailing Caverns",
+   "giver": "Nalpak",
+   "text": "Nalpak trusts only those who have grown strong in the field. Reach level 20 in a single run in Wailing Caverns.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "wailing",
+     "class": 0,
+     "count": 20,
+     "text": "Reach level 20"
+    }
+   ],
+   "reward": {
+    "gold": 180,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "duskwood.story",
+   "zone": "duskwood",
+   "title": "The Spectral Wolf",
+   "giver": "Commander Althea Ebonlocke",
+   "text": "Lupos stalks the road to Darkshire and no caravan has passed in a week. Hunt it down.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Lupos",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Lupos"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 160,
+    "materials": 6,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "duskwood.bounty",
+   "zone": "duskwood",
+   "title": "Bounty: Skeletal Mages",
+   "giver": "Commander Althea Ebonlocke",
+   "text": "Skeletal Mages keep coming at Darkshire. Commander Althea Ebonlocke pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Skeletal Mage",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Skeletal Mages"
+    }
+   ],
+   "reward": {
+    "gold": 100,
+    "materials": 5,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "duskwood.lairs",
+   "zone": "duskwood",
+   "title": "Break the Lairs",
+   "giver": "Commander Althea Ebonlocke",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Darkshire sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "duskwood.hold",
+   "zone": "duskwood",
+   "title": "Hold the Line",
+   "giver": "Commander Althea Ebonlocke",
+   "text": "Commander Althea Ebonlocke needs the field held while Darkshire regroups. Survive ten minutes in Duskwood, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 200,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "duskwood.finale",
+   "zone": "duskwood",
+   "title": "Nightbane",
+   "giver": "Commander Althea Ebonlocke",
+   "text": "Nefaru leads the Nightbane worgen against Darkshire’s walls. The Night Watch needs this ended.",
+   "requires": [
+    "duskwood.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Nefaru",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Nefaru"
+    }
+   ],
+   "reward": {
+    "gold": 480,
+    "materials": 7,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "duskwood.proven",
+   "zone": "duskwood",
+   "title": "Proven in Duskwood",
+   "giver": "Commander Althea Ebonlocke",
+   "text": "Commander Althea Ebonlocke trusts only those who have grown strong in the field. Reach level 22 in a single run in Duskwood.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 22,
+     "text": "Reach level 22"
+    }
+   ],
+   "reward": {
+    "gold": 240,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "stonetalon.story",
+   "zone": "stonetalon",
+   "title": "Iron in the Forest",
+   "giver": "Seereth Stonebreak",
+   "text": "The Venture Co. levels Stonetalon’s forests with machines like XT:4. Stop the machines and the men who run them.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "XT:4",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat XT:4"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 160,
+    "materials": 6,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "stonetalon.bounty",
+   "zone": "stonetalon",
+   "title": "Bounty: Venture Co. Loggers",
+   "giver": "Seereth Stonebreak",
+   "text": "Venture Co. Loggers keep coming at Sun Rock Retreat. Seereth Stonebreak pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Venture Co. Logger",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Venture Co. Loggers"
+    }
+   ],
+   "reward": {
+    "gold": 100,
+    "materials": 5,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "stonetalon.lairs",
+   "zone": "stonetalon",
+   "title": "Break the Lairs",
+   "giver": "Seereth Stonebreak",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Sun Rock Retreat sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "stonetalon.hold",
+   "zone": "stonetalon",
+   "title": "Hold the Line",
+   "giver": "Seereth Stonebreak",
+   "text": "Seereth Stonebreak needs the field held while Sun Rock Retreat regroups. Survive ten minutes in Stonetalon Mountains, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 200,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "stonetalon.finale",
+   "zone": "stonetalon",
+   "title": "Windshear Crag",
+   "giver": "Seereth Stonebreak",
+   "text": "Gerenzo Wrenchwhistle runs the whole operation from Windshear Crag. Shut him down.",
+   "requires": [
+    "stonetalon.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Gerenzo Wrenchwhistle",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Gerenzo Wrenchwhistle"
+    }
+   ],
+   "reward": {
+    "gold": 480,
+    "materials": 7,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "stonetalon.proven",
+   "zone": "stonetalon",
+   "title": "Proven in Stonetalon Mountains",
+   "giver": "Seereth Stonebreak",
+   "text": "Seereth Stonebreak trusts only those who have grown strong in the field. Reach level 22 in a single run in Stonetalon Mountains.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 22,
+     "text": "Reach level 22"
+    }
+   ],
+   "reward": {
+    "gold": 240,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "stranglethorn.story",
+   "zone": "stranglethorn",
+   "title": "The Uncatchable",
+   "giver": "Lieutenant Doren",
+   "text": "Sin’Dall, the tiger no hunter has caught, prowls the northern jungle. Be the first.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Sin'Dall",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Sin'Dall"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 200,
+    "materials": 7,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "stranglethorn.bounty",
+   "zone": "stranglethorn",
+   "title": "Bounty: Lashtail Raptors",
+   "giver": "Lieutenant Doren",
+   "text": "Lashtail Raptors keep coming at the Rebel Camp. Lieutenant Doren pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Lashtail Raptor",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Lashtail Raptors"
+    }
+   ],
+   "reward": {
+    "gold": 125,
+    "materials": 6,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "stranglethorn.lairs",
+   "zone": "stranglethorn",
+   "title": "Break the Lairs",
+   "giver": "Lieutenant Doren",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the Rebel Camp sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 150,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "stranglethorn.hold",
+   "zone": "stranglethorn",
+   "title": "Hold the Line",
+   "giver": "Lieutenant Doren",
+   "text": "Lieutenant Doren needs the field held while the Rebel Camp regroups. Survive ten minutes in Stranglethorn Vale, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 250,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "stranglethorn.finale",
+   "zone": "stranglethorn",
+   "title": "King of the Jungle",
+   "giver": "Lieutenant Doren",
+   "text": "King Bangalash rules the panthers of Stranglethorn. Only the greatest hunters come back with his pelt.",
+   "requires": [
+    "stranglethorn.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "King Bangalash",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat King Bangalash"
+    }
+   ],
+   "reward": {
+    "gold": 600,
+    "materials": 8,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "stranglethorn.proven",
+   "zone": "stranglethorn",
+   "title": "Proven in Stranglethorn Vale",
+   "giver": "Lieutenant Doren",
+   "text": "Lieutenant Doren trusts only those who have grown strong in the field. Reach level 25 in a single run in Stranglethorn Vale.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 25,
+     "text": "Reach level 25"
+    }
+   ],
+   "reward": {
+    "gold": 300,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  }
+ ],
+ "achievements": [
+  {
+   "id": "conquer.elwynn",
+   "category": "Zones",
+   "title": "Conqueror of Elwynn Forest",
+   "text": "Defeat Morgan the Collector and clear Elwynn Forest.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Elwynn Forest"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.elwynn",
+   "category": "Bosses",
+   "title": "Most Wanted: Elwynn Forest",
+   "text": "Defeat every boss in Elwynn Forest.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Hogger",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 1,
+     "text": "Hogger"
+    },
+    {
+     "kind": "boss",
+     "target": "Mother Fang",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 1,
+     "text": "Mother Fang"
+    },
+    {
+     "kind": "boss",
+     "target": "Princess",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 1,
+     "text": "Princess"
+    },
+    {
+     "kind": "boss",
+     "target": "Morgan the Collector",
+     "zone": "elwynn",
+     "class": 0,
+     "count": 1,
+     "text": "Morgan the Collector"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.dun-morogh",
+   "category": "Zones",
+   "title": "Conqueror of Dun Morogh",
+   "text": "Defeat Bjarn and clear Dun Morogh.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Dun Morogh"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.dun-morogh",
+   "category": "Bosses",
+   "title": "Most Wanted: Dun Morogh",
+   "text": "Defeat every boss in Dun Morogh.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Edan the Howler",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Edan the Howler"
+    },
+    {
+     "kind": "boss",
+     "target": "Timber",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Timber"
+    },
+    {
+     "kind": "boss",
+     "target": "Great Father Arctikus",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Great Father Arctikus"
+    },
+    {
+     "kind": "boss",
+     "target": "Old Icebeard",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Old Icebeard"
+    },
+    {
+     "kind": "boss",
+     "target": "Vagash",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Vagash"
+    },
+    {
+     "kind": "boss",
+     "target": "Bjarn",
+     "zone": "dun-morogh",
+     "class": 0,
+     "count": 1,
+     "text": "Bjarn"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.teldrassil",
+   "category": "Zones",
+   "title": "Conqueror of Teldrassil",
+   "text": "Defeat Gnarlpine Augur and clear Teldrassil.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Teldrassil"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.teldrassil",
+   "category": "Bosses",
+   "title": "Most Wanted: Teldrassil",
+   "text": "Defeat every boss in Teldrassil.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Threggil",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Threggil"
+    },
+    {
+     "kind": "boss",
+     "target": "Uruson",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Uruson"
+    },
+    {
+     "kind": "boss",
+     "target": "Gnarlpine Defender",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Gnarlpine Defender"
+    },
+    {
+     "kind": "boss",
+     "target": "Duskstalker",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Duskstalker"
+    },
+    {
+     "kind": "boss",
+     "target": "Oakenscowl",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Oakenscowl"
+    },
+    {
+     "kind": "boss",
+     "target": "Gnarlpine Augur",
+     "zone": "teldrassil",
+     "class": 0,
+     "count": 1,
+     "text": "Gnarlpine Augur"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.durotar",
+   "category": "Zones",
+   "title": "Conqueror of Durotar",
+   "text": "Defeat Burning Blade Cultist and clear Durotar.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Durotar"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.durotar",
+   "category": "Bosses",
+   "title": "Most Wanted: Durotar",
+   "text": "Defeat every boss in Durotar.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Geolord Mottle",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Geolord Mottle"
+    },
+    {
+     "kind": "boss",
+     "target": "Razormane Dustrunner",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Razormane Dustrunner"
+    },
+    {
+     "kind": "boss",
+     "target": "Razormane Battleguard",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Razormane Battleguard"
+    },
+    {
+     "kind": "boss",
+     "target": "Burning Blade Neophyte",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Burning Blade Neophyte"
+    },
+    {
+     "kind": "boss",
+     "target": "Death Flayer",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Death Flayer"
+    },
+    {
+     "kind": "boss",
+     "target": "Burning Blade Cultist",
+     "zone": "durotar",
+     "class": 0,
+     "count": 1,
+     "text": "Burning Blade Cultist"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.mulgore",
+   "category": "Zones",
+   "title": "Conqueror of Mulgore",
+   "text": "Defeat Ghost Howl and clear Mulgore.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Mulgore"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.mulgore",
+   "category": "Bosses",
+   "title": "Most Wanted: Mulgore",
+   "text": "Defeat every boss in Mulgore.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Prairie Stalker",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Prairie Stalker"
+    },
+    {
+     "kind": "boss",
+     "target": "Mazzranache",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Mazzranache"
+    },
+    {
+     "kind": "boss",
+     "target": "Snagglespear",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Snagglespear"
+    },
+    {
+     "kind": "boss",
+     "target": "Swoop",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Swoop"
+    },
+    {
+     "kind": "boss",
+     "target": "Elder Plainstrider",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Elder Plainstrider"
+    },
+    {
+     "kind": "boss",
+     "target": "Ghost Howl",
+     "zone": "mulgore",
+     "class": 0,
+     "count": 1,
+     "text": "Ghost Howl"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.tirisfal",
+   "category": "Zones",
+   "title": "Conqueror of Tirisfal Glades",
+   "text": "Defeat Gorefang and clear Tirisfal Glades.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Tirisfal Glades"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.tirisfal",
+   "category": "Bosses",
+   "title": "Most Wanted: Tirisfal Glades",
+   "text": "Defeat every boss in Tirisfal Glades.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Farmer Solliden",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Farmer Solliden"
+    },
+    {
+     "kind": "boss",
+     "target": "Tormented Spirit",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Tormented Spirit"
+    },
+    {
+     "kind": "boss",
+     "target": "Bayne",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Bayne"
+    },
+    {
+     "kind": "boss",
+     "target": "Ressan the Needler",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Ressan the Needler"
+    },
+    {
+     "kind": "boss",
+     "target": "Fellicent's Shade",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Fellicent's Shade"
+    },
+    {
+     "kind": "boss",
+     "target": "Gorefang",
+     "zone": "tirisfal",
+     "class": 0,
+     "count": 1,
+     "text": "Gorefang"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.westfall",
+   "category": "Zones",
+   "title": "Conqueror of Westfall",
+   "text": "Defeat Vultros and clear Westfall.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Westfall"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.westfall",
+   "category": "Bosses",
+   "title": "Most Wanted: Westfall",
+   "text": "Defeat every boss in Westfall.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Brainwashed Noble",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Brainwashed Noble"
+    },
+    {
+     "kind": "boss",
+     "target": "Marisa du'Paige",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Marisa du'Paige"
+    },
+    {
+     "kind": "boss",
+     "target": "Sergeant Brashclaw",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Sergeant Brashclaw"
+    },
+    {
+     "kind": "boss",
+     "target": "Klaven Mortwake",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Klaven Mortwake"
+    },
+    {
+     "kind": "boss",
+     "target": "Lupos",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Lupos"
+    },
+    {
+     "kind": "boss",
+     "target": "Vultros",
+     "zone": "westfall",
+     "class": 0,
+     "count": 1,
+     "text": "Vultros"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.barrens",
+   "category": "Zones",
+   "title": "Conqueror of The Barrens",
+   "text": "Defeat Hezrul Bloodmark and clear The Barrens.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Clear The Barrens"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.barrens",
+   "category": "Bosses",
+   "title": "Most Wanted: The Barrens",
+   "text": "Defeat every boss in The Barrens.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Echeyakee",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Echeyakee"
+    },
+    {
+     "kind": "boss",
+     "target": "Takk the Leaper",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Takk the Leaper"
+    },
+    {
+     "kind": "boss",
+     "target": "Lakota'mani",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Lakota'mani"
+    },
+    {
+     "kind": "boss",
+     "target": "Humar the Pridelord",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Humar the Pridelord"
+    },
+    {
+     "kind": "boss",
+     "target": "Agathelos the Raging",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Agathelos the Raging"
+    },
+    {
+     "kind": "boss",
+     "target": "Hezrul Bloodmark",
+     "zone": "barrens",
+     "class": 0,
+     "count": 1,
+     "text": "Hezrul Bloodmark"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.deadmines",
+   "category": "Zones",
+   "title": "Conqueror of The Deadmines",
+   "text": "Defeat Edwin VanCleef and clear The Deadmines.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 1,
+     "text": "Clear The Deadmines"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.deadmines",
+   "category": "Bosses",
+   "title": "Most Wanted: The Deadmines",
+   "text": "Defeat every boss in The Deadmines.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Rhahk'Zor",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 1,
+     "text": "Rhahk'Zor"
+    },
+    {
+     "kind": "boss",
+     "target": "Sneed's Shredder",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 1,
+     "text": "Sneed's Shredder"
+    },
+    {
+     "kind": "boss",
+     "target": "Gilnid",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 1,
+     "text": "Gilnid"
+    },
+    {
+     "kind": "boss",
+     "target": "Mr. Smite",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 1,
+     "text": "Mr. Smite"
+    },
+    {
+     "kind": "boss",
+     "target": "Edwin VanCleef",
+     "zone": "deadmines",
+     "class": 0,
+     "count": 1,
+     "text": "Edwin VanCleef"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.wailing",
+   "category": "Zones",
+   "title": "Conqueror of Wailing Caverns",
+   "text": "Defeat Mutanus the Devourer and clear Wailing Caverns.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "wailing",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Wailing Caverns"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.wailing",
+   "category": "Bosses",
+   "title": "Most Wanted: Wailing Caverns",
+   "text": "Defeat every boss in Wailing Caverns.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Lady Anacondra",
+     "zone": "wailing",
+     "class": 0,
+     "count": 1,
+     "text": "Lady Anacondra"
+    },
+    {
+     "kind": "boss",
+     "target": "Lord Cobrahn",
+     "zone": "wailing",
+     "class": 0,
+     "count": 1,
+     "text": "Lord Cobrahn"
+    },
+    {
+     "kind": "boss",
+     "target": "Lord Pythas",
+     "zone": "wailing",
+     "class": 0,
+     "count": 1,
+     "text": "Lord Pythas"
+    },
+    {
+     "kind": "boss",
+     "target": "Lord Serpentis",
+     "zone": "wailing",
+     "class": 0,
+     "count": 1,
+     "text": "Lord Serpentis"
+    },
+    {
+     "kind": "boss",
+     "target": "Mutanus the Devourer",
+     "zone": "wailing",
+     "class": 0,
+     "count": 1,
+     "text": "Mutanus the Devourer"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.duskwood",
+   "category": "Zones",
+   "title": "Conqueror of Duskwood",
+   "text": "Defeat Nefaru and clear Duskwood.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Duskwood"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.duskwood",
+   "category": "Bosses",
+   "title": "Most Wanted: Duskwood",
+   "text": "Defeat every boss in Duskwood.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Lupos",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Lupos"
+    },
+    {
+     "kind": "boss",
+     "target": "Naraxis",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Naraxis"
+    },
+    {
+     "kind": "boss",
+     "target": "Nightbane Vile Fang",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Nightbane Vile Fang"
+    },
+    {
+     "kind": "boss",
+     "target": "Nightbane Tainted One",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Nightbane Tainted One"
+    },
+    {
+     "kind": "boss",
+     "target": "Fenros",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Fenros"
+    },
+    {
+     "kind": "boss",
+     "target": "Nefaru",
+     "zone": "duskwood",
+     "class": 0,
+     "count": 1,
+     "text": "Nefaru"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.stonetalon",
+   "category": "Zones",
+   "title": "Conqueror of Stonetalon Mountains",
+   "text": "Defeat Gerenzo Wrenchwhistle and clear Stonetalon Mountains.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Stonetalon Mountains"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.stonetalon",
+   "category": "Bosses",
+   "title": "Most Wanted: Stonetalon Mountains",
+   "text": "Defeat every boss in Stonetalon Mountains.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "XT:4",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 1,
+     "text": "XT:4"
+    },
+    {
+     "kind": "boss",
+     "target": "XT:9",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 1,
+     "text": "XT:9"
+    },
+    {
+     "kind": "boss",
+     "target": "Foreman Rigger",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 1,
+     "text": "Foreman Rigger"
+    },
+    {
+     "kind": "boss",
+     "target": "Taskmaster Whipfang",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 1,
+     "text": "Taskmaster Whipfang"
+    },
+    {
+     "kind": "boss",
+     "target": "Gerenzo Wrenchwhistle",
+     "zone": "stonetalon",
+     "class": 0,
+     "count": 1,
+     "text": "Gerenzo Wrenchwhistle"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.stranglethorn",
+   "category": "Zones",
+   "title": "Conqueror of Stranglethorn Vale",
+   "text": "Defeat King Bangalash and clear Stranglethorn Vale.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Stranglethorn Vale"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.stranglethorn",
+   "category": "Bosses",
+   "title": "Most Wanted: Stranglethorn Vale",
+   "text": "Defeat every boss in Stranglethorn Vale.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Sin'Dall",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 1,
+     "text": "Sin'Dall"
+    },
+    {
+     "kind": "boss",
+     "target": "Bhag'thera",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 1,
+     "text": "Bhag'thera"
+    },
+    {
+     "kind": "boss",
+     "target": "Tethis",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 1,
+     "text": "Tethis"
+    },
+    {
+     "kind": "boss",
+     "target": "Colonel Kurzen",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 1,
+     "text": "Colonel Kurzen"
+    },
+    {
+     "kind": "boss",
+     "target": "King Bangalash",
+     "zone": "stranglethorn",
+     "class": 0,
+     "count": 1,
+     "text": "King Bangalash"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "road.alliance",
+   "category": "Zones",
+   "title": "The Alliance Road",
+   "text": "Clear every zone on the road from Elwynn to Stranglethorn.",
+   "points": 25,
+   "criteria": [],
+   "requires": [
+    "conquer.elwynn",
+    "conquer.westfall",
+    "conquer.deadmines",
+    "conquer.duskwood",
+    "conquer.stranglethorn"
+   ]
+  },
+  {
+   "id": "road.horde",
+   "category": "Zones",
+   "title": "The Horde Road",
+   "text": "Clear every zone on the road from Durotar to Stranglethorn.",
+   "points": 25,
+   "criteria": [],
+   "requires": [
+    "conquer.durotar",
+    "conquer.barrens",
+    "conquer.wailing",
+    "conquer.stonetalon",
+    "conquer.stranglethorn"
+   ]
+  },
+  {
+   "id": "road.cradles",
+   "category": "Zones",
+   "title": "Cradles of Azeroth",
+   "text": "Clear all six starting lands.",
+   "points": 25,
+   "criteria": [],
+   "requires": [
+    "conquer.elwynn",
+    "conquer.dun-morogh",
+    "conquer.teldrassil",
+    "conquer.durotar",
+    "conquer.mulgore",
+    "conquer.tirisfal"
+   ]
+  },
+  {
+   "id": "road.world",
+   "category": "Zones",
+   "title": "Azeroth Survivor",
+   "text": "Clear every zone.",
+   "points": 50,
+   "criteria": [],
+   "requires": [
+    "conquer.elwynn",
+    "conquer.dun-morogh",
+    "conquer.teldrassil",
+    "conquer.durotar",
+    "conquer.mulgore",
+    "conquer.tirisfal",
+    "conquer.westfall",
+    "conquer.barrens",
+    "conquer.deadmines",
+    "conquer.wailing",
+    "conquer.duskwood",
+    "conquer.stonetalon",
+    "conquer.stranglethorn"
+   ]
+  },
+  {
+   "id": "bosses.10",
+   "category": "Bosses",
+   "title": "Boss Hunter",
+   "text": "Defeat 10 bosses.",
+   "points": 5,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 10,
+     "text": "Defeat 10 bosses."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "bosses.50",
+   "category": "Bosses",
+   "title": "Boss Slayer",
+   "text": "Defeat 50 bosses.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 50,
+     "text": "Defeat 50 bosses."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "bosses.200",
+   "category": "Bosses",
+   "title": "Kingslayer",
+   "text": "Defeat 200 bosses.",
+   "points": 20,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 200,
+     "text": "Defeat 200 bosses."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "kills.1000",
+   "category": "Slayer",
+   "title": "Blooded",
+   "text": "Slay 1,000 enemies.",
+   "points": 5,
+   "criteria": [
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 1000,
+     "text": "Slay 1,000 enemies."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "kills.10000",
+   "category": "Slayer",
+   "title": "Veteran",
+   "text": "Slay 10,000 enemies.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 10000,
+     "text": "Slay 10,000 enemies."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "kills.50000",
+   "category": "Slayer",
+   "title": "Legion of One",
+   "text": "Slay 50,000 enemies.",
+   "points": 25,
+   "criteria": [
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 50000,
+     "text": "Slay 50,000 enemies."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "elites.25",
+   "category": "Slayer",
+   "title": "Champion Hunter",
+   "text": "Slay 25 elites.",
+   "points": 5,
+   "criteria": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 25,
+     "text": "Slay 25 elites."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "elites.100",
+   "category": "Slayer",
+   "title": "Lairbreaker",
+   "text": "Slay 100 elites.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 100,
+     "text": "Slay 100 elites."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "elites.500",
+   "category": "Slayer",
+   "title": "Bane of Champions",
+   "text": "Slay 500 elites.",
+   "points": 20,
+   "criteria": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 500,
+     "text": "Slay 500 elites."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "survive.600",
+   "category": "Survival",
+   "title": "Holdout",
+   "text": "Survive 10:00 in a single run.",
+   "points": 5,
+   "criteria": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00 in a single run."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "survive.840",
+   "category": "Survival",
+   "title": "Unbroken",
+   "text": "Survive 14:00 in a single run.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 840,
+     "text": "Survive 14:00 in a single run."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "clears.10",
+   "category": "Survival",
+   "title": "Seasoned",
+   "text": "Clear 10 runs.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 10,
+     "text": "Clear 10 runs."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "clears.50",
+   "category": "Survival",
+   "title": "Relentless",
+   "text": "Clear 50 runs.",
+   "points": 25,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 50,
+     "text": "Clear 50 runs."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "level.30",
+   "category": "Survival",
+   "title": "Ascendant",
+   "text": "Reach level 30 in a single run.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 30,
+     "text": "Reach level 30 in a single run."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "party.2",
+   "category": "Co-op",
+   "title": "Brothers in Arms",
+   "text": "Clear a zone with at least one ally.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "party",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 2,
+     "text": "Clear a zone with at least one ally."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "party.3",
+   "category": "Co-op",
+   "title": "Warband",
+   "text": "Clear a zone in a party of three or more.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "party",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 3,
+     "text": "Clear a zone in a party of three or more."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "party.4",
+   "category": "Co-op",
+   "title": "Full Party",
+   "text": "Clear a zone in a party of four.",
+   "points": 15,
+   "criteria": [
+    {
+     "kind": "party",
+     "target": "",
+     "zone": "",
+     "class": 0,
+     "count": 4,
+     "text": "Clear a zone in a party of four."
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.1",
+   "category": "Mastery",
+   "title": "Warrior’s Road",
+   "text": "Clear 5 runs as a Warrior.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 1,
+     "count": 5,
+     "text": "Clear 5 runs as a Warrior"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.2",
+   "category": "Mastery",
+   "title": "Paladin’s Road",
+   "text": "Clear 5 runs as a Paladin.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 2,
+     "count": 5,
+     "text": "Clear 5 runs as a Paladin"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.3",
+   "category": "Mastery",
+   "title": "Hunter’s Road",
+   "text": "Clear 5 runs as a Hunter.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 3,
+     "count": 5,
+     "text": "Clear 5 runs as a Hunter"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.4",
+   "category": "Mastery",
+   "title": "Rogue’s Road",
+   "text": "Clear 5 runs as a Rogue.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 4,
+     "count": 5,
+     "text": "Clear 5 runs as a Rogue"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.5",
+   "category": "Mastery",
+   "title": "Priest’s Road",
+   "text": "Clear 5 runs as a Priest.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 5,
+     "count": 5,
+     "text": "Clear 5 runs as a Priest"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.7",
+   "category": "Mastery",
+   "title": "Shaman’s Road",
+   "text": "Clear 5 runs as a Shaman.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 7,
+     "count": 5,
+     "text": "Clear 5 runs as a Shaman"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.8",
+   "category": "Mastery",
+   "title": "Mage’s Road",
+   "text": "Clear 5 runs as a Mage.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 8,
+     "count": 5,
+     "text": "Clear 5 runs as a Mage"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.9",
+   "category": "Mastery",
+   "title": "Warlock’s Road",
+   "text": "Clear 5 runs as a Warlock.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 9,
+     "count": 5,
+     "text": "Clear 5 runs as a Warlock"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "class.11",
+   "category": "Mastery",
+   "title": "Druid’s Road",
+   "text": "Clear 5 runs as a Druid.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "",
+     "class": 11,
+     "count": 5,
+     "text": "Clear 5 runs as a Druid"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "master.all",
+   "category": "Mastery",
+   "title": "Master of Arms",
+   "text": "Earn every class’s Road achievement.",
+   "points": 50,
+   "criteria": [],
+   "requires": [
+    "class.1",
+    "class.2",
+    "class.3",
+    "class.4",
+    "class.5",
+    "class.7",
+    "class.8",
+    "class.9",
+    "class.11"
+   ]
+  }
+ ]
+}

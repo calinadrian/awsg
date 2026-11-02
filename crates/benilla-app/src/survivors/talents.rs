@@ -185,18 +185,14 @@ impl ClassBook {
     }
 
     pub fn progress_text(&self) -> String {
+        let points = super::front_end::plural(self.available(), "talent point");
         if self.earned() >= MAX_POINTS {
-            format!(
-                "Class level {} (MAX) | {} talent points available",
-                self.level(),
-                self.available()
-            )
+            format!("Class level {} (max)  ·  {points} to spend", self.level())
         } else {
             let (xp, next) = self.toward_next();
             format!(
-                "Class level {} | {xp:.0} / {next:.0} XP | {} talent points available",
-                self.level(),
-                self.available()
+                "Class level {}  ·  {xp:.0} / {next:.0} XP  ·  {points} to spend",
+                self.level()
             )
         }
     }
@@ -576,8 +572,15 @@ pub(super) fn settle_run(run: &mut Run, book: &mut TalentBook, guardians: u32, m
 #[derive(Component)]
 pub(super) struct MenuProgress;
 
+/// The results screen's reward headline: the class XP the run paid and any points it earned.
 #[derive(Component)]
 pub(super) struct ResultsProgress;
+/// The class level line under the results screen's XP bar.
+#[derive(Component)]
+pub(super) struct ResultsLevel;
+/// The results screen's class XP bar fill.
+#[derive(Component)]
+pub(super) struct ResultsXpFill;
 
 /// Keep the reward receipt and the selected class's saved progress visible between runs.
 pub(super) fn refresh_progress(
@@ -589,7 +592,9 @@ pub(super) fn refresh_progress(
     mut texts: ParamSet<(
         Query<&mut Text, With<MenuProgress>>,
         Query<&mut Text, With<ResultsProgress>>,
+        Query<&mut Text, With<ResultsLevel>>,
     )>,
+    mut fills: Query<&mut Node, With<ResultsXpFill>>,
 ) {
     match phase.get() {
         Phase::Menu => {
@@ -611,20 +616,34 @@ pub(super) fn refresh_progress(
         Phase::GameOver => {
             let page = book.class(run.class.id);
             let (xp, points) = run.talent_pay;
-            let earned = if points > 0 {
-                format!("Level up! +{points} talent points")
-            } else if page.earned() >= MAX_POINTS {
-                "Maximum class level reached".into()
-            } else {
-                "Earn class XP each run to unlock talent points".into()
-            };
-            let value = format!(
-                "+{xp:.0} {} class XP | {earned}\n{}\nSpend your points in Talents from the main menu.",
-                run.class.name, page.progress_text()
-            );
+            let mut value = format!("+{xp:.0} {} class XP", run.class.name);
+            if points > 0 {
+                value.push_str(&format!(
+                    "  ·  Level up! +{}",
+                    super::front_end::plural(points, "talent point")
+                ));
+            }
             for mut text in &mut texts.p1() {
                 if text.0 != value {
                     text.0 = value.clone();
+                }
+            }
+            let line = if page.available() > 0 {
+                format!("{}  ·  spend them in Talents", page.progress_text())
+            } else {
+                page.progress_text()
+            };
+            for mut text in &mut texts.p2() {
+                if text.0 != line {
+                    text.0 = line.clone();
+                }
+            }
+            let (have, next) = page.toward_next();
+            let fraction = if page.earned() >= MAX_POINTS { 1. } else { (have / next.max(1.)).clamp(0., 1.) };
+            for mut fill in &mut fills {
+                let want = Val::Percent(fraction * 100.);
+                if fill.width != want {
+                    fill.width = want;
                 }
             }
         }

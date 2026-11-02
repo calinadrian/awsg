@@ -172,6 +172,8 @@ pub(super) struct Loot {
     pub xp: u32,
     pub boss: bool,
     pub boss_name: Option<String>,
+    /// The creature's roster name, for quest and achievement counts.
+    pub name: &'static str,
     pub spawn_cost: f32,
     pub roaming_elite: bool,
     pub elite: bool,
@@ -1001,6 +1003,10 @@ pub(super) fn drop_loot(
     for d in drops.read() {
         let kind = if d.boss { 2 } else if d.elite { 1 } else { 0 };
         run.equipment_kills[kind] = run.equipment_kills[kind].saturating_add(1);
+        if kind < 2 && (run.tally.len() < super::quests::MAX_TALLY || run.tally.contains_key(d.name)) {
+            let count = &mut run.tally.entry(d.name.to_owned()).or_default()[kind];
+            *count = count.saturating_add(1);
+        }
         if let Some(name) = &d.boss_name {
             run.boss_loot.push(name.clone());
         }

@@ -967,6 +967,7 @@ pub(super) fn apply_hits(
                 xp: en.xp,
                 boss: en.boss,
                 boss_name: en.boss.then(|| en.def.name.to_owned()),
+                name: en.def.name,
                 spawn_cost: if en.home.is_none() {
                     super::horde_spawning::cost(en.def)
                 } else {

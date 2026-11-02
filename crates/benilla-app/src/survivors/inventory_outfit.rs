@@ -95,7 +95,7 @@ fn dress(
                 continue;
             };
             let look = inventory
-                .hero(&coop.url, class.id)
+                .hero(&inventory.realm(&coop), class.id)
                 .map_or_else(Vec::new, |hero| {
                     hero.inventory
                         .items

@@ -12,6 +12,7 @@ use bevy::ui_render::ui_material::{MaterialNode, UiMaterial};
 use bevy::window::PrimaryWindow;
 
 use super::data::{self, AbilityDef, Effect, Kind};
+use super::front_end::{self as skin, gap, size};
 use super::hero::{self, Hero};
 use super::jewelry::{self, JEWELS};
 use super::minimap::{self, MiniMap};
@@ -179,7 +180,18 @@ pub(super) enum UiAction {
     Settings,
     MainMenu,
     Quit,
+    /// From the results: back through the menu and straight into the same pick.
+    Again,
 }
+
+/// Set by the results' Play again: the menu starts the next run as soon as it is up.
+#[derive(Resource, Default)]
+pub(super) struct Replay(bool);
+
+/// The clock's column at the top centre: the clock, the run's line, and the boss bars that
+/// [`super::plates::boss_bar`] hangs under them.
+#[derive(Component)]
+pub(super) struct TopStack;
 
 /// The colour a button returns to when not hovered.
 #[derive(Component)]
@@ -551,22 +563,27 @@ pub(super) fn setup_hud(
                         },
                     ));
                 });
-                // The clock, with the level and the kill count on one line under it.
-                row.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(0.0),
-                    ..default()
-                })
+                // The clock, with the level and the run's counts on one line under it, and the
+                // boss bars under that, all one column so none can run into the next.
+                row.spawn((
+                    TopStack,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                ))
                 .with_children(|col| {
                     col.spawn((TimerText, centered(f, "00:00", 34.0, Color::WHITE)));
                     col.spawn(Node {
-                        column_gap: Val::Px(14.0),
+                        column_gap: Val::Px(8.0),
+                        margin: UiRect::bottom(Val::Px(6.0)),
                         ..default()
                     })
                     .with_children(|line| {
                         line.spawn((LevelText, text(f, "Level 1", 14.0, GOLD)));
-                        line.spawn((KillText, text(f, "Kills 0", 14.0, Color::WHITE)));
+                        line.spawn((KillText, text(f, "", 14.0, Color::WHITE)));
                     });
                 });
                 // The minimap cluster's column.
@@ -693,7 +710,8 @@ pub(super) fn setup_hud(
                 row_gap: Val::Px(18.0),
                 ..default()
             },
-            BackgroundColor(Color::NONE),
+            // Dims the world, the plates and the meters under the cards.
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
             GlobalZIndex(420),
             Visibility::Hidden,
             // The build's icons stay hoverable under the cards.
@@ -753,7 +771,13 @@ pub(super) fn setup_hud(
             bevy::ui::FocusPolicy::Pass,
         ))
         .with_children(|root| {
-            root.spawn(centered(f, "Paused", 46.0, GOLD));
+            root.spawn((
+                centered(f, "Paused", size::DISPLAY, skin::GOLD),
+                Node {
+                    margin: UiRect::bottom(Val::Px(gap::S)),
+                    ..default()
+                },
+            ));
             for (label, action) in [
                 ("Resume", UiAction::Resume),
                 ("Settings", UiAction::Settings),
@@ -772,12 +796,13 @@ pub(super) fn setup_hud(
                     },
                 ))
                 .with_children(|b| {
-                    b.spawn(text(f, label, 20.0, Color::WHITE));
+                    b.spawn(text(f, label, size::LEAD + 2.0, skin::TEXT));
                 });
             }
         });
 
     // --- Results. ---
+    let results_w = 640.0;
     commands
         .spawn((
             OverRoot,
@@ -788,79 +813,138 @@ pub(super) fn setup_hud(
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(14.0),
+                row_gap: Val::Px(gap::M),
                 ..default()
             },
             MaterialNode(fills.add(super::fill::FillMaterial::radial(
-                Color::srgba(0.07, 0.02, 0.0, 0.8),
-                Color::srgba(0.0, 0.0, 0.0, 0.94),
+                Color::srgba(0.07, 0.02, 0.0, 0.88),
+                Color::srgba(0.0, 0.0, 0.0, 0.97),
             ))),
             GlobalZIndex(440),
             Visibility::Hidden,
         ))
         .with_children(|root| {
-            root.spawn((OverTitle, centered(f, "", 64.0, GOLD)));
-            root.spawn((
-                OverLine,
-                centered(f, "", 18.0, Color::srgb(0.85, 0.78, 0.6)),
-            ));
-            // The run in numbers, one tile each.
+            root.spawn((OverTitle, centered(f, "", size::HERO, skin::GOLD)));
+            root.spawn((OverLine, centered(f, "", size::LEAD, skin::TEXT)));
+            root.spawn((OverStats, centered(f, "", size::SMALL, skin::MUTED)));
+            // The run in numbers: equal tiles across the column's width.
             root.spawn(Node {
-                column_gap: Val::Px(12.0),
-                margin: UiRect::vertical(Val::Px(14.0)),
+                width: Val::Px(results_w),
+                column_gap: Val::Px(gap::S),
+                margin: UiRect::top(Val::Px(gap::S)),
                 ..default()
             })
             .with_children(|row| {
-                for (i, label) in ["Survived", "Level", "Kills", "Damage", "Bosses"]
+                for (i, label) in ["SURVIVED", "LEVEL", "KILLS", "DAMAGE", "BOSSES"]
                     .into_iter()
                     .enumerate()
                 {
                     row.spawn((
                         Node {
-                            width: Val::Px(128.0),
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
                             flex_direction: FlexDirection::Column,
                             align_items: AlignItems::Center,
-                            padding: UiRect::axes(Val::Px(10.0), Val::Px(12.0)),
-                            row_gap: Val::Px(4.0),
+                            padding: UiRect::axes(Val::Px(gap::S), Val::Px(gap::M)),
+                            row_gap: Val::Px(gap::XS),
                             border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
                             ..default()
                         },
                         BackgroundGradient::from(LinearGradient::to_bottom(vec![
                             ColorStop::percent(Color::srgba(0.2, 0.14, 0.05, 0.92), 0.0),
                             ColorStop::percent(Color::srgba(0.04, 0.03, 0.02, 0.94), 100.0),
                         ])),
-                        BorderColor::all(EDGE),
+                        BorderColor::all(skin::EDGE),
                     ))
                     .with_children(|tile| {
-                        tile.spawn((OverStat(i), centered(f, "", 26.0, Color::WHITE)));
-                        tile.spawn(centered(f, label, 12.0, DIM));
+                        tile.spawn((OverStat(i), centered(f, "", size::TITLE, skin::TEXT)));
+                        tile.spawn(centered(f, label, size::CAPTION, skin::MUTED));
                     });
                 }
             });
-            root.spawn((OverStats, centered(f, "", 15.0, DIM)));
-            root.spawn((super::talents::ResultsProgress, centered(f, "", 17.0, GOLD)));
-            root.spawn((
-                edged_button(UiAction::MainMenu, BUTTON, GOLD),
-                Node {
-                    width: Val::Px(260.0),
-                    justify_content: JustifyContent::Center,
-                    padding: UiRect::axes(Val::Px(20.0), Val::Px(11.0)),
-                    margin: UiRect::top(Val::Px(8.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BoxShadow::new(
-                    Color::srgba(1.0, 0.7, 0.2, 0.35),
-                    Val::Px(0.0),
-                    Val::Px(0.0),
-                    Val::Px(0.0),
-                    Val::Px(16.0),
-                ),
-            ))
-            .with_children(|b| {
-                b.spawn(text(f, "Quit to menu", 22.0, GOLD));
+            // What the run paid the class: the XP, the bar toward the next point, the level.
+            root.spawn(skin::panel(Node {
+                width: Val::Px(results_w),
+                padding: UiRect::axes(Val::Px(gap::L), Val::Px(gap::M)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(gap::S),
+                ..default()
+            }))
+            .with_children(|panel| {
+                skin::heading(panel, f, "REWARDS");
+                let headline = skin::label(panel, f, "", size::LEAD, skin::GOLD);
+                panel
+                    .commands()
+                    .entity(headline)
+                    .insert(super::talents::ResultsProgress);
+                let fill = skin::progress_bar(panel, 0.0, skin::GOLD.darker(0.15), 8.0);
+                panel
+                    .commands()
+                    .entity(fill)
+                    .insert(super::talents::ResultsXpFill);
+                let level = skin::label(panel, f, "", size::SMALL, skin::MUTED);
+                panel
+                    .commands()
+                    .entity(level)
+                    .insert(super::talents::ResultsLevel);
+                skin::heading(panel, f, "QUESTS");
+                panel.spawn((
+                    super::quests::ResultsQuests,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(gap::XS),
+                        ..default()
+                    },
+                ));
+            });
+            root.spawn(Node {
+                column_gap: Val::Px(gap::M),
+                margin: UiRect::top(Val::Px(gap::S)),
+                ..default()
+            })
+            .with_children(|row| {
+                for (title, action, primary) in [
+                    ("Play again", UiAction::Again, true),
+                    ("Main menu", UiAction::MainMenu, false),
+                ] {
+                    let base = if primary { BUTTON } else { skin::SURFACE };
+                    let mut b = row.spawn((
+                        edged_button(action, base, if primary { skin::GOLD } else { skin::EDGE }),
+                        Node {
+                            width: Val::Px(220.0),
+                            justify_content: JustifyContent::Center,
+                            padding: UiRect::axes(Val::Px(20.0), Val::Px(10.0)),
+                            border: UiRect::all(Val::Px(if primary { 2.0 } else { 1.0 })),
+                            border_radius: BorderRadius::all(Val::Px(5.0)),
+                            ..default()
+                        },
+                    ));
+                    if primary {
+                        b.insert(BoxShadow::new(
+                            Color::srgba(1.0, 0.7, 0.2, 0.35),
+                            Val::Px(0.0),
+                            Val::Px(0.0),
+                            Val::Px(0.0),
+                            Val::Px(16.0),
+                        ));
+                    }
+                    b.with_children(|b| {
+                        b.spawn(text(
+                            f,
+                            title,
+                            if primary { size::HEADING } else { size::LEAD },
+                            if primary { skin::GOLD } else { skin::TEXT },
+                        ));
+                    });
+                }
+            });
+            root.spawn(Node {
+                column_gap: Val::Px(gap::XL),
+                ..default()
+            })
+            .with_children(|row| {
+                skin::keycap(row, f, "ENTER", "Main menu");
             });
         });
 }
@@ -1106,6 +1190,7 @@ pub(super) fn buttons(
     mut exit: MessageWriter<AppExit>,
     phase: Res<State<Phase>>,
     mut options: ResMut<super::options::Options>,
+    mut replay: ResMut<Replay>,
 ) {
     for (interaction, action, base, mut bg) in &mut presses {
         match interaction {
@@ -1126,6 +1211,10 @@ pub(super) fn buttons(
                     {
                         options.open = false;
                         options.settings = false;
+                        next.set(Phase::Menu);
+                    }
+                    (UiAction::Again, Phase::GameOver) if !options.open => {
+                        replay.0 = true;
                         next.set(Phase::Menu);
                     }
                     (UiAction::Quit, _)
@@ -1154,7 +1243,16 @@ pub(super) fn keys(
     mut nameplates: ResMut<super::plates::NameplateSettings>,
     mut cvars: ResMut<crate::cvars::Cvars>,
     mut commands: Commands,
+    mut replay: ResMut<Replay>,
 ) {
+    // Play again: the menu is up, so start the same pick as Enter would. A co-op room starts
+    // its runs from the host, so there it is only the way back to the menu.
+    if *phase.get() == Phase::Menu && std::mem::take(&mut replay.0) {
+        if !coop.in_room() && start_run(&mut run, &mut selection) {
+            next.set(Phase::Playing);
+        }
+        return;
+    }
     if inventory.open || atlas.open || coop.open || (*phase.get() == Phase::Menu && coop.in_room()) {
         return;
     }
@@ -1324,7 +1422,7 @@ pub(super) fn describe_card(
                 })
                 .collect();
             if d.targets > 0 {
-                lines.push(format!("All spells   +{} target", d.targets));
+                lines.push(format!("All spells   +{}", skin::plural(d.targets, "target")));
             }
             CardText {
                 spell: 0,
@@ -1394,7 +1492,7 @@ pub(super) fn refresh_hud(
     let kills = run.kills;
     if let Ok(mut t) = texts.p2().single_mut() {
         **t = format!(
-            "Kills {kills}   •   Gold {}   •   Cache {}",
+            "·   Kills {kills}   ·   Gold {}   ·   Cache {}",
             run.gold, run.chest_cost
         );
     }
@@ -1433,7 +1531,7 @@ pub(super) fn refresh_hud(
         **t = title;
     }
     let summary = format!(
-        "{} {} in {}   —   press Enter to return to menu",
+        "{} {}  ·  {}",
         super::races::race_name(run.race),
         run.class.name,
         selection.map_def().name,
@@ -1676,6 +1774,7 @@ const PLATE_NUDGE: f32 = 2.0;
 #[allow(clippy::type_complexity)]
 pub(super) fn hero_plate(
     run: Res<Run>,
+    phase: Res<State<Phase>>,
     ui_scale: Res<UiScale>,
     hero: Query<&Transform, With<Hero>>,
     cams: Query<(&Camera, &Transform), With<WorldCamera>>,
@@ -1704,7 +1803,8 @@ pub(super) fn hero_plate(
     let Ok((mut frame, mut vis)) = frames.single_mut() else {
         return;
     };
-    let Some((feet, viewport)) = seat else {
+    // Under the cards and the pause menu the plate would sit among their buttons.
+    let Some((feet, viewport)) = seat.filter(|_| *phase.get() == Phase::Playing) else {
         *vis = Visibility::Hidden;
         return;
     };
@@ -1811,7 +1911,8 @@ pub(super) fn refresh_results(
         run.level.to_string(),
         run.kills.to_string(),
         compact(run.damage_done),
-        run.bosses.to_string(),
+        // Killed, not met: one name per boss down.
+        run.boss_loot.len().to_string(),
     ];
     for (stat, mut t) in &mut over_texts.p0() {
         if let Some(v) = values.get(stat.0) {
@@ -1838,8 +1939,9 @@ pub(super) fn compact(v: f64) -> String {
     }
 }
 
+/// Whole from 100 up ("1480", not "1480.2"), else one decimal unless it is whole.
 fn num(v: f32) -> String {
-    if (v - v.round()).abs() < 0.05 {
+    if v.abs() >= 100.0 || (v - v.round()).abs() < 0.05 {
         format!("{}", v.round() as i64)
     } else {
         format!("{v:.1}")
@@ -1920,7 +2022,7 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
             if def.kind == Kind::Execute { s += "; damage doubles below 30% health"; }
             s
         }
-        Kind::Missiles => format!("Fires {} missiles for {d} damage each at random enemies within {} yd. Bosses and elites take priority; missiles can hit the same enemy repeatedly", c.count, num(def.range)),
+        Kind::Missiles => format!("Fires {} for {d} damage each at random enemies within {} yd. Bosses and elites take priority; missiles can hit the same enemy repeatedly", skin::plural(c.count, "missile"), num(def.range)),
         Kind::Buff => format!("Increases {} by {} for {} sec when enemies are within 30 yd", if def.self_effect == 9 { "cooldown recovery" } else { "damage" }, pct(c.dmg), num(c.duration)),
         Kind::Passive => super::spell_passives::description(def.key).into(),
         Kind::Nova => format!("Deals {d} damage to every enemy within {} yd of you", num(c.radius)),
@@ -1944,8 +2046,8 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
             num(c.radius)
         ),
         Kind::Dot => format!(
-            "Afflicts {} enemies in range with {} damage per second for {} sec. Bosses and elites are targeted first; avoids reapplying the same spell",
-            c.count,
+            "Afflicts {} in range with {} damage per second for {} sec. Bosses and elites are targeted first; avoids reapplying the same spell",
+            skin::plural(c.count, "enemy"),
             num(c.dot),
             num(c.duration)
         ),
@@ -1987,10 +2089,14 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
         );
     }
     if let Some(e) = effect_text(def.effect) {
+        s = s.trim_end_matches('.').to_string();
         s += ", ";
         s += &e;
     }
-    s.push('.');
+    // A passive's own text may already end its sentence: never "range..".
+    if !s.ends_with('.') {
+        s.push('.');
+    }
     s
 }
 
@@ -2226,11 +2332,11 @@ pub(super) fn icon_tooltip(
                 ),
                 Color::WHITE,
             ),
-            TipLine::new("Gear and stats are coming.", DIM),
+            TipLine::new("Equipment is managed from Inventory on the main menu.", DIM),
         ]),
         TipFor::Talents => Some(vec![
             TipLine::new("Talents", Color::WHITE).header(),
-            TipLine::new("Talent trees are coming.", DIM),
+            TipLine::new("Spend class points from Talents on the main menu.", DIM),
         ]),
     };
     let Some(lines) = lines else {

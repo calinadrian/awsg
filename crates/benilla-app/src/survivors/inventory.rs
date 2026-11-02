@@ -1,9 +1,13 @@
-//! Native inventory client, with cached gear and a durable transaction outbox.
+//! The inventory client, with cached gear and a durable transaction outbox. The outbox drains
+//! into one of two economies with the same rules ([`asr_coop::ledger`]): the realm at the co-op
+//! server's address, or the player's own solo ledger, which needs no server at all.
 use super::{coop::Coop, Phase, Run, Selection};
 use asr_coop::{
-    economy::{Action, Catalog, Inventory, Listing, Request},
-    Client, Server,
+    economy::{Action, Catalog, Inventory, Listing, Reply, Request},
+    ledger::{Host, Ledger, State as LedgerState},
 };
+#[cfg(not(target_arch = "wasm32"))]
+use asr_coop::{Client, Server};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -25,6 +29,21 @@ struct Save {
     pending: Vec<Job>,
     #[serde(default)]
     linked: BTreeMap<String, String>,
+    /// Whether the player chose the solo economy; unset, a player with no realm heroes is solo.
+    #[serde(default)]
+    solo: Option<bool>,
+}
+/// The solo economy's address in hero keys: `solo:<class>`.
+pub(super) const SOLO: &str = "solo";
+/// The account window's open tab.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Hash)]
+pub(super) enum Pane {
+    #[default]
+    Inventory,
+    Auction,
+    Drops,
+    Quests,
+    Achievements,
 }
 #[derive(Resource)]
 pub(super) struct Equipment {
@@ -34,12 +53,10 @@ pub(super) struct Equipment {
     pub status: String,
     pub revision: u64,
     pub open: bool,
-    pub market: bool,
+    pub pane: Pane,
     pub search: String,
     pub search_active: bool,
     pub search_cursor: super::text_edit::Cursor,
-    pub show_loot: bool,
-    pub show_journal: bool,
     pub loot_class: Option<u8>,
     pub loot_slot: Option<usize>,
     pub loot_quality: usize,
@@ -51,8 +68,16 @@ pub(super) struct Equipment {
     pub slot_filter: Option<usize>,
     pub price: u64,
     pub confirm: Option<Action>,
+    /// The quest open in the quest log.
+    pub quest: Option<String>,
+    /// The economy zone the quest log offers quests from; all the hero's zones when `None`.
+    pub quest_zone: Option<String>,
+    /// The achievement category shown: 0 for the summary, then one per category.
+    pub category: usize,
     #[cfg(not(target_arch = "wasm32"))]
     connection: Option<std::sync::Mutex<asr_coop::transport::Connection>>,
+    /// The solo economy, read from its save the first time it is needed.
+    ledger: Option<Ledger>,
     server: String,
     connected: bool,
     flight: bool,
@@ -61,6 +86,8 @@ pub(super) struct Equipment {
     run_key: String,
     counted: [u32; 3],
     boss_counted: usize,
+    /// The run's kill tally as of the last reward batch.
+    tallied: std::collections::BTreeMap<String, [u32; 2]>,
     reward_t: f32,
     finished: bool,
     read_only: bool,
@@ -68,6 +95,51 @@ pub(super) struct Equipment {
 }
 fn path() -> Option<std::path::PathBuf> {
     crate::local_state::home().map(|p| p.join("survivors-inventory.json"))
+}
+/// The solo ledger's state: every solo hero, their bags and their run sessions.
+fn solo_path() -> Option<std::path::PathBuf> {
+    crate::local_state::home().map(|p| p.join("survivors-solo-economy.json"))
+}
+/// The solo ledger's clock, dice and save.
+struct SoloHost {
+    seed: u64,
+}
+impl SoloHost {
+    fn new() -> Self {
+        let nanos = web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as u64);
+        Self { seed: nanos ^ 0x5DEE_CE66_D1CE_4E5B }
+    }
+    /// splitmix64: plenty for loot rolls nobody else has to trust.
+    fn next(&mut self) -> u64 {
+        self.seed = self.seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.seed;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+}
+impl Host for SoloHost {
+    fn now(&mut self) -> u64 {
+        web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    }
+    fn random(&mut self, limit: u32) -> u32 {
+        if limit == 0 {
+            return 0;
+        }
+        (self.next() % u64::from(limit)) as u32
+    }
+    fn secret(&mut self) -> String {
+        format!("{:016x}{:016x}", self.next(), self.next())
+    }
+    fn save(&mut self, _generation: u64, state: &[u8]) -> Result<(), String> {
+        let path = solo_path().ok_or("Could not save transaction: no persistent save folder")?;
+        crate::local_state::write_atomic_bytes(&path, state)
+            .map_err(|e| format!("Could not save transaction: {e}"))
+    }
 }
 fn id() -> String {
     #[cfg(not(target_arch = "wasm32"))]
@@ -111,12 +183,10 @@ impl Default for Equipment {
             status,
             revision: 0,
             open: false,
-            market: false,
+            pane: Pane::Inventory,
             search: String::new(),
             search_active: false,
             search_cursor: Default::default(),
-            show_loot: false,
-            show_journal: false,
             loot_class: None,
             loot_slot: None,
             loot_quality: 0,
@@ -127,8 +197,12 @@ impl Default for Equipment {
             slot_filter: None,
             price: 10,
             confirm: None,
+            quest: None,
+            quest_zone: None,
+            category: 0,
             #[cfg(not(target_arch = "wasm32"))]
             connection: None,
+            ledger: None,
             server: String::new(),
             connected: false,
             flight: false,
@@ -137,6 +211,7 @@ impl Default for Equipment {
             run_key: String::new(),
             counted: [0; 3],
             boss_counted: 0,
+            tallied: Default::default(),
             reward_t: 0.,
             finished: true,
             read_only,
@@ -147,6 +222,147 @@ impl Default for Equipment {
 impl Equipment {
     pub fn key(server: &str, class: u8) -> String {
         format!("{}:{class}", server.trim_end_matches('/'))
+    }
+    /// Whether this player keeps their bags in the solo economy. The web build has no realm
+    /// connection, so it is always solo there.
+    pub fn solo(&self) -> bool {
+        cfg!(target_arch = "wasm32")
+            || self.save.solo.unwrap_or_else(|| {
+                let prefix = format!("{SOLO}:");
+                self.save.heroes.keys().all(|key| key.starts_with(&prefix))
+            })
+    }
+    /// The economy this player's bags and rewards live in: the solo ledger, or the realm at the
+    /// co-op server's address. A co-op room always plays on the realm its players share.
+    pub fn realm(&self, coop: &Coop) -> String {
+        if self.solo() && !coop.in_room() {
+            SOLO.into()
+        } else {
+            coop.url.clone()
+        }
+    }
+    pub fn set_solo(&mut self, solo: bool) {
+        if self.save.solo != Some(solo) {
+            self.save.solo = Some(solo);
+            self.persist();
+            self.listings.clear();
+            self.selected = None;
+            self.listing = None;
+            self.revision += 1;
+        }
+    }
+    /// An economy's answer to the outbox's first job for `server`, solo or realm alike.
+    fn receive(&mut self, server: &str, job: Job, reply: Reply) {
+        if reply.ok {
+            let prefix = format!("{}:", server.trim_end_matches('/'));
+            let linked = if let Action::LinkInventory { tokens } = &job.request.action {
+                self.save.linked.insert(prefix.clone(), tokens.join("|"));
+                true
+            } else {
+                self.save.linked.contains_key(&prefix)
+                    && !matches!(job.request.action, Action::Register { .. })
+            };
+            let shared = reply.inventory.clone();
+            let hero = self.save.heroes.entry(job.key).or_default();
+            if let Some(token) = reply.token {
+                hero.token = token;
+            }
+            if let Some(inventory) = reply.inventory {
+                hero.inventory = inventory;
+            }
+            if let Some(run) = reply.run {
+                hero.run = run;
+            }
+            if linked {
+                if let Some(inventory) = shared {
+                    for (key, hero) in &mut self.save.heroes {
+                        if key.starts_with(&prefix) {
+                            let class = hero.inventory.class;
+                            hero.inventory = inventory.clone();
+                            hero.inventory.class = class;
+                        }
+                    }
+                }
+            }
+            self.listings = reply.listings;
+            self.status = if server == SOLO {
+                "Solo inventory saved".into()
+            } else {
+                "Inventory synchronized".into()
+            };
+        } else {
+            if matches!(job.request.action, Action::LinkInventory { .. }) {
+                self.link_failed = true;
+            }
+            self.status = reply.message;
+        }
+        self.persist();
+        self.revision += 1;
+    }
+    /// The job's credential and run, from the hero the job is for; `None` for a hero this save
+    /// has no credential for.
+    fn signed(&self, job: &Job) -> Option<Request> {
+        let mut request = job.request.clone();
+        if matches!(request.action, Action::Register { .. }) {
+            return Some(request);
+        }
+        let hero = self.save.heroes.get(&job.key)?;
+        request.token = hero.token.clone();
+        if let Action::Reward { run, .. } = &mut request.action {
+            if run.is_empty() {
+                *run = hero.run.clone();
+            }
+        }
+        Some(request)
+    }
+    /// Drain the solo jobs through the solo ledger, at once: there is no one to wait for.
+    fn solo_tick(&mut self, class: u8) {
+        self.server = SOLO.into();
+        self.connected = true;
+        if self.ledger.is_none() {
+            let loaded = solo_path().map(|p| crate::local_state::read_to_string(&p));
+            let state = match loaded {
+                Some(Ok(text)) => match serde_json::from_str::<LedgerState>(&text) {
+                    Ok(state) => state,
+                    Err(error) => {
+                        self.status = format!("Solo save could not be read; preserve it for recovery: {error}");
+                        self.read_only = true;
+                        self.revision += 1;
+                        return;
+                    }
+                },
+                Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => {
+                    self.status = format!("Solo save could not be read: {e}");
+                    self.read_only = true;
+                    self.revision += 1;
+                    return;
+                }
+                _ => LedgerState::default(),
+            };
+            self.ledger = Some(Ledger::new(state, Catalog::load()));
+        }
+        self.link_classes(SOLO, class);
+        let Some(mut ledger) = self.ledger.take() else { return };
+        let mut host = SoloHost::new();
+        let prefix = format!("{SOLO}:");
+        for _ in 0..32 {
+            let Some(index) = self.save.pending.iter().position(|j| j.key.starts_with(&prefix)) else {
+                break;
+            };
+            let Some(request) = self.signed(&self.save.pending[index]) else {
+                self.status = "Missing solo hero credential; restore survivors-inventory.json from backup".into();
+                break;
+            };
+            let reply = ledger.handle(request, &mut host);
+            if reply.retry {
+                self.status = reply.message;
+                self.revision += 1;
+                break;
+            }
+            let job = self.save.pending.remove(index);
+            self.receive(SOLO, job, reply);
+        }
+        self.ledger = Some(ledger);
     }
     pub fn hero(&self, server: &str, class: u8) -> Option<&HeroSave> {
         self.save.heroes.get(&Self::key(server, class)).or_else(|| {
@@ -169,11 +385,33 @@ impl Equipment {
         hero.inventory.class = class;
         Some(hero)
     }
+    /// The hero's active quests in `zone` as the in-run tracker shows them, with this run's
+    /// unsent kills folded in, and the achievements the hero holds.
+    pub fn journal(
+        &self,
+        coop: &Coop,
+        run: &Run,
+        zone: &str,
+    ) -> Option<(Vec<super::quests::Line>, &std::collections::BTreeMap<String, u64>)> {
+        let hero = self.hero(&self.realm(coop), run.class.id)?;
+        let lines = super::quests::live(&self.catalog, &hero.inventory, zone, run.class.id, run, &self.tallied, self.boss_counted);
+        Some((lines, &hero.inventory.achievements))
+    }
     pub fn busy(&self) -> bool {
         self.read_only
     }
     pub fn online(&self) -> bool {
         self.connected
+    }
+    /// Whether an accept, abandon or turn-in for this quest is still waiting on the ledger.
+    pub fn quest_busy(&self, quest: &str) -> bool {
+        self.read_only
+            || self.save.pending.iter().any(|job| match &job.request.action {
+                Action::AcceptQuest { quest: pending }
+                | Action::AbandonQuest { quest: pending }
+                | Action::TurnInQuest { quest: pending } => pending == quest,
+                _ => false,
+            })
     }
     pub fn item_busy(&self, item: u64) -> bool {
         self.read_only
@@ -295,12 +533,23 @@ impl Equipment {
             );
         }
     }
-    fn rewards(&mut self, run: &Run, gold: u32) {
+    /// Queue what the run has earned since the last batch; `end` is the party size of a run
+    /// that is over, which also reports its gold and best-of progress.
+    fn rewards(&mut self, run: &Run, gold: u32, end: Option<u32>) {
         let delta = std::array::from_fn::<_, 3, _>(|i| {
             run.equipment_kills[i].saturating_sub(self.counted[i])
         });
         let boss_names = run.boss_loot.iter().skip(self.boss_counted).cloned().collect::<Vec<_>>();
-        if delta != [0; 3] || gold > 0 || !boss_names.is_empty() {
+        let mut progress = super::quests::kill_ticks(run, &mut self.tallied);
+        if delta != [0; 3] || gold > 0 || !boss_names.is_empty() || !progress.is_empty() || end.is_some() {
+            progress.extend(super::quests::run_ticks(run));
+            if let Some(party) = end {
+                use asr_coop::quests::{Kind, Tick};
+                progress.push(Tick { kind: Kind::Gold, target: String::new(), n: gold });
+                if run.won && party > 1 {
+                    progress.push(Tick { kind: Kind::Party, target: String::new(), n: party });
+                }
+            }
             self.queue(
                 self.run_key.clone(),
                 Action::Reward {
@@ -310,6 +559,7 @@ impl Equipment {
                     boss: delta[2],
                     boss_names,
                     gold,
+                    progress,
                 },
             );
             self.counted = run.equipment_kills;
@@ -340,10 +590,12 @@ fn begin(
 ) {
     gear.open = false;
     run.spell_damage.clear();
-    gear.ensure_hero(&coop.url, run.class.id, &coop.name);
-    gear.run_key = Equipment::key(&coop.url, run.class.id);
+    let url = gear.realm(&coop);
+    gear.ensure_hero(&url, run.class.id, &coop.name);
+    gear.run_key = Equipment::key(&url, run.class.id);
     gear.counted = [0; 3];
     gear.boss_counted = 0;
+    gear.tallied.clear();
     gear.reward_t = 0.;
     gear.finished = false;
     let zone_name = selection.stage_def().name;
@@ -354,12 +606,12 @@ fn begin(
         .find(|(_, z)| z.name == zone_name)
         .map(|(id, _)| id.clone())
     {
-        gear.action(&coop.url, run.class.id, Action::BeginRun { zone });
+        gear.action(&url, run.class.id, Action::BeginRun { zone });
     } else {
         gear.finished = true;
         gear.status = "Equipment drops are not available for this map".into();
     }
-    if let Some(hero) = gear.view(&coop.url, run.class.id) {
+    if let Some(hero) = gear.view(&url, run.class.id) {
         run.gear_look = hero
             .inventory
             .items
@@ -410,18 +662,22 @@ fn rewards(
     gear.reward_t += time.delta_secs();
     if gear.reward_t >= 10. || run.boss_loot.len() > gear.boss_counted {
         gear.reward_t = 0.;
-        gear.rewards(&run, 0);
+        gear.rewards(&run, 0, None);
     }
 }
-fn finish(run: Res<Run>, mut gear: ResMut<Equipment>) {
+/// How many players a run that ends now had.
+fn party(coop: &Coop) -> u32 {
+    coop.room.as_ref().map_or(1, |room| room.members.len() as u32)
+}
+fn finish(run: Res<Run>, coop: Res<Coop>, mut gear: ResMut<Equipment>) {
     if !gear.finished {
-        gear.rewards(&run, run.gold);
+        gear.rewards(&run, run.gold, Some(party(&coop)));
         gear.finished = true;
     }
 }
-fn settle_exit(mut exits: MessageReader<AppExit>, run: Res<Run>, mut gear: ResMut<Equipment>) {
+fn settle_exit(mut exits: MessageReader<AppExit>, run: Res<Run>, coop: Res<Coop>, mut gear: ResMut<Equipment>) {
     if exits.read().next().is_some() && !gear.finished {
-        gear.rewards(&run, run.gold);
+        gear.rewards(&run, run.gold, Some(party(&coop)));
         gear.finished = true;
     }
 }
@@ -434,32 +690,35 @@ fn network(
     let Some(class) = selection.class_def().map(|c| c.id) else {
         return;
     };
+    let url = gear.realm(&coop);
     if gear.open {
-        gear.ensure_hero(&coop.url, class, &coop.name);
+        gear.ensure_hero(&url, class, &coop.name);
     }
     if gear.read_only {
+        return;
+    }
+    if url == SOLO {
+        gear.solo_tick(class);
         return;
     }
     gear.timer += time.delta_secs();
     gear.refresh_t += time.delta_secs();
     #[cfg(not(target_arch = "wasm32"))]
     {
-        if gear.server != coop.url {
+        let prefix = format!("{}:", url.trim_end_matches('/'));
+        if gear.server != url {
             gear.connection = None;
             gear.connected = false;
             gear.flight = false;
-            gear.server = coop.url.clone();
+            gear.server = url.clone();
             gear.listings.clear();
             gear.link_failed = false;
         }
-        let relevant = gear.save.pending.iter().any(|j| {
-            j.key
-                .starts_with(&format!("{}:", coop.url.trim_end_matches('/')))
-        });
+        let relevant = gear.save.pending.iter().any(|j| j.key.starts_with(&prefix));
         if gear.connection.is_none() && (gear.open || relevant) && gear.timer >= 3. {
             gear.timer = 0.;
             gear.connection = Some(std::sync::Mutex::new(asr_coop::transport::connect(
-                coop.url.clone(),
+                url.clone(),
             )));
             gear.status = "Connecting to shared inventory and auctions…".into();
             gear.revision += 1;
@@ -496,47 +755,7 @@ fn network(
                     }
                     let job = gear.save.pending.remove(0);
                     gear.flight = false;
-                    if reply.ok {
-                        let prefix = format!("{}:", coop.url.trim_end_matches('/'));
-                        let linked = if let Action::LinkInventory { tokens } = &job.request.action {
-                            gear.save.linked.insert(prefix.clone(), tokens.join("|"));
-                            true
-                        } else {
-                            gear.save.linked.contains_key(&prefix)
-                                && !matches!(job.request.action, Action::Register { .. })
-                        };
-                        let shared = reply.inventory.clone();
-                        let hero = gear.save.heroes.entry(job.key).or_default();
-                        if let Some(token) = reply.token {
-                            hero.token = token;
-                        }
-                        if let Some(inventory) = reply.inventory {
-                            hero.inventory = inventory;
-                        }
-                        if let Some(run) = reply.run {
-                            hero.run = run;
-                        }
-                        if linked {
-                            if let Some(inventory) = shared {
-                                for (key, hero) in &mut gear.save.heroes {
-                                    if key.starts_with(&prefix) {
-                                        let class = hero.inventory.class;
-                                        hero.inventory = inventory.clone();
-                                        hero.inventory.class = class;
-                                    }
-                                }
-                            }
-                        }
-                        gear.listings = reply.listings;
-                        gear.status = "Inventory synchronized".into();
-                    } else {
-                        if matches!(job.request.action, Action::LinkInventory { .. }) {
-                            gear.link_failed = true;
-                        }
-                        gear.status = reply.message;
-                    }
-                    gear.persist();
-                    gear.revision += 1;
+                    gear.receive(&url, job, reply);
                 }
                 Err(reason) | Ok(Server::Error { reason }) => {
                     gear.status = format!("Shared economy unavailable: {reason}. Pending transactions are saved for retry.");
@@ -558,36 +777,22 @@ fn network(
             gear.revision += 1;
         }
         if gear.connected && !gear.flight {
-            gear.link_classes(&coop.url, class);
+            gear.link_classes(&url, class);
             if gear.save.pending.is_empty() && gear.open && gear.refresh_t > 5. {
                 gear.refresh_t = 0.;
-                gear.action(&coop.url, class, Action::Refresh);
+                gear.action(&url, class, Action::Refresh);
             }
-            if let Some(index) = gear.save.pending.iter().position(|j| {
-                j.key
-                    .starts_with(&format!("{}:", coop.url.trim_end_matches('/')))
-            }) {
+            if let Some(index) = gear.save.pending.iter().position(|j| j.key.starts_with(&prefix)) {
                 if index != 0 {
                     let job = gear.save.pending.remove(index);
                     gear.save.pending.insert(0, job);
                 }
-                let key = gear.save.pending[0].key.clone();
-                if !matches!(gear.save.pending[0].request.action, Action::Register { .. }) {
-                    if let Some(hero) = gear.save.heroes.get(&key).cloned() {
-                        gear.save.pending[0].request.token = hero.token;
-                        if let Action::Reward { run, .. } = &mut gear.save.pending[0].request.action
-                        {
-                            if run.is_empty() {
-                                *run = hero.run;
-                            }
-                        }
-                    } else {
-                        gear.status =
-                            "Missing hero credential; restore survivors-inventory.json from backup"
-                                .into();
-                        return;
-                    }
-                }
+                let Some(request) = gear.signed(&gear.save.pending[0]) else {
+                    gear.status =
+                        "Missing hero credential; restore survivors-inventory.json from backup".into();
+                    return;
+                };
+                gear.save.pending[0].request = request;
                 if gear.persist() {
                     let request = gear.save.pending[0].request.clone();
                     let sent = gear
@@ -605,9 +810,5 @@ fn network(
                 gear.timer = 0.;
             }
         }
-    }
-    #[cfg(target_arch = "wasm32")]
-    if gear.open {
-        gear.status = "Shared inventory currently requires the desktop build".into();
     }
 }

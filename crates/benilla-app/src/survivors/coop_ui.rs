@@ -16,8 +16,6 @@ struct Panel;
 struct ScrollPanel;
 #[derive(Component)]
 pub(super) struct OpenCoop;
-#[derive(Component)]
-struct PartyText;
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 enum Page {
     #[default]
@@ -64,33 +62,12 @@ struct Editor {
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Editor>()
         .add_systems(Update, skin::hover.after(render))
-        .add_systems(Startup, setup.after(super::hud::setup_hud))
         .add_systems(
             Update,
             (toggle, controls, render, scroll_dialog)
                 .chain()
                 .after(super::hud::show_panels),
         );
-}
-fn setup(mut commands: Commands, font: Res<HudFont>) {
-    commands.spawn((
-        PartyText,
-        Visibility::Hidden,
-        Text::new(""),
-        TextFont {
-            font: font.0.clone(),
-            font_size: 12.,
-            ..default()
-        },
-        TextColor(skin::TEXT),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(22.),
-            top: Val::Px(110.),
-            ..default()
-        },
-        GlobalZIndex(450),
-    ));
 }
 fn toggle(
     inventory: Res<super::inventory::Equipment>,
@@ -362,41 +339,8 @@ fn render(
     font: Res<HudFont>,
     selection: Res<Selection>,
     panels: Query<Entity, With<Panel>>,
-    mut party: Query<&mut Text, With<PartyText>>,
     real: Res<Time<Real>>,
 ) {
-    for mut text in &mut party {
-        text.0 = if coop.running {
-            let mut rows = vec![format!(
-                "PARTY  {}",
-                coop.room.as_ref().map_or("", |r| r.code.as_str())
-            )];
-            if let Some(room) = &coop.room {
-                for member in &room.members {
-                    if let Some(p) = coop.players.get(&member.peer) {
-                        rows.push(format!(
-                            "{}  {:.0}/{:.0}{}",
-                            member.name,
-                            p.hp,
-                            p.maximum,
-                            if !p.loaded {
-                                "  Loading"
-                            } else if p.paused {
-                                "  Choosing / paused"
-                            } else if p.hp <= 0. {
-                                "  Fallen"
-                            } else {
-                                ""
-                            }
-                        ));
-                    }
-                }
-            }
-            rows.join("\n")
-        } else {
-            String::new()
-        };
-    }
     let copied = real.elapsed_secs() < editor.copied_until;
     let signature = format!(
         "{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}|{}|{}|{:?}",

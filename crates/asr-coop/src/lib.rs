@@ -3,9 +3,11 @@ use serde::{Deserialize, Serialize};
 pub mod economy;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod economy_store;
+pub mod ledger;
+pub mod quests;
 
 pub const PROTOCOL: u32 = 1;
-pub const BUILD: &str = "asr-elwynn-coop-economy-4";
+pub const BUILD: &str = "asr-elwynn-coop-economy-5";
 pub const MAX_PLAYERS: usize = 4;
 pub const MAX_MESSAGE: usize = 2 * 1024 * 1024;
 

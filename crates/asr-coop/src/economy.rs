@@ -11,6 +11,9 @@ pub struct Catalog {
     pub zones: BTreeMap<String, Zone>,
     #[serde(default)]
     pub sets: BTreeMap<String, SetBonus>,
+    /// Quests and achievements, from their own catalog file.
+    #[serde(skip)]
+    pub quests: crate::quests::QuestCatalog,
 }
 #[derive(Clone, Deserialize)]
 pub struct SetBonus {
@@ -73,8 +76,10 @@ pub struct Drop {
 }
 impl Catalog {
     pub fn load() -> Self {
-        serde_json::from_str(include_str!("../assets/economy_catalog.json"))
-            .expect("bundled ASR item catalog")
+        let mut catalog: Self = serde_json::from_str(include_str!("../assets/economy_catalog.json"))
+            .expect("bundled ASR item catalog");
+        catalog.quests = crate::quests::QuestCatalog::load();
+        catalog
     }
     pub fn definition(&self, id: &str) -> Option<&Definition> {
         self.items.iter().find(|d| d.id == id)
@@ -182,6 +187,24 @@ pub struct Inventory {
     pub gold: u64,
     pub materials: Amounts,
     pub items: Vec<Item>,
+    /// The quest log: accepted quests and their progress.
+    #[serde(default)]
+    pub quests: Vec<crate::quests::QuestState>,
+    /// Quests turned in, and how many times.
+    #[serde(default)]
+    pub quests_done: BTreeMap<String, u32>,
+    /// Achievements earned, and when (seconds since the Unix epoch).
+    #[serde(default)]
+    pub achievements: BTreeMap<String, u64>,
+    /// Counts toward achievements not yet earned, one per criterion.
+    #[serde(default)]
+    pub achievement_progress: BTreeMap<String, Vec<u32>>,
+    /// Every achievement point ever earned; `achievement_points` is what is left to spend.
+    #[serde(default)]
+    pub achievement_total: u32,
+    /// The quest catalog revision this hero was last brought forward to.
+    #[serde(default)]
+    pub quest_rev: u32,
 }
 impl Inventory {
     pub fn bonuses(&self, catalog: &Catalog) -> Amounts {
@@ -291,6 +314,19 @@ pub enum Action {
         #[serde(default)]
         boss_names: Vec<String>,
         gold: u32,
+        /// Quest and achievement progress this batch; bosses and the clear the ledger counts
+        /// itself.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        progress: Vec<crate::quests::Tick>,
+    },
+    AcceptQuest {
+        quest: String,
+    },
+    AbandonQuest {
+        quest: String,
+    },
+    TurnInQuest {
+        quest: String,
     },
 }
 #[derive(Clone, Default, Serialize, Deserialize)]

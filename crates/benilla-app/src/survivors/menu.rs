@@ -15,10 +15,6 @@ use crate::glue::art::{tc_rect, GlueArt, GOLD};
 use crate::glue::widgets::{GlueDisabled, HoverLabel, LockHighlight};
 use crate::glue::GlueClicks;
 
-/// The shown race's bonuses on the pick plate, one per line.
-#[derive(Component)]
-pub(super) struct PickDescription;
-
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum MenuAction {
     Race(u8),

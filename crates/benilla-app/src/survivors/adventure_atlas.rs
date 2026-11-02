@@ -3,10 +3,16 @@
 //! Playable battlegrounds are picked here as on the adventure panel; the rest show as locked.
 //! Card art is the original ASR's zone photographs (`assets/atlas`, sources in `sources.json`);
 //! a raid without one falls back to its own loading screen from the player's install.
-use super::{data, front_end as skin, hud::HudFont, inventory::Equipment, Phase, Selection};
+use super::{
+    data, difficulty,
+    front_end::{self as skin, gap, size},
+    hud::HudFont,
+    inventory::Equipment,
+    Phase, Selection,
+};
 use crate::glue::GlueClicks;
 use benilla_assets::{LockRecover, MapCatalogRes, WorldAssets};
-use bevy::prelude::*;
+use bevy::{prelude::*, window::PrimaryWindow};
 use std::collections::HashMap;
 
 #[derive(Component, Clone, Copy)]
@@ -39,6 +45,8 @@ enum Art {
     Photo(&'static str),
     /// The `Map.dbc` row whose loading screen stands in.
     Screen(u32),
+    /// No art of its own: the card is its side's colour under the name.
+    Plain,
 }
 
 struct Place {
@@ -71,7 +79,7 @@ const fn place(
     }
 }
 
-use Art::{Photo, Screen};
+use Art::{Photo, Plain, Screen};
 use Side::{Alliance, Both, Horde};
 
 static PLACES: &[Place] = &[
@@ -147,14 +155,14 @@ static PLACES: &[Place] = &[
         ..place("Ruins of Ahn'Qiraj", Both, Screen(509), "The scarab wall falls",
             "The qiraji swarm through the ruins beyond the Scarab Wall.")
     },
-    place("Teldrassil", Alliance, Screen(1), "The tree of life",
+    place("Teldrassil", Alliance, Plain, "The tree of life",
         "Nightsabers and gnarlpine furbolgs prowl beneath the boughs of the great tree."),
-    place("Mulgore", Horde, Screen(1), "The wide red land",
+    place("Mulgore", Horde, Plain, "The wide red land",
         "Plainstriders, prairie wolves and the quilboar roam the Tauren homeland."),
-    place("Tirisfal Glades", Horde, Screen(0), "The shadowed beginning",
+    place("Tirisfal Glades", Horde, Plain, "The shadowed beginning",
         "Forsaken and Scarlet patrols stalk the misted fields beyond Deathknell."),
-    place("Dun Morogh", Alliance, Screen(0), "The snowy homeland",
-        "Defeat Dun Morogh's final boss to unlock Dwarves and Gnomes."),
+    place("Dun Morogh", Alliance, Plain, "The snowy homeland",
+        "Troggs, Frostmane trolls and wendigo haunt the frozen valleys below Ironforge."),
 ];
 
 /// A map of cards on a seven-column grid, and the path drawn between them.
@@ -257,23 +265,24 @@ fn playable(p: &Place) -> Option<usize> {
         .filter(|&i| super::dungeon::available(&data::MAPS[i]))
 }
 
-fn status(p: &Place, selection: &Selection) -> (String, Color) {
-    if playable(p).is_some_and(|map| !selection.can_visit(map)) {
-        return ("Other faction territory".into(), Color::srgb(0.95, 0.42, 0.36));
+/// Whether the place can be played, one short phrase that never wraps on a card. Which side's
+/// it is shows apart, on [`faction`].
+fn status(p: &Place, selection: &Selection) -> (&'static str, Color) {
+    match playable(p) {
+        Some(map) if !selection.can_visit(map) => ("Other faction", skin::MUTED),
+        Some(_) if selection.cleared.contains(p.map) => ("Cleared", skin::GREEN),
+        Some(_) => ("Open", skin::GOLD),
+        None if data::MAPS.iter().any(|m| m.name == p.map) => ("Needs dungeon pack", skin::RED),
+        None => ("Coming soon", skin::MUTED),
     }
-    let side = match p.side {
+}
+
+/// The side a place belongs to, for its badge; `None` for a place both sides share.
+fn faction(p: &Place) -> Option<(&'static str, Color)> {
+    match p.side {
         Both => None,
-        Alliance => Some(("Alliance", Color::srgb(0.42, 0.62, 1.0))),
-        Horde => Some(("Horde", Color::srgb(0.95, 0.36, 0.3))),
-    };
-    let locked = Color::srgb(0.95, 0.42, 0.36);
-    match (playable(p), side) {
-        (Some(_), Some((side, color))) => (side.into(), color),
-        (Some(_), None) => ("Open".into(), skin::GREEN),
-        (None, _) if data::MAPS.iter().any(|m| m.name == p.map) => {
-            ("Dungeon pack required".into(), locked)
-        }
-        (None, _) => ("Locked".into(), locked),
+        Alliance => Some(("ALLIANCE", skin::ALLIANCE)),
+        Horde => Some(("HORDE", skin::HORDE)),
     }
 }
 
@@ -345,10 +354,56 @@ fn hover(cards: Query<(&Card, &Interaction)>, mut atlas: ResMut<Atlas>) {
     }
 }
 
+/// A faction's small badge: its name in its colour on a dark tag.
+fn badge(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: &str, color: Color) {
+    p.spawn((
+        Node {
+            padding: UiRect::axes(Val::Px(5.), Val::Px(1.)),
+            border: UiRect::all(Val::Px(1.)),
+            border_radius: BorderRadius::all(Val::Px(3.)),
+            flex_shrink: 0.,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0., 0., 0., 0.65)),
+        BorderColor::all(color.with_alpha(0.75)),
+    ))
+    .with_children(|p| {
+        skin::label(p, f, text, size::CAPTION, color);
+    });
+}
+
+/// Five pips, `tier` of them lit.
+fn pips(p: &mut ChildSpawnerCommands, tier: u8) {
+    p.spawn(Node {
+        column_gap: Val::Px(3.),
+        padding: UiRect::all(Val::Px(3.)),
+        border_radius: BorderRadius::all(Val::Px(4.)),
+        align_items: AlignItems::Center,
+        ..default()
+    })
+    .insert(BackgroundColor(Color::srgba(0., 0., 0., 0.55)))
+    .with_children(|p| {
+        for i in 0..5 {
+            p.spawn((
+                Node {
+                    width: Val::Px(6.),
+                    height: Val::Px(6.),
+                    border: UiRect::all(Val::Px(1.)),
+                    border_radius: BorderRadius::all(Val::Px(3.)),
+                    ..default()
+                },
+                BackgroundColor(if i < tier { skin::GOLD } else { Color::NONE }),
+                BorderColor::all(if i < tier { skin::GOLD } else { skin::EDGE }),
+            ));
+        }
+    });
+}
+
 fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, index: usize, at: (f32, f32), height: f32, selected: bool, selection: &Selection) {
     let place = &PLACES[index];
     let open = playable(place).filter(|&map| selection.can_visit(map));
     let (state, color) = status(place, selection);
+    let side = faction(place);
     let mut card = p.spawn((
         Button,
         Card(index),
@@ -365,9 +420,10 @@ fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, index: usize, at: (f32, 
             width: Val::Percent(CARD_W),
             height: Val::Percent(height),
             border: UiRect::all(Val::Px(if selected { 2. } else { 1. })),
-            padding: UiRect::axes(Val::Px(12.), Val::Px(8.)),
+            padding: UiRect::axes(Val::Px(gap::S), Val::Px(6.)),
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::FlexEnd,
+            row_gap: Val::Px(1.),
             overflow: Overflow::clip(),
             ..default()
         },
@@ -392,17 +448,54 @@ fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, index: usize, at: (f32, 
             height: Val::Percent(100.),
             ..default()
         };
-        p.spawn((CardArt(place.art), ImageNode::default(), fill.clone()));
+        if let Art::Plain = place.art {
+            // No photograph: the side's colour, deep, so the name still reads.
+            let tint = side.map_or(skin::GOLD, |(_, c)| c);
+            p.spawn((
+                fill.clone(),
+                BackgroundGradient::from(LinearGradient::to_bottom(vec![
+                    ColorStop::auto(tint.darker(0.45).with_alpha(0.9)),
+                    ColorStop::auto(Color::srgb(0.03, 0.028, 0.024)),
+                ])),
+            ));
+        } else {
+            p.spawn((CardArt(place.art), ImageNode::default(), fill.clone()));
+        }
         // Darker toward the name, and darker still while locked.
         p.spawn((
             fill,
             BackgroundGradient::from(LinearGradient::to_bottom(vec![
                 ColorStop::auto(Color::srgba(0., 0., 0., if open.is_some() { 0.05 } else { 0.35 })),
-                ColorStop::auto(Color::srgba(0., 0., 0., if open.is_some() { 0.7 } else { 0.85 })),
+                ColorStop::auto(Color::srgba(0., 0., 0., if open.is_some() { 0.75 } else { 0.88 })),
             ])),
         ));
-        skin::label(p, f, place.name, 19., if open.is_some() { skin::GOLD } else { skin::TEXT });
-        skin::label(p, f, state, 12., color);
+        // The side's badge and the tier pips, pinned to the top corners.
+        p.spawn(Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(5.),
+            left: Val::Px(5.),
+            right: Val::Px(5.),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|p| {
+            match side {
+                Some((name, color)) => badge(p, f, name, color),
+                None => {
+                    p.spawn(Node::default());
+                }
+            }
+            if let Some(tier) = difficulty::tier(place.map) {
+                pips(p, tier);
+            }
+        });
+        let name = skin::label(p, f, place.name, size::LEAD, if open.is_some() { skin::GOLD } else { skin::TEXT });
+        p.commands().entity(name).insert(skin::shadow());
+        let state = skin::label(p, f, state, size::SMALL, color);
+        p.commands()
+            .entity(state)
+            .insert((skin::shadow(), TextLayout::new_with_linebreak(LineBreak::NoWrap)));
     });
 }
 
@@ -450,12 +543,13 @@ fn path(p: &mut ChildSpawnerCommands, a: (f32, f32), b: (f32, f32), height: f32)
     }
 }
 
-fn chip(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: String, last: bool) {
+/// A boss on the details strip; the last, the final boss, in gold.
+fn boss_chip(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: String, last: bool) {
     p.spawn((
         Node {
-            padding: UiRect::axes(Val::Px(10.), Val::Px(3.)),
+            padding: UiRect::axes(Val::Px(gap::S), Val::Px(2.)),
             border: UiRect::all(Val::Px(1.)),
-            border_radius: BorderRadius::all(Val::Px(11.)),
+            border_radius: BorderRadius::all(Val::Px(9.)),
             flex_shrink: 0.,
             ..default()
         },
@@ -463,9 +557,16 @@ fn chip(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: String, last: bool
         BorderColor::all(if last { skin::GOLD } else { Color::srgb(0.45, 0.22, 0.14) }),
     ))
     .with_children(|p| {
-        skin::label(p, f, text, 13., Color::srgb(0.96, 0.66, 0.45));
+        skin::label(p, f, text, size::SMALL, if last { skin::GOLD } else { Color::srgb(0.96, 0.66, 0.45) });
     });
 }
+
+/// The strip under the map, one fixed height whatever it describes, so the map never moves.
+const DETAILS_H: f32 = 118.;
+const HEADER_H: f32 = 34.;
+const FRAME_PAD: f32 = 18.;
+const FRAME_GAP: f32 = 12.;
+const FRAME_MAX: f32 = 1600.;
 
 fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, selection: &Selection) {
     let open = playable(place).filter(|&map| selection.can_visit(map));
@@ -473,33 +574,51 @@ fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, select
     p.spawn((
         Node {
             width: Val::Percent(100.),
+            height: Val::Px(DETAILS_H),
             flex_shrink: 0.,
-            padding: UiRect::axes(Val::Px(18.), Val::Px(12.)),
+            padding: UiRect::axes(Val::Px(18.), Val::Px(gap::M)),
             border: UiRect::all(Val::Px(1.)),
             border_radius: BorderRadius::all(Val::Px(5.)),
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(5.),
+            row_gap: Val::Px(6.),
+            overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(skin::SURFACE),
         BorderColor::all(skin::EDGE),
     ))
     .with_children(|p| {
-        p.spawn(Node { column_gap: Val::Px(14.), align_items: AlignItems::Baseline, ..default() })
-            .with_children(|p| {
-                skin::label(p, f, place.name, 26., skin::GOLD);
-                skin::label(p, f, place.line, 16., Color::srgb(0.96, 0.66, 0.45));
-                skin::label(p, f, state, 14., color);
-                if let Some(map) = data::all_maps().iter().find(|m| m.name == place.map) {
-                    skin::label(p, f, map.zone, 12., skin::MUTED);
-                }
+        p.spawn(Node {
+            width: Val::Percent(100.),
+            column_gap: Val::Px(gap::M),
+            align_items: AlignItems::Center,
+            flex_shrink: 0.,
+            ..default()
+        })
+        .with_children(|p| {
+            skin::label(p, f, place.name, size::TITLE, skin::GOLD);
+            skin::label(p, f, place.line, size::LEAD, Color::srgb(0.96, 0.66, 0.45));
+            if let Some(map) = data::all_maps().iter().find(|m| m.name == place.map) {
+                skin::label(p, f, map.zone, size::SMALL, skin::MUTED);
+            }
+            p.spawn(Node {
+                flex_grow: 1.,
+                ..default()
             });
-        skin::label(p, f, place.blurb, 15., skin::TEXT);
+            if let Some(tier) = difficulty::tier(place.map) {
+                skin::chip(p, f, format!("Tier {}", difficulty::numeral(tier)), skin::GOLD);
+            }
+            if let Some((side, color)) = faction(place) {
+                skin::chip(p, f, side, color);
+            }
+            skin::chip(p, f, state, color);
+        });
+        skin::label(p, f, place.blurb, size::BODY, skin::TEXT);
         p.spawn(Node {
             flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(8.),
-            row_gap: Val::Px(6.),
-            margin: UiRect::top(Val::Px(4.)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.),
+            row_gap: Val::Px(gap::XS),
             ..default()
         })
         .with_children(|p| {
@@ -512,7 +631,7 @@ fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, select
                         if at == 0 {
                             b.name.to_string()
                         } else {
-                            format!("{}:{:02} · {}", at / 60, at % 60, b.name)
+                            format!("{}:{:02}  ·  {}", at / 60, at % 60, b.name)
                         }
                     })
                     .collect(),
@@ -526,12 +645,26 @@ fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, select
             };
             let n = chips.len();
             for (i, text) in chips.into_iter().enumerate() {
-                chip(p, f, text, i + 1 == n);
+                boss_chip(p, f, text, i + 1 == n);
+            }
+            let unlocks: Vec<_> = super::races::RACES
+                .iter()
+                .filter(|race| super::races::unlock_zone(race.id) == Some(place.map))
+                .map(|race| race.name)
+                .collect();
+            if !unlocks.is_empty() {
+                let what = if selection.cleared.contains(place.map) { "Unlocked" } else { "Clear to unlock" };
+                let note = skin::label(p, f, format!("{what}: {}", unlocks.join(", ")), size::SMALL, skin::GREEN);
+                p.commands().entity(note).insert(Node {
+                    margin: UiRect::left(Val::Px(gap::S)),
+                    ..default()
+                });
             }
         });
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw(
     mut commands: Commands,
     font: Option<Res<HudFont>>,
@@ -539,10 +672,15 @@ fn draw(
     selection: Res<Selection>,
     phase: Res<State<Phase>>,
     roots: Query<Entity, With<Root>>,
-    mut last: Local<Option<(u64, u32, bool)>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    ui_scale: Res<UiScale>,
+    mut last: Local<Option<(u64, u32, bool, (u32, u32))>>,
 ) {
     let show = atlas.open && *phase.get() == Phase::Menu;
-    let key = (atlas.revision, selection.version, show);
+    let canvas = windows.single().map_or(Vec2::new(1365., 768.), |w| {
+        Vec2::new(w.width(), w.height()) / ui_scale.0.max(0.01)
+    });
+    let key = (atlas.revision, selection.version, show, (canvas.x as u32, canvas.y as u32));
     if *last == Some(key) {
         return;
     }
@@ -569,8 +707,15 @@ fn draw(
     // A row's height in percent of the map, and a card's within it.
     let row = 100. / f32::from(road.rows);
     let card_h = row / ROW_GAP;
-    // The map keeps the cards' aspect at any width: its height is rows of cards plus gaps.
+    // The map keeps the cards' aspect, as large as the frame leaves room for: the frame is the
+    // header, the map and the details strip, and never taller than the canvas.
     let aspect = COLUMNS / (0.9 / CARD_ASPECT * ROW_GAP * f32::from(road.rows));
+    let room = Vec2::new(
+        (canvas.x * 0.96).min(FRAME_MAX) - 2. * FRAME_PAD - 2.,
+        canvas.y * 0.96 - 2. * FRAME_PAD - 2. - HEADER_H - DETAILS_H - 2. * FRAME_GAP,
+    );
+    let map_w = room.x.min(room.y.max(80.) * aspect);
+    let map_h = map_w / aspect;
     let place_at = |(_, c, r): (usize, u8, u8)| {
         (f32::from(c) * 100. / COLUMNS, f32::from(r) * row + (row - card_h) / 2.)
     };
@@ -591,29 +736,46 @@ fn draw(
         .with_children(|root| {
             root.spawn(skin::panel(Node {
                 width: Val::Percent(96.),
-                max_width: Val::Px(1600.),
-                max_height: Val::Percent(96.),
-                padding: UiRect::all(Val::Px(18.)),
+                max_width: Val::Px(FRAME_MAX),
+                padding: UiRect::all(Val::Px(FRAME_PAD)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(14.),
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(FRAME_GAP),
                 ..default()
             }))
             .with_children(|p| {
-                p.spawn(Node { column_gap: Val::Px(12.), flex_shrink: 0., ..default() })
-                    .with_children(|p| {
-                        for (i, (title, detail, _)) in TABS.iter().enumerate() {
-                            p.spawn(Node { width: Val::Px(260.), ..default() }).with_children(|p| {
-                                skin::button(p, f, title, detail, Action::Tab(i as u8), true, i == tab, true);
-                            });
-                        }
-                        p.spawn(Node { flex_grow: 1., ..default() });
-                        p.spawn(Node { width: Val::Px(120.), ..default() }).with_children(|p| {
-                            skin::button(p, f, "Close", "Esc", Action::Close, false, false, true);
-                        });
-                    });
+                // The title and the tabs on one fixed row; the open tab lit, Close at the end.
                 p.spawn(Node {
                     width: Val::Percent(100.),
-                    aspect_ratio: Some(aspect),
+                    height: Val::Px(HEADER_H),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(gap::S),
+                    flex_shrink: 0.,
+                    ..default()
+                })
+                .with_children(|p| {
+                    skin::label(p, f, "ADVENTURE", size::HEADING, skin::GOLD);
+                    let detail = skin::label(p, f, TABS[tab].1, size::SMALL, skin::MUTED);
+                    p.commands().entity(detail).insert(Node {
+                        margin: UiRect::left(Val::Px(gap::XS)),
+                        ..default()
+                    });
+                    p.spawn(Node {
+                        flex_grow: 1.,
+                        ..default()
+                    });
+                    for (i, (title, _, _)) in TABS.iter().enumerate() {
+                        skin::tab_state(p, f, title, Action::Tab(i as u8), i == tab);
+                    }
+                    p.spawn(Node {
+                        width: Val::Px(gap::M),
+                        ..default()
+                    });
+                    skin::tab(p, f, "Close", Action::Close);
+                });
+                p.spawn(Node {
+                    width: Val::Px(map_w),
+                    height: Val::Px(map_h),
                     flex_shrink: 0.,
                     ..default()
                 })
@@ -630,7 +792,7 @@ fn draw(
         });
 }
 
-/// Photographs from the bundle; the loading screen through `Map.dbc` → `LoadingScreens.dbc`.
+// Photographs from the bundle; the loading screen through `Map.dbc` → `LoadingScreens.dbc`.
 fn art(
     maps: Option<Res<MapCatalogRes>>,
     mut assets: Option<ResMut<WorldAssets>>,
@@ -662,6 +824,7 @@ fn art(
                     node.image = image;
                 }
             }
+            Art::Plain => {}
         }
     }
 }

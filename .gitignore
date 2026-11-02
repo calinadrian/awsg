@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/target-desktop/
 **/*.rs.bk
 # Cargo.lock IS committed (this workspace produces binaries).
 

@@ -129,6 +129,9 @@ enum Packet {
         equipment_kills: [u32; 3],
         #[serde(default)]
         boss_loot: Vec<String>,
+        /// Kills by creature name, `[normal, elite]`, for every player's quests.
+        #[serde(default)]
+        tally: Vec<(String, [u32; 2])>,
         /// Each guest's last applied `seq`, so guests can drop acknowledged hits.
         #[serde(default, with = "peer_map")]
         acks: HashMap<u32, u32>,
@@ -855,6 +858,7 @@ fn receive(
                         revive_progress,
                         equipment_kills,
                         boss_loot,
+                        tally,
                         acks,
                         elapsed,
                         kills,
@@ -881,6 +885,7 @@ fn receive(
                         coop.revive_progress = revive_progress;
                         run.equipment_kills = equipment_kills;
                         run.boss_loot = boss_loot;
+                        run.tally = tally.into_iter().take(super::quests::MAX_TALLY).collect();
                         telegraphs.restore(warnings);
                         let me = coop.peer;
                         coop.replay.extend(
@@ -1439,6 +1444,7 @@ fn transmit(
             revive_progress: coop.revive_progress.clone(),
             equipment_kills: run.equipment_kills,
             boss_loot: run.boss_loot.clone(),
+            tally: run.tally.iter().map(|(name, n)| (name.clone(), *n)).collect(),
             acks: coop.acks.clone(),
             elapsed: run.elapsed,
             kills: run.kills,
@@ -1588,6 +1594,7 @@ pub(super) fn apply_guest_hits(
                 xp: enemy.xp,
                 boss: enemy.boss,
                 boss_name: enemy.boss.then(|| enemy.def.name.to_owned()),
+                name: enemy.def.name,
                 spawn_cost: if enemy.home.is_none() {
                     super::horde_spawning::cost(enemy.def)
                 } else {
@@ -1664,6 +1671,7 @@ mod tests {
             revive_progress: HashMap::from([(1, 0.5)]),
             equipment_kills: [0; 3],
             boss_loot: Vec::new(),
+            tally: vec![("Kobold Vermin".into(), [3, 0])],
             acks: HashMap::from([(1, 42)]),
             elapsed: 3.,
             kills: 0,

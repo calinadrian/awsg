@@ -74,11 +74,14 @@ impl Source {
 const ROWS: usize = 32;
 const WIDTH: f32 = 280.0;
 const ROW_H: f32 = 17.0;
-/// Below the 192-unit minimap cluster.
-const TOP: f32 = 198.0;
+/// Below the 192-unit minimap cluster, inset 4 from the top.
+const TOP: f32 = 204.0;
 
 #[derive(Component)]
 struct Meter;
+/// The column down the right edge under the minimap: this meter, then the quest tracker.
+#[derive(Component)]
+pub(super) struct RightStack;
 #[derive(Component)]
 struct MeterRow(usize);
 #[derive(Component)]
@@ -245,14 +248,27 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, meters: Query<(), W
         return;
     }
     let f = &font.0;
-    commands
+    let stack = commands
         .spawn((
-            Meter,
+            RightStack,
             Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(8.0),
                 top: Val::Px(TOP),
                 width: Val::Px(WIDTH),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            GlobalZIndex(85),
+        ))
+        .id();
+    commands
+        .spawn((
+            Meter,
+            ChildOf(stack),
+            Node {
+                width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(1.0),
                 padding: UiRect::all(Val::Px(4.0)),
@@ -261,7 +277,6 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, meters: Query<(), W
             },
             BackgroundColor(Color::srgba(0.02, 0.025, 0.02, 0.72)),
             BorderColor::all(Color::srgb(0.42, 0.38, 0.23)),
-            GlobalZIndex(85),
             Visibility::Hidden,
         ))
         .with_children(|panel| {
@@ -418,7 +433,8 @@ fn paint(
     let Ok(mut visibility) = meters.single_mut() else {
         return;
     };
-    let shown = *phase.get() != Phase::Menu;
+    // Not behind the pause menu or the results, which have the screen to themselves.
+    let shown = matches!(*phase.get(), Phase::Playing | Phase::LevelUp);
     let want = if shown {
         Visibility::Inherited
     } else {

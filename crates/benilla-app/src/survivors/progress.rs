@@ -57,7 +57,7 @@ fn track(
             changed |= progress.cleared_zones.insert(selection.stage_def().name.into());
         }
     }
-    if let Some(hero) = selection.class_def().and_then(|class| gear.hero(&coop.url, class.id)) {
+    if let Some(hero) = selection.class_def().and_then(|class| gear.hero(&gear.realm(&coop), class.id)) {
         for id in &hero.inventory.cleared_zones {
             if let Some(zone) = gear.catalog.zones.get(id) {
                 changed |= progress.cleared_zones.insert(zone.name.clone());
@@ -70,6 +70,10 @@ fn track(
     }).map(|race| race.id).collect();
     if selection.unlocked_races != unlocked {
         selection.unlocked_races = unlocked;
+        selection.version += 1;
+    }
+    if selection.cleared != progress.cleared_zones {
+        selection.cleared.clone_from(&progress.cleared_zones);
         selection.version += 1;
     }
     if *phase.get() != Phase::Menu { return; }

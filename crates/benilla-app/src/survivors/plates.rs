@@ -493,12 +493,10 @@ fn spawn_boss_bar(commands: &mut Commands, f: &Handle<Font>) -> Entity {
     let rows: Vec<BarRow> = (0..MAX_BARS).map(|_| spawn_bar_row(commands, f)).collect();
     let mut children = vec![yell];
     children.extend(rows.iter().map(|row| row.frame));
+    // In the clock's column ([`super::hud::TopStack`]), so it always starts under the run's line.
     commands
         .spawn((
             Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(66.0),
-                width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 row_gap: Val::Px(2.0),
@@ -547,6 +545,7 @@ pub(super) fn boss_bar(
     mut shown: Query<&mut Visibility, Without<BossBar>>,
     mut nodes: Query<&mut Node>,
     mut texts: Query<&mut Text>,
+    stack: Query<Entity, With<super::hud::TopStack>>,
 ) {
     if let Some((_, left)) = run.yell.as_mut() {
         *left -= time.delta_secs();
@@ -555,8 +554,9 @@ pub(super) fn boss_bar(
         }
     }
     let Ok((bar, mut vis)) = bars.single_mut() else {
-        if let Some(font) = font {
-            spawn_boss_bar(&mut commands, &font.0);
+        if let (Some(font), Ok(stack)) = (font, stack.single()) {
+            let bar = spawn_boss_bar(&mut commands, &font.0);
+            commands.entity(stack).add_child(bar);
         }
         return;
     };

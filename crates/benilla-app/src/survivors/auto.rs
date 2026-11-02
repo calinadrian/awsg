@@ -175,6 +175,7 @@ pub(super) fn drive(
     loading: Res<crate::loading_screen::LoadingScreen>,
     heroes: Query<(), With<Hero>>,
     enemies: Query<&Enemy>,
+    gear: Res<super::inventory::Equipment>,
 ) {
     let dt = time.delta_secs();
     auto.wait += dt;
@@ -190,7 +191,7 @@ pub(super) fn drive(
                 selection.look = None;
                 selection.version += 1;
                 auto.wait = 0.0;
-            } else if heroes.is_empty() || loading.covering() {
+            } else if heroes.is_empty() || loading.covering() || gear.open {
                 auto.wait = 0.0;
             } else if auto.wait > 2.0 && auto.wait < 3.0 {
                 auto.capture_once(&mut commands, "menu".into());

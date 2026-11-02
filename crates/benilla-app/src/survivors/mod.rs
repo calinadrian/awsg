@@ -18,6 +18,7 @@ mod party_frames;
 mod coop_ui;
 mod damage_meter;
 mod data;
+mod difficulty;
 mod drive;
 mod dungeon;
 mod elwynn;
@@ -36,6 +37,7 @@ mod hero;
 mod horde_spawning;
 mod hud;
 mod jewelry;
+mod journal_ui;
 mod inventory;
 mod inventory_ui;
 pub(crate) mod inventory_outfit;
@@ -48,6 +50,7 @@ mod minimap;
 mod options;
 mod plates;
 mod progress;
+mod quests;
 mod races;
 mod reward_axes;
 mod rewards;
@@ -59,6 +62,7 @@ mod text_edit;
 mod talents;
 mod talents_data;
 mod telegraphs;
+mod ui_audit;
 mod unit_frames;
 mod units;
 
@@ -87,7 +91,7 @@ impl Plugin for SurvivorsPlugin {
             .add_plugins(grade::plugin)
             .add_plugins(options::plugin)
             .add_plugins((coop::plugin, coop_ui::plugin, progress::plugin, party_frames::plugin))
-            .add_plugins((damage_meter::plugin, text_edit::plugin))
+            .add_plugins((damage_meter::plugin, text_edit::plugin, quests::plugin))
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
@@ -109,6 +113,7 @@ impl Plugin for SurvivorsPlugin {
             .init_resource::<plates::NameplateSettings>()
             .init_resource::<talents::TalentScreen>()
             .init_resource::<hud::Offer>()
+            .init_resource::<hud::Replay>()
             .init_resource::<cards::PendingPick>()
             .add_message::<abilities::Hit>()
             .add_message::<enemies::Loot>()
@@ -128,6 +133,7 @@ impl Plugin for SurvivorsPlugin {
             .add_plugins(appearance::plugin)
             .add_plugins((inventory::plugin, inventory_ui::plugin, inventory_outfit::plugin))
             .add_plugins(adventure_atlas::plugin)
+            .add_plugins(ui_audit::plugin)
             .add_systems(
                 Update,
                 loot_ground::seat
@@ -306,6 +312,8 @@ pub(super) struct Selection {
     /// The FEATURES dials, kept per class (and the race and sex they were set on); a hero with no
     /// entry wears its display's own look.
     pub features: std::collections::HashMap<(usize, u8, u8), appearance::Features>,
+    /// The zones whose final boss this player has beaten, kept by [`progress`].
+    pub cleared: std::collections::BTreeSet<String>,
 }
 
 impl Selection {
@@ -473,6 +481,8 @@ pub(super) struct Run {
     pub equipment_kills: [u32; 3],
     /// Boss names whose kills are ready to resolve through the zone's named loot table.
     pub boss_loot: Vec<String>,
+    /// Kills by creature name, `[normal, elite]`, toward quests and achievements.
+    pub tally: std::collections::BTreeMap<String, [u32; 2]>,
     pub thorns: f32,
     pub thorns_t: f32,
     pub thorns_spell: u32,
@@ -543,6 +553,7 @@ impl Default for Run {
             gear_look: Vec::new(),
             equipment_kills: [0; 3],
             boss_loot: Vec::new(),
+            tally: Default::default(),
             thorns: 0.0,
             thorns_t: 0.0,
             thorns_spell: 0,
