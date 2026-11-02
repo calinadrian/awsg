@@ -18,9 +18,26 @@ use super::Run;
 
 /// The art's side, in texels.
 const ART: u32 = 128;
-/// The old telegraphs' gold: the edge pale and bright, the fill deeper.
-const EDGE: [u8; 3] = [255, 236, 140];
-const FILL: [u8; 3] = [255, 196, 40];
+/// What a telegraph asks of the player, by its colour: gold to step out of (red in its last
+/// moments), green to stand in, purple to stand in together.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(super) enum Tone {
+    #[default]
+    Gold,
+    Green,
+    Purple,
+}
+
+/// The art's colours, edge and fill, by palette: the old telegraphs' gold (the edge pale and
+/// bright, the fill deeper), the red gold turns before it lands, green and purple.
+const PALETTES: [([u8; 3], [u8; 3]); 4] = [
+    ([255, 236, 140], [255, 196, 40]),
+    ([255, 160, 140], [235, 45, 30]),
+    ([180, 255, 180], [50, 220, 80]),
+    ([232, 180, 255], [172, 70, 240]),
+];
+/// How long before it lands a gold telegraph turns red.
+const RED_BEFORE: f32 = 0.4;
 
 /// One telegraph texture: each texel's colour and alpha from its place, `[-1, 1]` on both axes.
 fn art(images: &mut Assets<Image>, texel: impl Fn(Vec2) -> ([u8; 3], f32)) -> Handle<Image> {
@@ -66,7 +83,7 @@ pub(super) struct Art {
 }
 
 impl Art {
-    fn new(images: &mut Assets<Image>) -> Self {
+    fn new(images: &mut Assets<Image>, (lit, body): ([u8; 3], [u8; 3])) -> Self {
         Self {
             cones: [45.0_f32, 40.0].map(|degrees| {
                 let half = degrees.to_radians();
@@ -76,11 +93,11 @@ impl Art {
                     let mask = inside(d, 0.96, 0.03) * inside(angle, half, 0.02);
                     let edge =
                         (1.0 - inside(d, 0.9, 0.03)).max(1.0 - inside(angle, half - 0.05, 0.02));
-                    (EDGE, mask * (0.14 + 0.81 * edge))
+                    (lit, mask * (0.14 + 0.81 * edge))
                 });
                 let fill = art(images, |p| {
                     (
-                        FILL,
+                        body,
                         0.28 * inside(p.length(), 0.95, 0.03)
                             * inside(p.x.atan2(p.y).abs(), half, 0.02),
                     )
@@ -92,24 +109,24 @@ impl Art {
                 let edge = inside(d, 0.96, 0.03) * (1.0 - inside(d, 0.9, 0.03));
                 let glow = inside(d, 0.96, 0.03) * ((d - 0.6) / 0.33).clamp(0.0, 1.0);
                 if edge > 0.0 {
-                    (EDGE, 0.95 * edge + 0.3 * glow)
+                    (lit, 0.95 * edge + 0.3 * glow)
                 } else {
-                    (FILL, 0.14 * inside(d, 0.92, 0.03) + 0.3 * glow)
+                    (body, 0.14 * inside(d, 0.92, 0.03) + 0.3 * glow)
                 }
             }),
-            disc: art(images, |p| (FILL, 0.28 * inside(p.length(), 0.95, 0.05))),
+            disc: art(images, |p| (body, 0.28 * inside(p.length(), 0.95, 0.05))),
             // x runs across the lane, y down it (to its far end at +1).
             lane: art(images, |p| {
                 let side = 1.0 - inside(p.x.abs(), 0.9, 0.05);
                 let end = 1.0 - inside(p.y, 0.93, 0.04);
                 let edge = side.max(end);
                 if edge > 0.0 {
-                    (EDGE, 0.95 * edge)
+                    (lit, 0.95 * edge)
                 } else {
-                    (FILL, 0.14)
+                    (body, 0.14)
                 }
             }),
-            solid: art(images, |_| (FILL, 0.3)),
+            solid: art(images, |_| (body, 0.3)),
         }
     }
 }
@@ -139,6 +156,7 @@ enum Shape {
 
 struct Telegraph {
     shape: Shape,
+    tone: Tone,
     /// The run seconds it appears, finishes filling and goes.
     start: f32,
     full: f32,
@@ -153,7 +171,7 @@ pub(super) struct Telegraphs(Vec<Telegraph>);
 
 impl Telegraphs {
     /// The host sends warnings as shapes and encounter times; each guest projects its own art.
-    pub(super) fn snapshot(&self) -> Vec<[f32; 13]> {
+    pub(super) fn snapshot(&self) -> Vec<[f32; 14]> {
         self.0
             .iter()
             .map(|t| {
@@ -174,11 +192,12 @@ impl Telegraphs {
                 };
                 [
                     kind, a.x, a.y, a.z, b.x, b.y, b.z, radius, half, len, t.start, t.full, t.end,
+                    t.tone as u8 as f32,
                 ]
             })
             .collect()
     }
-    pub(super) fn restore(&mut self, warnings: Vec<[f32; 13]>) {
+    pub(super) fn restore(&mut self, warnings: Vec<[f32; 14]>) {
         let old = self.snapshot();
         let mut next = Vec::new();
         for w in warnings
@@ -213,6 +232,11 @@ impl Telegraphs {
                 .map_or_else(Vec::new, |i| std::mem::take(&mut self.0[i].outline));
             next.push(Telegraph {
                 shape,
+                tone: match w[13] as u8 {
+                    1 => Tone::Green,
+                    2 => Tone::Purple,
+                    _ => Tone::Gold,
+                },
                 start: w[10],
                 full: w[11],
                 end: w[12],
@@ -221,9 +245,16 @@ impl Telegraphs {
         }
         self.0 = next;
     }
+    /// Colours the telegraph last marked.
+    pub fn tone(&mut self, tone: Tone) {
+        if let Some(t) = self.0.last_mut() {
+            t.tone = tone;
+        }
+    }
     /// A ground hazard stays filled while it can still deal damage.
     pub fn hazard(&mut self, center: Vec3, radius: f32, now: f32, secs: f32) {
         self.0.push(Telegraph {
+            tone: Tone::Gold,
             shape: Shape::Circle { center, radius },
             start: now,
             full: now,
@@ -241,6 +272,7 @@ impl Telegraphs {
         secs: f32,
     ) {
         self.0.push(Telegraph {
+            tone: Tone::Gold,
             shape: Shape::Cone {
                 center,
                 dir,
@@ -256,6 +288,7 @@ impl Telegraphs {
     /// A circle of `radius` at `center`, filling for `secs` until what it warns of lands.
     pub fn circle(&mut self, center: Vec3, radius: f32, now: f32, secs: f32) {
         self.0.push(Telegraph {
+            tone: Tone::Gold,
             shape: Shape::Circle { center, radius },
             start: now,
             full: now + secs,
@@ -273,6 +306,7 @@ impl Telegraphs {
             return;
         }
         self.0.push(Telegraph {
+            tone: Tone::Gold,
             shape: Shape::Lane {
                 from,
                 dir: way / len,
@@ -337,7 +371,7 @@ pub(super) fn draw_telegraphs(
     run: Res<Run>,
     phase: Res<State<super::Phase>>,
     mut images: ResMut<Assets<Image>>,
-    mut textures: Local<Option<Art>>,
+    mut textures: Local<Option<[Art; 4]>>,
     mut tele: ResMut<Telegraphs>,
     decals: WorldDecal,
     cam: Query<Entity, With<WorldCamera>>,
@@ -353,10 +387,17 @@ pub(super) fn draw_telegraphs(
     if tele.0.is_empty() {
         return;
     }
-    let art = textures.get_or_insert_with(|| Art::new(&mut images));
+    let palettes = textures.get_or_insert_with(|| PALETTES.map(|p| Art::new(&mut images, p)));
     let Ok(cam) = cam.single() else { return };
     for t in &mut tele.0 {
         let fill = ((now - t.start) / (t.full - t.start).max(1e-3)).clamp(0.0, 1.0);
+        let palette = match t.tone {
+            Tone::Gold if t.full > t.start && t.full - now < RED_BEFORE => 1,
+            Tone::Gold => 0,
+            Tone::Green => 2,
+            Tone::Purple => 3,
+        };
+        let art = &palettes[palette];
         let (anchor, outline, texture, inner) = match t.shape {
             Shape::Cone {
                 center,

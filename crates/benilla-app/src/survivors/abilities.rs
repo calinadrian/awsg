@@ -340,13 +340,13 @@ pub(super) fn cast_abilities(
     let now = run.elapsed;
     let mut foes: Vec<Foe> = enemies
         .iter()
-        .filter(|(_, _, e)| !e.dead)
+        .filter(|(_, _, e)| !e.dead && !e.untargetable())
         .map(|(e, tf, en)| Foe {
             e,
             pos: tf.translation,
             dist: hero::reach(hpos, tf.translation),
             radius: en.radius,
-            priority: en.boss || en.home.is_some(),
+            priority: en.priority(),
             marked: run.passives.marks.get(&e).is_some_and(|m| m.hunter),
             health: en.hp / en.max_hp,
         })
@@ -354,14 +354,14 @@ pub(super) fn cast_abilities(
     foes.sort_by(|a, b| a.dist.total_cmp(&b.dist));
     let passive_targets: Vec<_> = enemies
         .iter()
-        .filter(|(_, _, e)| !e.dead)
+        .filter(|(_, _, e)| !e.dead && !e.untargetable())
         .map(|(e, tf, en)| {
             (
                 e,
                 tf.translation,
                 en.hp,
                 en.max_hp,
-                en.boss || en.home.is_some(),
+                en.priority(),
             )
         })
         .collect();
@@ -779,13 +779,13 @@ pub(super) fn tick_areas(
     let now = run.elapsed;
     let live: Vec<Foe> = enemies
         .iter()
-        .filter(|(_, _, e)| !e.dead)
+        .filter(|(_, _, e)| !e.dead && !e.untargetable())
         .map(|(e, tf, en)| Foe {
             e,
             pos: tf.translation,
             dist: 0.0,
             radius: en.radius,
-            priority: en.boss || en.home.is_some(),
+            priority: en.priority(),
             marked: run.passives.marks.get(&e).is_some_and(|m| m.hunter),
             health: en.hp / en.max_hp,
         })
@@ -941,7 +941,7 @@ pub(super) fn apply_hits(
             if let Ok((_, _, center, ..)) = enemies.get(h.target) {
                 let c = center.translation;
                 for (e, _, tf, en, ..) in enemies.iter() {
-                    if e != h.target && !en.dead && flat(tf.translation - c).length() <= h.splash {
+                    if e != h.target && !en.dead && !en.untargetable() && flat(tf.translation - c).length() <= h.splash {
                         all.push(Hit {
                             target: e,
                             damage: h.damage * 0.7,
@@ -973,8 +973,8 @@ pub(super) fn apply_hits(
                 } else {
                     0.0
                 },
-                roaming_elite: en.home.is_none() && super::elwynn::is_roaming_elite(en.def),
-                elite: en.home.is_some() || super::elwynn::is_roaming_elite(en.def),
+                roaming_elite: en.home.is_none() && en.def.roaming_elite,
+                elite: en.home.is_some() || en.def.roaming_elite,
             });
             run.kills += 1;
             let healing = run.talents.stat(15)
@@ -993,7 +993,8 @@ pub(super) fn apply_hits(
         let Ok((e, guid, tf, mut en, mut store, mut marks)) = enemies.get_mut(h.target) else {
             continue;
         };
-        if en.dead {
+        // A warded boss shrugs off every blow until its guards fall.
+        if en.dead || en.ward {
             continue;
         }
         let mut dmg = h.damage * super::spell_passives::marked_multiplier(&run, e);
@@ -1131,7 +1132,7 @@ pub(super) fn apply_hits(
 
     // The over-time ticks, once a second each.
     for (e, guid, tf, mut en, mut store, mut marks) in &mut enemies {
-        if en.dead || en.dots.is_empty() {
+        if en.dead || en.dots.is_empty() || en.ward {
             continue;
         }
         let mut dealt = 0.0;

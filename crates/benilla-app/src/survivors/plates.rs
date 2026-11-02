@@ -223,6 +223,7 @@ pub(super) fn enemy_plates(
     ),
     mut by_unit: Local<HashMap<Entity, Entity>>,
     mut bucket: Local<crate::smart_rect::SmartBucket>,
+    hud: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<super::hud::TopStack>>,
 ) {
     use crate::vplates::{
         gx_px, plate_basis, text_px, BAR_H, BAR_OFF_X, BAR_OFF_Y, BAR_W, LEVEL_H, LEVEL_OFF_X,
@@ -264,6 +265,12 @@ pub(super) fn enemy_plates(
     let (pw, ph) = (gx(PLATE_W), gx(PLATE_H));
     let bar_top = ph - gx(BAR_OFF_Y) - gx(BAR_H);
     let ui_viewport = viewport / s;
+    // The clock, the run's line and the boss bars: a plate under them is unreadable and makes
+    // them so, and every boss there already has its name in a bar.
+    let covered = hud.single().ok().map(|(node, at)| {
+        let inv = node.inverse_scale_factor();
+        Rect::from_center_size(at.translation * inv, node.size() * inv)
+    });
     let near = hero.single().ok().map(|h| h.translation);
     let mut encounters = Vec::new();
     let mut nearby = Vec::new();
@@ -336,6 +343,9 @@ pub(super) fn enemy_plates(
             screen.y / s + ph,
         );
         let seated = bucket.resolve(desired, ui_viewport);
+        if covered.is_some_and(|hud| !hud.intersect(seated).is_empty()) {
+            continue;
+        }
         bucket.claim(seated);
         *v = Visibility::Inherited;
         if let Ok(mut n) = nodes.get_mut(plate) {
@@ -527,7 +537,7 @@ fn grouped(n: f32) -> String {
 fn engaged(e: &Enemy) -> bool {
     e.boss
         || e.home.is_some_and(|h| h.awake)
-        || (super::elwynn::is_roaming_elite(e.def) && e.hp < e.max_hp)
+        || (e.def.roaming_elite && e.hp < e.max_hp)
 }
 
 /// Show a bar for every engaged boss and elite in range, bosses first and then the nearest,
@@ -615,7 +625,7 @@ pub(super) fn boss_bar(
         if let Ok(mut n) = nodes.get_mut(row.fill) {
             n.width = Val::Percent(share * 100.0);
         }
-        set(&mut texts, row.name, e.def.name.to_string());
+        set(&mut texts, row.name, super::mechanics::bar_name(e));
         set(
             &mut texts,
             row.health,

@@ -1,0 +1,154 @@
+# roster
+Kobold Vermin #26 hp 24 dmg 3 speed 5 swing 1.6 scale 0.9 xp 1 level 1 from 0 cost 1 big false roam false last false ranged 0 phases 0
+Young Wolf #165 hp 18 dmg 3 speed 7.4 swing 1.3 scale 0.7 xp 1 level 2 from 30 cost 1 big false roam false last false ranged 0 phases 0
+Murloc Streamrunner #31 hp 30 dmg 4 speed 5.6 swing 1.6 scale 1 xp 1 level 3 from 72 cost 1 big false roam false last false ranged 0 phases 0
+Kobold Geomancer #163 hp 30 dmg 6 speed 5 swing 3.2 scale 1 xp 2 level 4 from 120 cost 2 big false roam false last false ranged 133 phases 0
+Defias Thug #2323 hp 44 dmg 6 speed 5.4 swing 1.8 scale 1 xp 2 level 5 from 180 cost 1.5 big false roam false last false ranged 0 phases 0
+Riverpaw Brute #175 hp 120 dmg 9 speed 4.6 swing 2.2 scale 1.1 xp 4 level 6 from 270 cost 3 big false roam false last false ranged 0 phases 0
+Prowler #644 hp 50 dmg 7 speed 7.6 swing 1.3 scale 1.3 xp 2 level 7 from 360 cost 1.5 big false roam false last false ranged 0 phases 0
+Defias Rogue Wizard #2315 hp 40 dmg 7 speed 5 swing 3.2 scale 1 xp 3 level 8 from 450 cost 2 big false roam false last false ranged 116 phases 0
+Defias Enforcer #2324 hp 170 dmg 12 speed 4.8 swing 2.2 scale 1.25 xp 4 level 9 from 540 cost 3 big false roam false last false ranged 0 phases 0
+Hogger #384 hp 3600 dmg 22 speed 5.6 swing 1 scale 3.5 xp 35 level 11 from 180 cost 0 big false roam false last false ranged 0 phases 4
+Mother Fang #7536 hp 9000 dmg 30 speed 6 swing 1 scale 0.83 xp 60 level 10 from 360 cost 0 big false roam false last false ranged 0 phases 3
+Princess #703 hp 28000 dmg 46 speed 6.2 swing 1 scale 4.46 xp 100 level 11 from 720 cost 0 big false roam false last false ranged 0 phases 2
+Morgan the Collector #2322 hp 52500 dmg 54 speed 6.6 swing 1 scale 8.24 xp 150 level 12 from 960 cost 0 big false roam false last true ranged 0 phases 2
+Kobold Taskmaster #163 hp 600 dmg 18 speed 5.4 swing 2 scale 2.03 xp 25 level 10 from 210 cost 0 big false roam true last false ranged 0 phases 0
+Gruff Swiftbite #246 hp 800 dmg 22 speed 6.6 swing 1.6 scale 1.62 xp 28 level 10 from 480 cost 0 big false roam true last false ranged 0 phases 0
+Fedfennel #204 hp 17000 dmg 38 speed 5.4 swing 1 scale 2.98 xp 80 level 11 from 540 cost 0 big false roam false last false ranged 0 phases 0
+Bellygrub #377 hp 1000 dmg 26 speed 5 swing 2.4 scale 2.97 xp 30 level 11 from 780 cost 0 big false roam true last false ranged 0 phases 0
+# spawn stats (hp, damage, speed) by run second
+horde Kobold Vermin @0: 97.416 3.3958 5.250
+horde Young Wolf @0: 73.062 3.3958 7.770
+horde Murloc Streamrunner @0: 121.770 4.5277 5.880
+horde Kobold Geomancer @0: 121.770 6.7915 5.250
+horde Defias Thug @0: 178.596 6.7915 5.670
+horde Riverpaw Brute @0: 487.080 10.1873 4.830
+horde Prowler @0: 202.950 7.9235 7.980
+horde Defias Rogue Wizard @0: 162.360 7.9235 5.250
+horde Defias Enforcer @0: 690.030 13.5831 5.040
+roaming Kobold Taskmaster @0: 2361.600 16.2997 5.670
+roaming Gruff Swiftbite @0: 3148.800 19.9218 6.930
+roaming Bellygrub @0: 3936.000 23.5440 5.250
+lair Kobold Taskmaster @0 slain 0: 3690.000 22.8196
+lair Kobold Taskmaster @0 slain 2: 5535.000 25.1015
+lair Gruff Swiftbite @0 slain 0: 4920.000 27.8906
+lair Gruff Swiftbite @0 slain 2: 7380.000 30.6796
+lair Fedfennel @0 slain 0: 80155.000 34.4105
+lair Fedfennel @0 slain 2: 80155.000 34.4105
+lair Bellygrub @0 slain 0: 6150.000 32.9616
+lair Bellygrub @0 slain 2: 9225.000 36.2578
+horde Kobold Vermin @60: 111.350 3.6851 5.250
+horde Young Wolf @60: 83.513 3.6851 7.770
+horde Murloc Streamrunner @60: 139.188 4.9135 5.880
+horde Kobold Geomancer @60: 139.188 7.3702 5.250
+horde Defias Thug @60: 204.142 7.3702 5.670
+horde Riverpaw Brute @60: 556.752 11.0553 4.830
+horde Prowler @60: 231.980 8.5985 7.980
+horde Defias Rogue Wizard @60: 185.584 8.5985 5.250
+horde Defias Enforcer @60: 788.732 14.7404 5.040
+roaming Kobold Taskmaster @60: 2696.806 17.6884 5.670
+roaming Gruff Swiftbite @60: 3595.741 21.6192 6.930
+roaming Bellygrub @60: 4494.676 25.5500 5.250
+lair Kobold Taskmaster @60 slain 0: 4166.010 24.7364
+lair Kobold Taskmaster @60 slain 2: 6249.015 27.2101
+lair Gruff Swiftbite @60 slain 0: 5554.680 30.2334
+lair Gruff Swiftbite @60 slain 2: 8332.020 33.2567
+lair Fedfennel @60 slain 0: 80155.000 34.4105
+lair Fedfennel @60 slain 2: 80155.000 34.4105
+lair Bellygrub @60 slain 0: 6943.349 35.7304
+lair Bellygrub @60 slain 2: 10415.023 39.3034
+horde Kobold Vermin @180: 176.720 4.5856 5.250
+horde Young Wolf @180: 132.540 4.5856 7.770
+horde Murloc Streamrunner @180: 220.901 6.1142 5.880
+horde Kobold Geomancer @180: 220.901 9.1713 5.250
+horde Defias Thug @180: 323.987 9.1713 5.670
+horde Riverpaw Brute @180: 883.602 13.7569 4.830
+horde Prowler @180: 368.168 10.6998 7.980
+horde Defias Rogue Wizard @180: 294.534 10.6998 5.250
+horde Defias Enforcer @180: 1251.770 18.3426 5.040
+roaming Kobold Taskmaster @180: 4213.992 22.0111 5.670
+roaming Gruff Swiftbite @180: 5618.656 26.9025 6.930
+roaming Bellygrub @180: 7023.319 31.7938 5.250
+lair Kobold Taskmaster @180 slain 0: 5317.290 29.1178
+lair Kobold Taskmaster @180 slain 2: 7975.935 32.0295
+lair Gruff Swiftbite @180 slain 0: 7089.720 35.5884
+lair Gruff Swiftbite @180 slain 2: 10634.580 39.1472
+lair Fedfennel @180 slain 0: 80155.000 34.4105
+lair Fedfennel @180 slain 2: 80155.000 34.4105
+lair Bellygrub @180 slain 0: 8862.150 42.0590
+lair Bellygrub @180 slain 2: 13293.226 46.2649
+horde Kobold Vermin @540: 969.110 10.1561 5.250
+horde Young Wolf @540: 726.832 10.1561 7.770
+horde Murloc Streamrunner @540: 1211.387 13.5414 5.880
+horde Kobold Geomancer @540: 1211.387 20.3121 5.250
+horde Defias Thug @540: 1776.702 20.3121 5.670
+horde Riverpaw Brute @540: 4845.550 30.4682 4.830
+horde Prowler @540: 2018.979 23.6975 7.980
+horde Defias Rogue Wizard @540: 1615.183 23.6975 5.250
+horde Defias Enforcer @540: 6864.529 40.6243 5.040
+roaming Kobold Taskmaster @540: 21599.809 48.7491 5.670
+roaming Gruff Swiftbite @540: 28799.746 59.5823 6.930
+roaming Bellygrub @540: 35999.680 70.4154 5.250
+lair Kobold Taskmaster @540 slain 0: 25092.000 46.6432
+lair Kobold Taskmaster @540 slain 2: 37638.000 51.3075
+lair Gruff Swiftbite @540 slain 0: 25092.000 57.0084
+lair Gruff Swiftbite @540 slain 2: 37638.000 62.7092
+lair Fedfennel @540 slain 0: 80155.000 34.4105
+lair Fedfennel @540 slain 2: 80155.000 34.4105
+lair Bellygrub @540 slain 0: 25092.000 67.3735
+lair Bellygrub @540 slain 2: 37638.000 74.1109
+horde Kobold Vermin @900: 3347.214 20.7142 5.250
+horde Young Wolf @900: 2510.410 20.7142 7.770
+horde Murloc Streamrunner @900: 4184.017 27.6189 5.880
+horde Kobold Geomancer @900: 4184.017 41.4284 5.250
+horde Defias Thug @900: 6136.559 41.4284 5.670
+horde Riverpaw Brute @900: 16736.068 62.1426 4.830
+horde Prowler @900: 6973.361 48.3331 7.980
+horde Defias Rogue Wizard @900: 5578.690 48.3331 5.250
+horde Defias Enforcer @900: 23709.430 82.8568 5.040
+roaming Kobold Taskmaster @900: 72377.141 99.4281 5.670
+roaming Gruff Swiftbite @900: 96502.852 121.5233 6.930
+roaming Bellygrub @900: 120628.555 143.6184 5.250
+lair Kobold Taskmaster @900 slain 0: 41328.000 70.7407
+lair Kobold Taskmaster @900 slain 2: 61992.000 77.8147
+lair Gruff Swiftbite @900 slain 0: 41328.000 86.4608
+lair Gruff Swiftbite @900 slain 2: 61992.000 95.1069
+lair Fedfennel @900 slain 0: 80155.000 34.4105
+lair Fedfennel @900 slain 2: 80155.000 34.4105
+lair Bellygrub @900 slain 0: 41328.000 102.1810
+lair Bellygrub @900 slain 2: 61992.000 112.3991
+horde Kobold Vermin @1200: 7181.507 33.9577 5.250
+horde Young Wolf @1200: 5386.130 33.9577 7.770
+horde Murloc Streamrunner @1200: 8976.885 45.2769 5.880
+horde Kobold Geomancer @1200: 8976.885 67.9154 5.250
+horde Defias Thug @1200: 13166.097 67.9154 5.670
+horde Riverpaw Brute @1200: 35907.539 101.8731 4.830
+horde Prowler @1200: 14961.473 79.2346 7.980
+horde Defias Rogue Wizard @1200: 11969.180 79.2346 5.250
+horde Defias Enforcer @1200: 50869.012 135.8308 5.040
+roaming Kobold Taskmaster @1200: 153315.078 162.9969 5.670
+roaming Gruff Swiftbite @1200: 204420.109 199.2185 6.930
+roaming Bellygrub @1200: 255525.109 235.4400 5.250
+lair Kobold Taskmaster @1200 slain 0: 41328.000 95.8422
+lair Kobold Taskmaster @1200 slain 2: 61992.000 105.4264
+lair Gruff Swiftbite @1200 slain 0: 41328.000 117.1404
+lair Gruff Swiftbite @1200 slain 2: 61992.000 128.8545
+lair Fedfennel @1200 slain 0: 80155.000 34.4105
+lair Fedfennel @1200 slain 2: 80155.000 34.4105
+lair Bellygrub @1200 slain 0: 43050.000 138.4387
+lair Bellygrub @1200 slain 2: 64575.000 152.2826
+boss Hogger: 16974.000 19.9218 5.600
+boss Mother Fang: 42435.000 27.1662 6.000
+boss Princess: 132020.000 41.6548 6.200
+boss Morgan the Collector: 247537.500 48.8991 6.600
+# spawner
+@0: rate 0.5400 heated 1.6200 boss 0.2430 floor 4 6 elite every 55.00
+@60: rate 0.7470 heated 2.2410 boss 0.3362 floor 5 9 elite every 52.50
+@180: rate 1.2510 heated 3.1250 boss 0.5629 floor 8 14 elite every 47.50
+@540: rate 3.4830 heated 3.4830 boss 1.5674 floor 18 30 elite every 32.50
+@900: rate 6.7950 heated 6.7950 boss 3.0577 floor 28 46 elite every 25.00
+@1200: rate 10.3800 heated 10.3800 boss 4.6710 floor 36 60 elite every 25.00
+party 1: x1.0000 cap 50
+party 2: x1.3360 cap 67
+party 3: x1.6720 cap 84
+party 4: x2.0080 cap 100

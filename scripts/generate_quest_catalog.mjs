@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const economy = JSON.parse(readFileSync(join(root, 'crates/asr-coop/assets/economy_catalog.json'), 'utf8'));
-const REVISION = 1;
+const REVISION = 2;
 
 // Story order within each faction's road; tier per difficulty.rs.
 const ZONES = [
@@ -52,6 +52,9 @@ const ZONES = [
   ['stonetalon', 4, 'Seereth Stonebreak', 'Sun Rock Retreat', 'Venture Co. Logger', 22,
     ['Iron in the Forest', 'The Venture Co. levels Stonetalon’s forests with machines like XT:4. Stop the machines and the men who run them.'],
     ['Windshear Crag', 'Gerenzo Wrenchwhistle runs the whole operation from Windshear Crag. Shut him down.']],
+  ['hall-of-thanes', 2, 'Keeper Brannoc', 'the Thanes’ Rest', 'Dark Iron Intruder', 18,
+    ['Robbers in the Tomb', 'Dark Iron raiders have broken into the burial halls of the old thanes. Faldrim Anvilmar leads the first band; start with him.'],
+    ['The Dirge', 'Durgen Dirgehammer means to wake the thanes and bind them to the Dark Iron. Silence his hammer before the dead answer.']],
   ['stranglethorn', 5, 'Lieutenant Doren', 'the Rebel Camp', 'Lashtail Raptor', 25,
     ['The Uncatchable', 'Sin’Dall, the tiger no hunter has caught, prowls the northern jungle. Be the first.'],
     ['King of the Jungle', 'King Bangalash rules the panthers of Stranglethorn. Only the greatest hunters come back with his pelt.']],

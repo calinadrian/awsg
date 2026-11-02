@@ -264,6 +264,7 @@ const CHARGE: u32 = 100;
 static GUARDIANS: [EnemyDef; 4] = [
     EnemyDef {
         roaming_elite: true,
+        kit: 1,
         from: 210.0,
         ..foe(
             (
@@ -282,18 +283,24 @@ static GUARDIANS: [EnemyDef; 4] = [
     },
     EnemyDef {
         roaming_elite: true,
+        kit: 2,
         from: 480.0,
         ..foe(
             ("Gruff Swiftbite", 246, 1.62, 800.0, 22.0, 1.6, 6.6, 28, 0.0),
             10,
         )
     },
-    foe(
-        ("Fedfennel", 204, 2.98, 17000.0, 38.0, 1.0, 5.4, 80, 9.0),
-        11,
-    ),
+    EnemyDef {
+        kit: 3,
+        lord: true,
+        ..foe(
+            ("Fedfennel", 204, 2.98, 17000.0, 38.0, 1.0, 5.4, 80, 9.0),
+            11,
+        )
+    },
     EnemyDef {
         roaming_elite: true,
+        kit: 4,
         from: 780.0,
         ..foe(
             ("Bellygrub", 377, 2.97, 1000.0, 26.0, 2.4, 5.0, 30, 0.0),
@@ -302,38 +309,32 @@ static GUARDIANS: [EnemyDef; 4] = [
     },
 ];
 
-/// Elwynn's roster, for its map; any other battleground keeps the mode's own.
+/// Elwynn's roster, for its map; any other battleground is built on its tables.
 pub(super) fn roster(map: &MapDef) -> Option<Roster> {
     (map.name == "Elwynn Forest").then(|| Roster {
-        enemies: HORDE.to_vec(),
+        enemies: horde(),
         bosses: BOSSES.to_vec(),
-        timed: true,
         guardians: GUARDIANS.to_vec(),
+        crowd: 1.0,
     })
 }
 
-/// Whether a definition belongs to Elwynn's regular horde.
-pub(super) fn is_regular(def: &EnemyDef) -> bool {
-    regular_index(def).is_some()
-}
-
-pub(super) fn regular_index(def: &EnemyDef) -> Option<usize> {
+/// The horde rows with their native budget costs.
+pub(super) fn horde() -> Vec<EnemyDef> {
     HORDE
         .iter()
-        .position(|entry| entry.name == def.name && entry.display == def.display)
+        .zip(super::elwynn_behavior::COSTS)
+        .map(|(def, cost)| EnemyDef { cost, ..*def })
+        .collect()
 }
 
-/// Whether a definition is one of the source's boss rows, Fedfennel included.
-pub(super) fn is_boss(def: &EnemyDef) -> bool {
-    BOSSES
-        .iter()
-        .chain(std::iter::once(&GUARDIANS[2]))
-        .any(|entry| entry.name == def.name && entry.display == def.display)
+pub(super) fn bosses() -> &'static [EnemyDef] {
+    &BOSSES
 }
 
-/// The three elite enemy-table rows also spawn as roaming chasers, independently of lairs.
-pub(super) fn is_roaming_elite(def: &EnemyDef) -> bool {
-    def.roaming_elite
+/// The four elite slots: three roaming elites and the lair lord, Fedfennel.
+pub(super) fn guardians() -> &'static [EnemyDef] {
+    &GUARDIANS
 }
 
 #[cfg(test)]
@@ -367,7 +368,9 @@ mod tests {
         assert_eq!(GUARDIANS[2].hp, 17000.0);
         assert_eq!(GUARDIANS[2].damage, 38.0);
         assert!(GUARDIANS.iter().all(|d| !d.last));
-        assert!(HORDE.iter().all(is_regular));
-        assert!(BOSSES.iter().all(|d| !is_regular(d)));
+        assert_eq!(GUARDIANS.map(|d| d.kit), [1, 2, 3, 4]);
+        assert_eq!(GUARDIANS.map(|d| d.lord), [false, false, true, false]);
+        assert!(horde().iter().all(|d| d.cost > 0.0));
+        assert!(BOSSES.iter().all(|d| d.cost == 0.0));
     }
 }

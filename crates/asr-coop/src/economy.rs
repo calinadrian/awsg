@@ -48,6 +48,26 @@ pub struct Definition {
 fn common_quality() -> String {
     "common".into()
 }
+fn first_tier() -> u8 {
+    1
+}
+/// Item qualities, worst first.
+pub const QUALITIES: [&str; 4] = ["common", "uncommon", "rare", "epic"];
+pub fn quality_rank(quality: &str) -> u32 {
+    QUALITIES.iter().position(|q| *q == quality).unwrap_or(0) as u32
+}
+/// A tier's item level for common gear at +0.
+const TIER_LEVEL: [u32; 5] = [10, 20, 26, 32, 42];
+/// A full set's slot weights summed, about fifteen for most classes.
+const SET_WEIGHT: f32 = 15.0;
+/// The gear score a zone is meant for: nine tenths of a full set of its own floor-quality gear.
+pub fn recommended_score(tier: u8) -> u32 {
+    let floor = [0, 1, 2, 2, 2][usize::from(tier.clamp(1, 5) - 1)];
+    (0.9 * item_level(tier, floor, 0) as f32 * SET_WEIGHT).round() as u32
+}
+fn item_level(tier: u8, quality: u32, upgrade: u8) -> u32 {
+    TIER_LEVEL[usize::from(tier.clamp(1, 5) - 1)] + 3 * quality + 2 * u32::from(upgrade)
+}
 #[derive(Clone, Deserialize)]
 pub struct Upgrade {
     pub cost: Amounts,
@@ -56,6 +76,9 @@ pub struct Upgrade {
 #[derive(Clone, Deserialize)]
 pub struct Zone {
     pub name: String,
+    /// The zone's tier along the roads, 1 (a starting zone) to 5; its gear's power follows it.
+    #[serde(default = "first_tier")]
+    pub tier: u8,
     pub equipment: Vec<Drop>,
     #[serde(default)]
     pub boss_drops: Vec<BossDrop>,
@@ -75,6 +98,10 @@ pub struct Drop {
     pub weight: u32,
 }
 impl Catalog {
+    /// A zone's tier, 1 for a zone it does not know.
+    pub fn tier(&self, zone: &str) -> u8 {
+        self.zones.get(zone).map_or(1, |z| z.tier)
+    }
     pub fn load() -> Self {
         let mut catalog: Self = serde_json::from_str(include_str!("../assets/economy_catalog.json"))
             .expect("bundled ASR item catalog");
@@ -117,6 +144,23 @@ impl Definition {
         self.armor.as_deref().is_none_or(|kind| {
             kind == armor || (matches!(class, 1 | 2) && kind == "mail")
         })
+    }
+    /// Item level: its zone's tier, then its quality and upgrades.
+    pub fn item_level(&self, catalog: &Catalog, upgrade: u8) -> u32 {
+        item_level(catalog.tier(&self.zone), quality_rank(&self.quality), upgrade)
+    }
+    /// Its share of a hero's gear score: item level by how much of a set its slot carries.
+    pub fn score(&self, catalog: &Catalog, upgrade: u8) -> u32 {
+        let weight = match self.slot.as_str() {
+            "main_hand" if self.two_handed => 2.2,
+            "main_hand" => 1.6,
+            "head" | "chest" | "legs" => 1.2,
+            "shoulders" | "hands" | "feet" | "belt" => 0.9,
+            "off_hand" | "ranged" => 0.8,
+            "shirt" => 0.2,
+            _ => 0.7,
+        };
+        (self.item_level(catalog, upgrade) as f32 * weight).round() as u32
     }
     pub fn bonuses(&self, level: u8) -> &Amounts {
         if level == 0 {
@@ -207,6 +251,19 @@ pub struct Inventory {
     pub quest_rev: u32,
 }
 impl Inventory {
+    /// The summed score of what this hero wears as `class`.
+    pub fn gear_score(&self, catalog: &Catalog, class: u8) -> u32 {
+        self.items
+            .iter()
+            .filter(|i| i.equipped_for(class))
+            .filter_map(|i| {
+                catalog
+                    .definition(&i.definition)
+                    .filter(|d| d.can_use(class))
+                    .map(|d| d.score(catalog, i.level))
+            })
+            .sum()
+    }
     pub fn bonuses(&self, catalog: &Catalog) -> Amounts {
         let mut result = Amounts::new();
         for item in self.items.iter().filter(|i| i.equipped_for(self.class)) {
@@ -361,5 +418,63 @@ impl std::fmt::Debug for Reply {
             .field("ok", &self.ok)
             .field("message", &self.message)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Gear is what carries a hero up the roads: each tier's weapons and armour outclass the last,
+    /// and every upgrade adds to an item.
+    #[test]
+    fn gear_power_grows_with_tier_and_upgrades() {
+        let catalog = Catalog::load();
+        assert!(catalog.zones.values().all(|z| (1..=5).contains(&z.tier)));
+        let average = |tier: u8, slot: &str, stat: &str| {
+            let values: Vec<u32> = catalog
+                .items
+                .iter()
+                .filter(|d| catalog.tier(&d.zone) == tier && d.slot == slot && !d.two_handed)
+                .filter_map(|d| d.base_bonuses.get(stat).copied())
+                .collect();
+            values.iter().sum::<u32>() as f32 / values.len().max(1) as f32
+        };
+        for tier in 2..=5 {
+            for (slot, stat) in [("main_hand", "damage_bp"), ("chest", "max_health"), ("chest", "damage_reduction_bp")] {
+                assert!(
+                    average(tier, slot, stat) > average(tier - 1, slot, stat),
+                    "tier {tier} {slot} {stat}"
+                );
+            }
+            assert!(recommended_score(tier) > recommended_score(tier - 1));
+        }
+        for item in &catalog.items {
+            let mut last = &item.base_bonuses;
+            assert_eq!(item.upgrades.len(), 5, "{}", item.id);
+            for upgrade in &item.upgrades {
+                assert!(last.iter().all(|(k, v)| upgrade.bonuses.get(k).is_some_and(|n| n >= v)), "{}", item.id);
+                last = &upgrade.bonuses;
+            }
+            if matches!(item.slot.as_str(), "main_hand" | "off_hand" | "ranged") {
+                assert!(item.base_bonuses.contains_key("damage_bp"), "{}", item.id);
+            }
+        }
+    }
+
+    #[test]
+    fn item_level_follows_tier_quality_and_upgrade() {
+        let catalog = Catalog::load();
+        let item = |zone: &str| {
+            catalog
+                .items
+                .iter()
+                .find(|d| d.zone == zone && d.slot == "chest")
+                .unwrap()
+        };
+        let (elwynn, stranglethorn) = (item("elwynn"), item("stranglethorn"));
+        assert!(stranglethorn.item_level(&catalog, 0) > elwynn.item_level(&catalog, 5));
+        assert_eq!(elwynn.item_level(&catalog, 3), elwynn.item_level(&catalog, 0) + 6);
+        assert!(stranglethorn.score(&catalog, 0) > elwynn.score(&catalog, 0));
     }
 }

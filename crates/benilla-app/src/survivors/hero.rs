@@ -362,7 +362,6 @@ pub(super) fn hero_vitals(
     mut hero: Query<(Entity, &Guid, &mut ObjectStore, &mut Marks), With<Hero>>,
     mut fields: MessageWriter<FieldChanged>,
     mut fx: Fx,
-    selection: Res<super::Selection>,
     mut rng: ResMut<super::Rng>,
     coop: Res<super::coop::Coop>,
 ) {
@@ -448,12 +447,8 @@ pub(super) fn hero_vitals(
         units::kill_unit(&mut store);
         marks.clear();
         marks.flush(entity, guid.0, &mut store, &mut fields);
-    } else if if data::roster(selection.map).timed {
-        // The old ASR's battlegrounds are won by slaying their last boss.
-        run.slain_last && !coop.guest()
-    } else {
-        run.elapsed >= data::VICTORY_SECS && !coop.guest()
-    } {
+    } else if run.slain_last && !coop.guest() {
+        // Every battleground is won by slaying its last boss.
         run.won = true;
         // A last flourish before the results.
         fx.cast(entity, 642, &[entity], None);

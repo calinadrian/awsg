@@ -60,6 +60,15 @@ struct Foe {
     dead: bool,
     #[serde(rename = "l", default, skip_serializing_if = "is_false")]
     lair: bool,
+    /// An elite's affixes, as [`super::mechanics::affix`] bits.
+    #[serde(rename = "a", default, skip_serializing_if = "is_zero_u16")]
+    affixes: u16,
+    /// Untouchable behind its guards.
+    #[serde(rename = "w", default, skip_serializing_if = "is_false")]
+    ward: bool,
+    /// Holds up a master's ward, so guests' spells go for it first too.
+    #[serde(rename = "k", default, skip_serializing_if = "is_false")]
+    guard: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Pickup {
@@ -77,6 +86,9 @@ fn is_zero(v: &u8) -> bool {
 }
 fn is_zero_f32(v: &f32) -> bool {
     *v == 0.
+}
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
 }
 fn is_false(v: &bool) -> bool {
     !*v
@@ -144,7 +156,13 @@ enum Packet {
         caches: Vec<[f32; 3]>,
         damage: Vec<(u32, f32)>,
         visuals: Vec<Visual>,
-        warnings: Vec<[f32; 13]>,
+        warnings: Vec<[f32; 14]>,
+        /// The latest boss line, for every player's screen.
+        #[serde(default)]
+        yell: Option<(String, f32)>,
+        /// Where a boss's pull drags each guest since the last snapshot.
+        #[serde(default)]
+        pushes: Vec<(u32, [f32; 3])>,
         paused: bool,
         ended: bool,
         won: bool,
@@ -870,6 +888,8 @@ fn receive(
                         damage,
                         visuals,
                         warnings,
+                        yell,
+                        pushes,
                         paused,
                         ended,
                         won,
@@ -888,6 +908,15 @@ fn receive(
                         run.tally = tally.into_iter().take(super::quests::MAX_TALLY).collect();
                         telegraphs.restore(warnings);
                         let me = coop.peer;
+                        if yell.as_ref().map(|y| &y.0) != run.yell.as_ref().map(|y| &y.0) {
+                            run.yell = yell;
+                        }
+                        for (_, push) in pushes.into_iter().filter(|(peer, _)| *peer == me) {
+                            let push = Vec3::from_array(push);
+                            if push.is_finite() && push.length() < 30. {
+                                run.push += push;
+                            }
+                        }
                         coop.replay.extend(
                             visuals
                                 .into_iter()
@@ -1043,6 +1072,9 @@ fn receive(
                                             .max(0.001)
                                     };
                                     e.max_hp = f.maximum;
+                                    e.affixes = f.affixes;
+                                    e.ward = f.ward;
+                                    e.guard = f.guard;
                                     if f.lair {
                                         e.home = Some(enemies::Home {
                                             pos: Vec3::from_array(f.pos),
@@ -1088,6 +1120,9 @@ fn receive(
                                         if let Some(mut e) = world.get_mut::<Enemy>(entity) {
                                             e.hp = f.hp;
                                             e.max_hp = f.maximum;
+                                            e.affixes = f.affixes;
+                                            e.ward = f.ward;
+                                            e.guard = f.guard;
                                             if f.lair {
                                                 e.home = Some(enemies::Home {
                                                     pos: Vec3::from_array(f.pos),
@@ -1412,6 +1447,9 @@ fn transmit(
                 speed: if mv.speed > 0. { round_to(e.speed, 100.) } else { 0. },
                 dead: e.dead,
                 lair: e.home.is_some(),
+                affixes: e.affixes,
+                ward: e.ward,
+                guard: e.guard,
             });
         }
         let paused = coop.room.as_ref().is_some_and(|r| {
@@ -1456,6 +1494,11 @@ fn transmit(
             damage: std::mem::take(&mut run.coop_damage),
             visuals: std::mem::take(&mut coop.visuals),
             warnings: telegraphs.snapshot(),
+            yell: run.yell.clone(),
+            pushes: std::mem::take(&mut run.coop_push)
+                .into_iter()
+                .map(|(peer, push)| (peer, push.to_array()))
+                .collect(),
             paused,
             ended: *phase.get() == Phase::GameOver,
             won: run.won,
@@ -1564,6 +1607,9 @@ pub(super) fn apply_guest_hits(
         if enemy.dead {
             continue;
         }
+        if enemy.ward {
+            continue;
+        }
         enemy.hp -= hit.damage;
         fx.number(entity, hit.damage, false, units::COLOR_SPELL);
         let boss = enemy.boss || enemy.home.is_some();
@@ -1600,8 +1646,8 @@ pub(super) fn apply_guest_hits(
                 } else {
                     0.0
                 },
-                roaming_elite: enemy.home.is_none() && super::elwynn::is_roaming_elite(enemy.def),
-                elite: enemy.home.is_some() || super::elwynn::is_roaming_elite(enemy.def),
+                roaming_elite: enemy.home.is_none() && enemy.def.roaming_elite,
+                elite: enemy.home.is_some() || enemy.def.roaming_elite,
             });
             units::kill_unit(&mut store);
             marks.clear();
@@ -1650,6 +1696,9 @@ mod tests {
             speed: 0.,
             dead: false,
             lair: false,
+            affixes: 0,
+            ward: false,
+            guard: false,
         };
         let text = serde_json::to_string(&foe).unwrap();
         assert_eq!(
@@ -1683,6 +1732,8 @@ mod tests {
             damage: Vec::new(),
             visuals: Vec::new(),
             warnings: Vec::new(),
+            yell: None,
+            pushes: Vec::new(),
             paused: false,
             ended: false,
             won: false,

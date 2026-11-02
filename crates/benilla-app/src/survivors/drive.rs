@@ -168,11 +168,18 @@ pub(super) fn hold_leash(
     world: super::dungeon::Ground,
     mut player: ResMut<Player>,
     mut hero: Query<&mut Transform, With<Hero>>,
+    mut run: ResMut<super::Run>,
 ) {
     // Not before the controller has taken the body: until then `player.pos` is the reset default,
     // which reads as far outside the leash and would drag the hero to its edge.
     if driven.is_none() || !player.active {
         return;
+    }
+    // A boss's pull drags the hero across the ground before the leash holds him.
+    let push = std::mem::take(&mut run.push);
+    if push.is_finite() {
+        player.pos.x += push.x;
+        player.pos.z += push.z;
     }
     let map = selection.stage_def();
     let center = hero::arena(map);

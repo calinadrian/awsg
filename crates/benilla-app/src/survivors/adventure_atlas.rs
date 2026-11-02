@@ -270,6 +270,7 @@ fn playable(p: &Place) -> Option<usize> {
 fn status(p: &Place, selection: &Selection) -> (&'static str, Color) {
     match playable(p) {
         Some(map) if !selection.can_visit(map) => ("Other faction", skin::MUTED),
+        Some(map) if !selection.unlocked(map) => ("Locked", skin::MUTED),
         Some(_) if selection.cleared.contains(p.map) => ("Cleared", skin::GREEN),
         Some(_) => ("Open", skin::GOLD),
         None if data::MAPS.iter().any(|m| m.name == p.map) => ("Needs dungeon pack", skin::RED),
@@ -331,7 +332,7 @@ fn input(
             atlas.hover = None;
         }
         Action::Pick(i) => {
-            if selection.map != i && selection.can_visit(i) && data::MAPS.get(i).is_some_and(super::dungeon::available) {
+            if selection.map != i && selection.can_visit(i) && selection.unlocked(i) && data::MAPS.get(i).is_some_and(super::dungeon::available) {
                 selection.select_map(i);
             }
         }
@@ -401,7 +402,7 @@ fn pips(p: &mut ChildSpawnerCommands, tier: u8) {
 
 fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, index: usize, at: (f32, f32), height: f32, selected: bool, selection: &Selection) {
     let place = &PLACES[index];
-    let open = playable(place).filter(|&map| selection.can_visit(map));
+    let open = playable(place).filter(|&map| selection.can_visit(map) && selection.unlocked(map));
     let (state, color) = status(place, selection);
     let side = faction(place);
     let mut card = p.spawn((
@@ -568,8 +569,9 @@ const FRAME_PAD: f32 = 18.;
 const FRAME_GAP: f32 = 12.;
 const FRAME_MAX: f32 = 1600.;
 
-fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, selection: &Selection) {
-    let open = playable(place).filter(|&map| selection.can_visit(map));
+/// `score` is the chosen hero's gear score, held against the zone's recommendation.
+fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, selection: &Selection, score: Option<u32>) {
+    let open = playable(place).filter(|&map| selection.can_visit(map) && selection.unlocked(map));
     let (state, color) = status(place, selection);
     p.spawn((
         Node {
@@ -607,11 +609,23 @@ fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, select
             });
             if let Some(tier) = difficulty::tier(place.map) {
                 skin::chip(p, f, format!("Tier {}", difficulty::numeral(tier)), skin::GOLD);
+                let wanted = asr_coop::economy::recommended_score(tier);
+                // Green when the hero's gear is ready for it, red when well short.
+                let color = match score {
+                    Some(have) if have >= wanted => skin::GREEN,
+                    Some(have) if have * 4 >= wanted * 3 => skin::GOLD,
+                    Some(_) => skin::RED,
+                    None => skin::MUTED,
+                };
+                skin::chip(p, f, format!("Gear score {wanted}"), color);
             }
             if let Some((side, color)) = faction(place) {
                 skin::chip(p, f, side, color);
             }
             skin::chip(p, f, state, color);
+            if playable(place).is_some_and(|map| !selection.unlocked(map)) {
+                skin::chip(p, f, difficulty::unlock_hint(place.map), skin::MUTED);
+            }
         });
         skin::label(p, f, place.blurb, size::BODY, skin::TEXT);
         p.spawn(Node {
@@ -674,6 +688,8 @@ fn draw(
     roots: Query<Entity, With<Root>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Res<UiScale>,
+    gear: Res<Equipment>,
+    coop: Res<super::coop::Coop>,
     mut last: Local<Option<(u64, u32, bool, (u32, u32))>>,
 ) {
     let show = atlas.open && *phase.get() == Phase::Menu;
@@ -787,7 +803,11 @@ fn draw(
                         card(map, f, c.0, place_at(c), card_h, current == Some(PLACES[c.0].map), &selection);
                     }
                 });
-                details(p, f, &PLACES[shown], &selection);
+                let score = selection
+                    .class_def()
+                    .and_then(|c| gear.view(&gear.realm(&coop), c.id))
+                    .map(|hero| hero.inventory.gear_score(&gear.catalog, hero.inventory.class));
+                details(p, f, &PLACES[shown], &selection, score);
             });
         });
 }

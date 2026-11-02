@@ -42,6 +42,12 @@ pub(super) struct Enemy {
     pub home: Option<Home>,
     /// A charge under way: the wind-up, then the rush.
     pub charge: Option<Charge>,
+    /// An elite's affixes, as [`super::mechanics::affix`] bits.
+    pub affixes: u16,
+    /// Untouchable while its guards stand.
+    pub ward: bool,
+    /// Raised to hold up a master's ward: every spell goes for it first.
+    pub guard: bool,
     /// A regular Elwynn mob's next short move towards a slot around the hero.
     approach: Option<Approach>,
 }
@@ -53,6 +59,20 @@ struct Approach {
 }
 
 impl Enemy {
+    /// A lair guardian not yet woken: spells pass it by until the hero comes near or strikes it.
+    pub(super) fn asleep(&self) -> bool {
+        self.home.is_some_and(|h| !h.awake)
+    }
+
+    /// Spells pass it by: asleep in its lair, or warded behind its guards.
+    pub(super) fn untargetable(&self) -> bool {
+        self.asleep() || self.ward
+    }
+    /// What spells go for first: bosses, lair guardians and a warded master's guards.
+    pub(super) fn priority(&self) -> bool {
+        self.boss || self.home.is_some() || self.guard
+    }
+
     pub(super) fn relocated(&mut self, pos: Vec3, center: Vec3) {
         self.cast = None;
         if let Some(approach) = self.approach.as_mut() {
@@ -161,7 +181,6 @@ pub(super) struct Dying(f32);
 
 #[derive(Resource, Default)]
 pub(super) struct Spawner {
-    timer: f32,
     source: super::horde_spawning::Spawner,
 }
 
@@ -222,7 +241,7 @@ pub(super) fn spawn_enemy(
     hero: Vec3,
     boss: bool,
 ) -> Entity {
-    if !boss && (super::elwynn::is_regular(def) || super::elwynn::is_roaming_elite(def)) {
+    if !boss && (def.cost > 0.0 || def.roaming_elite) {
         if let Some(slots) = run.horde_spawn_slots.as_mut() {
             if *slots == 0 {
                 return Entity::PLACEHOLDER;
@@ -230,13 +249,53 @@ pub(super) fn spawn_enemy(
             *slots -= 1;
         }
     }
-    // The old ASR's own numbers for its bosses and guardians stand as they are.
-    let scale = if def.phases.is_empty() && !boss {
-        data::hp_scale(run.elapsed)
+    let role = if boss {
+        Role::Boss
+    } else if def.roaming_elite {
+        Role::Roaming
     } else {
-        1.0
+        Role::Horde
     };
-    spawn_with(commands, run, def, pos, hero, boss, scale, None)
+    spawn_with(commands, run, def, pos, hero, role, 0, None)
+}
+
+/// How an enemy entered the fight, which picks its stat curve.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Role {
+    /// An ordinary chaser from the roster's horde rows.
+    Horde,
+    /// An elite row sent with the horde, away from any lair.
+    Roaming,
+    /// An elite holding a lair.
+    Lair,
+    Boss,
+}
+
+/// Health, damage and speed for an enemy spawning now, before co-op scaling. Sampled once at
+/// spawn so enemies already fighting do not gain health with the clock.
+/// Every battleground uses Elwynn's curves; its tier multiplies them.
+pub(super) fn spawn_stats(def: &EnemyDef, role: Role, elapsed: f32, slain: u32) -> (f32, f32, f32) {
+    let tier = super::difficulty::factors(def.tier);
+    match role {
+        Role::Horde => {
+            let (hp, damage, speed) =
+                super::elwynn_behavior::regular_stats(def.hp, def.damage, def.speed, elapsed);
+            (hp * tier.normal_hp, damage * tier.normal_damage, speed)
+        }
+        Role::Roaming => {
+            let (hp, damage, speed) =
+                super::elwynn_behavior::roaming_elite_stats(def.hp, def.damage, def.speed, elapsed);
+            (hp * tier.elite_hp, damage * tier.elite_damage, speed)
+        }
+        Role::Lair => {
+            let (hp, damage) = super::guardian_behavior::stats(def, elapsed, slain);
+            (hp * tier.elite_hp, damage * tier.elite_damage, def.speed)
+        }
+        Role::Boss => {
+            let (hp, damage) = super::elwynn_behavior::boss_stats(def.hp, def.damage);
+            (hp * tier.boss_hp, damage * tier.boss_damage, def.speed)
+        }
+    }
 }
 
 /// A guardian asleep in its lair, scaled by run time and guardians already slain.
@@ -252,17 +311,7 @@ pub(super) fn spawn_guardian(
     if let Some(slots) = run.horde_spawn_slots.as_mut() {
         *slots = slots.saturating_sub(1);
     }
-    let e = spawn_with(commands, run, def, pos, face, false, 1.0, Some(home));
-    let (hp, damage) = super::guardian_behavior::stats(def, run.elapsed, slain);
-    let hp = hp * run.party_factor(1.04);
-    commands.queue(move |world: &mut World| {
-        if let Some(mut enemy) = world.get_mut::<Enemy>(e) {
-            enemy.hp = hp;
-            enemy.max_hp = hp;
-            enemy.damage = damage;
-        }
-    });
-    e
+    spawn_with(commands, run, def, pos, face, Role::Lair, slain, Some(home))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -272,10 +321,11 @@ fn spawn_with(
     def: &'static EnemyDef,
     pos: Vec3,
     hero: Vec3,
-    boss: bool,
-    scale: f32,
+    role: Role,
+    slain: u32,
     home: Option<Home>,
 ) -> Entity {
+    let boss = role == Role::Boss;
     let serial = run.guid();
     let e = units::spawn_unit(
         commands,
@@ -292,22 +342,17 @@ fn spawn_with(
         pos,
         yaw_toward(hero - pos),
     );
-    // Only the ordinary Elwynn horde uses the reference's regular-mob curves.
-    // Sample once at spawn so enemies already fighting do not gain health with the clock.
-    let (hp, damage, speed) = if !boss && home.is_none() && super::elwynn::is_regular(def) {
-        super::elwynn_behavior::regular_stats(def.hp, def.damage, def.speed, run.elapsed)
-    } else if !boss && home.is_none() && super::elwynn::is_roaming_elite(def) {
-        super::elwynn_behavior::roaming_elite_stats(def.hp, def.damage, def.speed, run.elapsed)
-    } else if boss && super::elwynn::is_boss(def) {
-        let (hp, damage) = super::elwynn_behavior::boss_stats(def.hp, def.damage);
-        (hp, damage, def.speed)
+    let (hp, damage, speed) = spawn_stats(def, role, run.elapsed, slain);
+    // An elite past Elwynn rolls its affixes from its serial; a juggernaut stands a third taller.
+    let affixes = if matches!(role, Role::Lair | Role::Roaming) {
+        super::mechanics::draw(def.affixes, serial)
     } else {
-        let damage = if home.is_some() {
-            def.damage * scale
-        } else {
-            def.damage * data::damage_scale(run.elapsed)
-        };
-        (def.hp * scale, damage, def.speed)
+        0
+    };
+    let hp = if affixes & super::mechanics::affix::JUGGERNAUT != 0 {
+        hp * 1.35
+    } else {
+        hp
     };
     // Co-op health follows the living party at spawn; damage is not party-scaled.
     let hp = hp * run.party_factor(if boss || home.is_some() { 1.04 } else { 0.72 });
@@ -338,7 +383,10 @@ fn spawn_with(
             dead: false,
             home,
             charge: None,
-            approach: (home.is_some() || super::elwynn::is_regular(def) || super::elwynn::is_roaming_elite(def)).then(|| {
+            affixes,
+            ward: false,
+            guard: false,
+            approach: (home.is_some() || def.cost > 0.0 || def.roaming_elite).then(|| {
                 let side = flat(pos - hero);
                 Approach {
                     angle: side.z.atan2(side.x),
@@ -349,55 +397,22 @@ fn spawn_with(
         },
         Marks::debuffs(),
     ));
-    if !def.phases.is_empty() || home.is_some() || super::elwynn::is_roaming_elite(def) {
+    if !def.phases.is_empty() || home.is_some() || def.roaming_elite {
         commands.entity(e).insert(Script::default());
+    }
+    if let Some(kit) = def.script.filter(|_| boss) {
+        commands.entity(e).insert(super::mechanics::Mechanics::boss(kit));
+    } else if affixes != 0 {
+        commands.entity(e).insert(super::mechanics::Mechanics::elite(affixes));
     }
     e
 }
 
-/// Elwynn keeps every unlocked regular mob; other timed rosters keep the four newest.
-fn timed_pool(roster: &data::Roster, elapsed: f32) -> Vec<usize> {
-    let come: Vec<usize> = (0..roster.enemies.len())
+/// Every horde row unlocked by now: older rows stay in the mix.
+fn unlocked(roster: &data::Roster, elapsed: f32) -> Vec<usize> {
+    (0..roster.enemies.len())
         .filter(|&i| roster.enemies[i].from <= elapsed)
-        .collect();
-    let skip = if roster
-        .enemies
-        .first()
-        .is_some_and(|e| e.name == "Kobold Vermin")
-    {
-        0
-    } else {
-        come.len().saturating_sub(4)
-    };
-    come[skip..].to_vec()
-}
-
-fn choose_enemy<'a>(
-    roster: &'a data::Roster,
-    pool: &[usize],
-    elapsed: f32,
-    rng: &mut Rng,
-) -> &'a EnemyDef {
-    if roster
-        .enemies
-        .first()
-        .is_some_and(|e| e.name == "Kobold Vermin")
-    {
-        let weights: Vec<f32> = pool
-            .iter()
-            .map(|&i| {
-                super::elwynn_behavior::weight(
-                    elapsed,
-                    roster.enemies[i].from,
-                    super::elwynn_behavior::COSTS[i],
-                )
-            })
-            .collect();
-        let at = super::elwynn_behavior::choose(&weights, rng.f32()).unwrap_or(0);
-        &roster.enemies[pool[at]]
-    } else {
-        &roster.enemies[pool[rng.index(pool.len())]]
-    }
+        .collect()
 }
 
 /// Keep the horde topped up on a ring outside the view, with the bosses and the encircling waves
@@ -428,17 +443,7 @@ pub(super) fn spawn_enemies(
     };
     let elapsed = run.elapsed;
     let roster = data::roster(selection.map);
-    let pool = if roster.timed {
-        timed_pool(roster, elapsed)
-    } else {
-        data::wave_pool(elapsed, roster.enemies.len()).to_vec()
-    };
-
-    let due_bosses = if roster.timed {
-        roster.bosses.iter().filter(|b| b.from <= elapsed).count() as u32
-    } else {
-        ((elapsed / data::BOSS_EVERY_SECS) as u32).min(roster.bosses.len() as u32)
-    };
+    let due_bosses = roster.bosses.iter().filter(|b| b.from <= elapsed).count() as u32;
     let first_boss = run.bosses as usize;
     while run.bosses < due_bosses {
         let def = &roster.bosses[run.bosses as usize];
@@ -453,42 +458,20 @@ pub(super) fn spawn_enemies(
         });
     }
 
-    if roster.enemies.first().is_some_and(|e| e.name == "Kobold Vermin") {
-        let new_bosses = &roster.bosses[first_boss..run.bosses as usize];
-        super::horde_spawning::spawn(
-            &mut commands,
-            time.delta_secs(),
-            &mut run,
-            &mut rng,
-            &mut spawner.source,
-            roster,
-            new_bosses,
-            h.translation,
-            &mut enemies,
-            &ground,
-            &coop,
-        );
-        return;
-    }
-
-    spawner.timer -= time.delta_secs();
-    if spawner.timer > 0.0 {
-        return;
-    }
-    spawner.timer = 0.12;
-    let alive = enemies.iter().filter(|(e, _)| !e.dead).count();
-    let target = data::target_alive(elapsed);
-    if alive >= target {
-        return;
-    }
-    let n = (((target - alive) as f32) / 6.0).ceil().min(4.0) as usize;
-    for _ in 0..n {
-        let def = choose_enemy(roster, &pool, elapsed, &mut rng);
-        let a = rng.range(0.0, std::f32::consts::TAU);
-        let r = rng.range(34.0, 42.0);
-        let pos = ground.spawn_spot(hpos + Vec3::new(a.cos(), 0.0, a.sin()) * r, hpos.y);
-        spawn_enemy(&mut commands, &mut run, def, pos, hpos, false);
-    }
+    let new_bosses = &roster.bosses[first_boss..run.bosses as usize];
+    super::horde_spawning::spawn(
+        &mut commands,
+        time.delta_secs(),
+        &mut run,
+        &mut rng,
+        &mut spawner.source,
+        roster,
+        new_bosses,
+        h.translation,
+        &mut enemies,
+        &ground,
+        &coop,
+    );
 }
 
 /// The chase: straight at the hero, pushed apart from each other, stopped by crowd control, and
@@ -502,7 +485,6 @@ pub(super) fn move_enemies(
     mut enemies: Query<(Entity, &mut Transform, &mut Enemy, &mut MovementState), Without<Hero>>,
     mut fx: Fx,
     mut hits: MessageWriter<Hit>,
-    selection: Res<Selection>,
     lairs: Res<super::guardians::Lairs>,
     mut tele: ResMut<super::telegraphs::Telegraphs>,
     coop: Res<super::coop::Coop>,
@@ -518,7 +500,6 @@ pub(super) fn move_enemies(
     };
     let hpos = htf.translation;
     let hero_down = run.dead_t.is_some();
-    let elwynn = selection.stage_def().name == "Elwynn Forest";
 
     let now = run.elapsed;
 
@@ -645,7 +626,7 @@ pub(super) fn move_enemies(
                     home.awake = true;
                     // The native wake-event list refreshes stats once (RVA 0x5c0d688).
                     // Preserve the wound that woke it; do not heal or grow every frame.
-                    let (hp, damage) = super::guardian_behavior::stats(e.def, now, lairs.slain);
+                    let (hp, damage, _) = spawn_stats(e.def, Role::Lair, now, lairs.slain);
                     let hp = hp * run.party_factor(1.04);
                     if hp > e.max_hp {
                         e.hp = hp * (e.hp / e.max_hp).clamp(0.0, 1.0);
@@ -660,16 +641,6 @@ pub(super) fn move_enemies(
                     continue;
                 }
             }
-        } else if dist > 75.0 && selection.stage_def().name != "Elwynn Forest" {
-            // Strays far behind are brought back in front, as the reference genre does.
-            let back = hpos + to_hero.normalize_or_zero() * 38.0;
-            tf.translation = ground.spawn_spot(back, hpos.y);
-            if let Some(approach) = e.approach.as_mut() {
-                let side = flat(tf.translation - hpos);
-                approach.angle = side.z.atan2(side.x);
-                approach.next = 0.0;
-            }
-            continue;
         }
 
         // A charge: still while its lane fills, then a straight rush down it.
@@ -687,7 +658,7 @@ pub(super) fn move_enemies(
                     fx.cast(ent, c.spell, &[], None);
                 }
             } else {
-                speed = if e.home.is_some() || super::elwynn::is_roaming_elite(e.def) {
+                speed = if e.home.is_some() || e.def.roaming_elite {
                     40.0
                 } else {
                     CHARGE_SPEED
@@ -703,7 +674,7 @@ pub(super) fn move_enemies(
             mv.speed = speed;
             mv.flags = if speed > 0.0 { move_flags::FORWARD } else { 0 };
             if c.windup <= 0.0 && !c.hit && {
-                let reach = if e.home.is_some() || super::elwynn::is_roaming_elite(e.def) {
+                let reach = if e.home.is_some() || e.def.roaming_elite {
                     let scale = if e.home.is_some() { 1.35 } else { 1.0 };
                     (e.def.scale * scale * 1.2).clamp(4.0, 7.0)
                 } else {
@@ -801,7 +772,7 @@ pub(super) fn move_enemies(
         let in_reach = e
             .def
             .ranged
-            .is_some_and(|r| dist <= r.range * if elwynn { 1.0 } else { 0.85 } && homing.is_none());
+            .is_some_and(|r| dist <= r.range && homing.is_none());
         let mut step = Vec3::ZERO;
         let mut speed = 0.0;
         let mut approach_distance = None;
@@ -815,7 +786,7 @@ pub(super) fn move_enemies(
             } else {
                 to_hero.normalize_or_zero()
             };
-            if elwynn && e.def.ranged.is_none() && e.fear_t <= 0.0 && !contact {
+            if e.def.ranged.is_none() && e.fear_t <= 0.0 && !contact {
                 let scale = e.def.scale;
                 let speed = e.speed * e.slow;
                 if let Some(approach) = e.approach.as_mut() {
@@ -875,7 +846,7 @@ pub(super) fn move_enemies(
             && e.fear_t <= 0.0
             && e.attack_cd <= 0.0
             && !hero_down;
-        let native_caster = elwynn && super::elwynn::is_regular(e.def);
+        let native_caster = e.def.cost > 0.0;
         let cast_reach = e.def.ranged.is_some_and(|r| {
             if native_caster {
                 dist <= r.range + 4.0
@@ -919,6 +890,9 @@ pub(super) fn move_enemies(
             e.attack_cd = swing;
             let raw = e.damage * e.weaken;
             let taken = hero::hurt_hero(&mut run, raw);
+            if taken > 0.0 && e.affixes & super::mechanics::affix::VAMPIRIC != 0 {
+                e.hp = (e.hp + raw * 3.0).min(e.max_hp);
+            }
             fx.swing(ent, hero_e, taken);
             if taken > 0.0 {
                 fx.number(hero_e, taken, false, COLOR_HURT);
@@ -1132,27 +1106,24 @@ pub(super) fn run_scripts(
         }
     }
 
-    let pool = if roster.timed {
-        timed_pool(roster, now)
-    } else {
-        data::wave_pool(now, roster.enemies.len()).to_vec()
-    };
+    let pool = unlocked(roster, now);
+    let players = super::mechanics::living(&run, &coop, (hero_e, hpos), &allies);
     for (e, tf, mut en, mut script) in &mut scripted {
-        let (hero_e, hpos, peer, _) = coop.target(
+        let (_, hpos, peer, _) = coop.target(
             tf.translation,
             (hero_e, hpos),
             run.dead_t.is_none(),
             &allies,
         );
         run.coop_target = peer;
-        if en.home.is_some() || super::elwynn::is_roaming_elite(en.def) {
+        if en.home.is_some() || en.def.roaming_elite {
             super::guardian_behavior::tick(
                 &mut script.guardian,
                 &mut en,
                 e,
                 tf.translation,
-                hero_e,
                 hpos,
+                &players,
                 dt,
                 &mut commands,
                 &mut run,
@@ -1184,7 +1155,8 @@ pub(super) fn run_scripts(
             script.running.push((phase.action, first));
         }
         let pos = tf.translation;
-        let damage_scale = data::damage_scale(now);
+        let damage_scale =
+            data::damage_scale(now) * super::difficulty::factors(def.tier).boss_damage;
         let mut calls = Vec::new();
         for (action, wait) in &mut script.running {
             *wait -= dt;

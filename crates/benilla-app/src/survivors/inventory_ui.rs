@@ -522,7 +522,7 @@ fn input(
                 _ => None,
             };
         }
-        Action::LootQuality => gear.loot_quality = (gear.loot_quality + 1) % 4,
+        Action::LootQuality => gear.loot_quality = (gear.loot_quality + 1) % 5,
         Action::LootSource => gear.loot_source = (gear.loot_source + 1) % 3,
         Action::Listing(id) => {
             gear.listing = Some(id);
@@ -1257,7 +1257,7 @@ fn zone_loot(
             .with_children(|p| {
                 let slot = gear.loot_slot.and_then(|i| SLOTS.get(i)).map_or("All slots".into(), |slot| label_slot(slot));
                 button(p, f, &format!("Slot: {slot}"), Action::LootSlot, true);
-                button(p, f, ["Quality: All", "Quality: Common", "Quality: Uncommon", "Quality: Rare"][gear.loot_quality], Action::LootQuality, true);
+                button(p, f, ["Quality: All", "Quality: Common", "Quality: Uncommon", "Quality: Rare", "Quality: Epic"][gear.loot_quality], Action::LootQuality, true);
                 button(p, f, ["Source: All", "Source: Elites", "Source: Bosses"][gear.loot_source], Action::LootSource, true);
             });
             if let Some(map) = super::data::MAPS.iter().position(|map| map.name == zone_name) {
@@ -1282,7 +1282,7 @@ fn zone_loot(
                 .filter_map(|id| catalog.definition(id)).filter(|item| eligible(item)).collect();
             items.sort_by(|a, b| a.slot.cmp(&b.slot).then_with(|| a.name.cmp(&b.name)));
             items.dedup_by(|a, b| a.id == b.id);
-            let quality = ["", "common", "uncommon", "rare"][gear.loot_quality];
+            let quality = ["", "common", "uncommon", "rare", "epic"][gear.loot_quality];
             items.retain(|item| {
                 let elite = zone.equipment.iter().any(|drop| drop.item == item.id && drop.weight > 0);
                 let boss = zone.boss_drops.iter().any(|drop| drop.item == item.id);
@@ -1908,7 +1908,8 @@ fn draw(
                         p,
                         f,
                         format!(
-                            "{} gold  ·  {} AP",
+                            "Gear score {}  ·  {} gold  ·  {} AP",
+                            hero.map_or(0, |h| h.inventory.gear_score(&gear.catalog, class.id)),
                             hero.map_or(0, |h| h.inventory.gold),
                             hero.map_or(0, |h| h.inventory.achievement_points)
                         ),
@@ -2277,10 +2278,71 @@ fn tooltip_panel() -> impl Bundle {
     )
 }
 
+/// A bag item held against what the hero wears in its slot: the weaker of a pair of rings or
+/// trinkets, since that is the one it would replace.
+fn compare(
+    p: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    gear: &Equipment,
+    coop: &Coop,
+    class: u8,
+    item: &Item,
+    d: &Definition,
+) {
+    let Some(hero) = gear.view(&gear.realm(coop), class) else {
+        return;
+    };
+    let worn = hero
+        .inventory
+        .items
+        .iter()
+        .filter(|i| i.equipped_for(class))
+        .filter_map(|i| gear.catalog.definition(&i.definition).map(|w| (i, w)))
+        .filter(|(_, w)| w.slot == d.slot)
+        .min_by_key(|(i, w)| w.score(&gear.catalog, i.level));
+    let (old, old_score) = worn.map_or((Default::default(), 0), |(i, w)| {
+        (w.bonuses(i.level).clone(), w.score(&gear.catalog, i.level))
+    });
+    let new = d.bonuses(item.level);
+    tip_label(
+        p,
+        f,
+        worn.map_or("Fills an empty slot".into(), |(i, w)| {
+            format!(
+                "Instead of {}{}",
+                w.name,
+                if i.level > 0 { format!(" +{}", i.level) } else { String::new() }
+            )
+        }),
+        11.,
+        skin::MUTED,
+    );
+    let score = i64::from(d.score(&gear.catalog, item.level)) - i64::from(old_score);
+    let mut lines = vec![("gear_score".to_string(), score)];
+    for stat in new.keys().chain(old.keys()).collect::<std::collections::BTreeSet<_>>() {
+        let delta = i64::from(new.get(stat).copied().unwrap_or(0))
+            - i64::from(old.get(stat).copied().unwrap_or(0));
+        lines.push((stat.clone(), delta));
+    }
+    for (stat, delta) in lines.into_iter().filter(|(_, delta)| *delta != 0) {
+        let text = if stat == "gear_score" {
+            format!("{delta:+} Gear score")
+        } else {
+            let mut one = std::collections::BTreeMap::new();
+            one.insert(stat, delta.unsigned_abs() as u32);
+            let text = amounts(&one);
+            if delta < 0 { text.replacen('+', "-", 1) } else { text }
+        };
+        let color = if delta > 0 { Color::srgb(0.12, 1., 0.) } else { Color::srgb(1., 0.2, 0.2) };
+        tip_label(p, f, text, 11., color);
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn item_tooltip(
     mut commands: Commands,
     gear: Res<Equipment>,
+    coop: Res<Coop>,
     selection: Res<Selection>,
     phase: Res<State<Phase>>,
     font: Option<Res<HudFont>>,
@@ -2359,15 +2421,21 @@ fn item_tooltip(
                         14.,
                         item_color(d),
                     );
-                    if item.level > 0 {
-                        tip_label(
-                            p,
-                            &font.0,
-                            format!("Upgrade +{} of 5", item.level),
-                            11.,
-                            Color::srgb(1., 0.82, 0.),
-                        );
-                    }
+                    tip_label(
+                        p,
+                        &font.0,
+                        if item.level > 0 {
+                            format!(
+                                "Item Level {}  ·  Upgrade +{} of 5",
+                                d.item_level(&gear.catalog, item.level),
+                                item.level
+                            )
+                        } else {
+                            format!("Item Level {}", d.item_level(&gear.catalog, 0))
+                        },
+                        11.,
+                        Color::srgb(1., 0.82, 0.),
+                    );
                     p.spawn(Node {
                         width: Val::Percent(100.),
                         justify_content: JustifyContent::SpaceBetween,
@@ -2404,6 +2472,9 @@ fn item_tooltip(
                                 Color::srgb(0.12, 1., 0.)
                             },
                         );
+                    }
+                    if item.slot.is_none() && d.can_use(class) {
+                        compare(p, &font.0, &gear, &coop, class, item, d);
                     }
                     let classes = d
                         .classes

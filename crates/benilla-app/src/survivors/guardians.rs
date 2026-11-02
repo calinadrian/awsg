@@ -75,8 +75,8 @@ pub(super) fn keep_lairs(
                 pos: center + side * map.leash * OUT,
                 held: None,
                 spawned: false,
-                // Fedfennel keeps the source boss's 9:00 entrance in the elite slot.
-                refill_at: if def.name == "Fedfennel" {
+                // A lair lord (Elwynn's Fedfennel) keeps its boss row's entrance minute.
+                refill_at: if def.lord {
                     def.from
                 } else {
                     FIRST
@@ -96,7 +96,7 @@ pub(super) fn keep_lairs(
                     continue;
                 }
                 lair.held = None;
-                lair.refill_at = if lair.def.name == "Fedfennel" {
+                lair.refill_at = if lair.def.lord {
                     f32::INFINITY // The source encounter occurs once per run.
                 } else {
                     now + REFILL

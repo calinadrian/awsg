@@ -50,6 +50,7 @@ fn track(
     mut progress: ResMut<Progress>, mut selection: ResMut<Selection>, run: Res<Run>,
     phase: Res<State<Phase>>, gear: Res<super::inventory::Equipment>, coop: Res<super::coop::Coop>,
     creatures: Option<Res<crate::entities::Creatures>>,
+    auto: Option<Res<super::auto::Auto>>,
 ) {
     let mut changed = false;
     if *phase.get() != Phase::Menu {
@@ -87,7 +88,10 @@ fn track(
             if let Some((class, look)) = candidate { super::menu::set(&mut selection, &all, class, look); }
         }
     }
-    if !selection.can_visit(selection.map) {
+    // A zone of the other faction, or one whose road is not cleared yet, falls back to the start;
+    // the auto-play test harness may run any zone.
+    let locked = !selection.unlocked(selection.map) && auto.is_none();
+    if !selection.can_visit(selection.map) || locked {
         let race = selection.look.and_then(|i| selection.looks.get(i)).map_or(1, |look| look.1);
         let name = if super::races::RACES.iter().any(|r| r.id == race && r.faction == 1) { "Durotar" } else { "Elwynn Forest" };
         if let Some(map) = super::data::MAPS.iter().position(|map| map.name == name) { selection.select_map(map); }

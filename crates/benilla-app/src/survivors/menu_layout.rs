@@ -327,7 +327,7 @@ pub(super) enum PlateStat {
     Health,
     Reduction,
     Start,
-    Zones,
+    GearScore,
 }
 
 /// The shown race's name over its bonuses.
@@ -395,7 +395,7 @@ fn pick_plate(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
                     ("HEALTH", PlateStat::Health),
                     ("REDUCTION", PlateStat::Reduction),
                     ("STARTS WITH", PlateStat::Start),
-                    ("ZONES OPEN", PlateStat::Zones),
+                    ("GEAR SCORE", PlateStat::GearScore),
                 ] {
                     let value = skin::stat_tile(boxes, f, caption, "", size::LEAD);
                     boxes.commands().entity(value).insert(stat);
@@ -531,20 +531,21 @@ pub(super) fn refresh_pick_plate(
     )>,
     mut slots: Query<(&PoolSlot, &mut Node, &Children, &mut super::hud::TipFor), Without<TraitLine>>,
     mut icons: Query<&mut super::hud::SpellIcon>,
-    mut shown: Local<Option<(Option<usize>, Option<u8>, bool, usize, bool)>>,
+    gear: Res<super::inventory::Equipment>,
+    coop: Res<super::coop::Coop>,
+    mut shown: Local<Option<(Option<usize>, Option<u8>, bool, usize, bool, u64)>>,
 ) {
     let race = shown_race(&selection, &buttons);
-    let key = (selection.class, race, spells.is_some(), slots.iter().len(), race.is_some_and(|race| selection.race_unlocked(race)));
+    let key = (selection.class, race, spells.is_some(), slots.iter().len(), race.is_some_and(|race| selection.race_unlocked(race)), gear.revision);
     if *shown == Some(key) {
         return;
     }
     *shown = Some(key);
     let class = selection.class_def();
     let (hp, reduction) = class.map_or((0., 0.), |c| super::class_base(c.id));
-    let open = data::MAPS
-        .iter()
-        .filter(|m| super::dungeon::available(m) && super::races::can_enter(race.unwrap_or(1), m.name))
-        .count();
+    let score = class
+        .and_then(|c| gear.view(&gear.realm(&coop), c.id))
+        .map_or(0, |hero| hero.inventory.gear_score(&gear.catalog, hero.inventory.class));
     for (stat, mut text) in &mut texts.p0() {
         text.0 = match (stat, class) {
             (_, None) => String::new(),
@@ -553,7 +554,7 @@ pub(super) fn refresh_pick_plate(
             (PlateStat::Start, Some(c)) => {
                 super::hud::spell_name(spells.as_deref(), data::ability(c.start).spell, c.start)
             }
-            (PlateStat::Zones, _) => format!("{open} of {}", data::MAPS.len()),
+            (PlateStat::GearScore, _) => score.to_string(),
         };
     }
     let name = race.map_or(String::new(), |race| {

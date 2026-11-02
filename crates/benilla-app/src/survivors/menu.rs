@@ -215,7 +215,7 @@ pub(super) fn menu_clicks(
             options.settings = true;
         }
         MenuAction::Enter => {
-            if start_run(&mut run, &mut selection) {
+            if selection.unlocked(selection.map) && start_run(&mut run, &mut selection) {
                 next.set(Phase::Playing);
             }
         }
@@ -330,7 +330,7 @@ pub(super) fn refresh_menu_ui(
         }
         if let Some(mut disabled) = disabled {
             let off = match *action {
-                MenuAction::Enter => cur.is_none() || !selection.can_visit(selection.map) || !super::dungeon::available(&data::MAPS[selection.map]),
+                MenuAction::Enter => cur.is_none() || !selection.can_visit(selection.map) || !selection.unlocked(selection.map) || !super::dungeon::available(&data::MAPS[selection.map]),
                 MenuAction::Race(r) => !selection.race_unlocked(r),
                 _ => false,
             };
@@ -389,7 +389,7 @@ pub(super) fn refresh_menu_ui(
         };
         let enabled = match action {
             MenuAction::Enter => {
-                cur.is_some() && selection.can_visit(selection.map) && super::dungeon::available(&data::MAPS[selection.map])
+                cur.is_some() && selection.can_visit(selection.map) && selection.unlocked(selection.map) && super::dungeon::available(&data::MAPS[selection.map])
             }
             MenuAction::Race(race) => selection.race_unlocked(*race),
             _ => true,

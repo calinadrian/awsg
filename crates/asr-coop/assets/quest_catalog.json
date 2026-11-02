@@ -1,5 +1,5 @@
 {
- "revision": 1,
+ "revision": 2,
  "quests": [
   {
    "id": "elwynn.story",
@@ -1922,6 +1922,166 @@
    }
   },
   {
+   "id": "hall-of-thanes.story",
+   "zone": "hall-of-thanes",
+   "title": "Robbers in the Tomb",
+   "giver": "Keeper Brannoc",
+   "text": "Dark Iron raiders have broken into the burial halls of the old thanes. Faldrim Anvilmar leads the first band; start with him.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Faldrim Anvilmar",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Faldrim Anvilmar"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 80,
+    "materials": 4,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "hall-of-thanes.bounty",
+   "zone": "hall-of-thanes",
+   "title": "Bounty: Dark Iron Intruders",
+   "giver": "Keeper Brannoc",
+   "text": "Dark Iron Intruders keep coming at the Thanes’ Rest. Keeper Brannoc pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Dark Iron Intruder",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Dark Iron Intruders"
+    }
+   ],
+   "reward": {
+    "gold": 50,
+    "materials": 3,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "hall-of-thanes.lairs",
+   "zone": "hall-of-thanes",
+   "title": "Break the Lairs",
+   "giver": "Keeper Brannoc",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the Thanes’ Rest sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 60,
+    "materials": 2,
+    "points": 0,
+    "item": true
+   }
+  },
+  {
+   "id": "hall-of-thanes.hold",
+   "zone": "hall-of-thanes",
+   "title": "Hold the Line",
+   "giver": "Keeper Brannoc",
+   "text": "Keeper Brannoc needs the field held while the Thanes’ Rest regroups. Survive ten minutes in Hall of Thanes, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 100,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "hall-of-thanes.finale",
+   "zone": "hall-of-thanes",
+   "title": "The Dirge",
+   "giver": "Keeper Brannoc",
+   "text": "Durgen Dirgehammer means to wake the thanes and bind them to the Dark Iron. Silence his hammer before the dead answer.",
+   "requires": [
+    "hall-of-thanes.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Durgen Dirgehammer",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Durgen Dirgehammer"
+    }
+   ],
+   "reward": {
+    "gold": 240,
+    "materials": 5,
+    "points": 10,
+    "item": true
+   }
+  },
+  {
+   "id": "hall-of-thanes.proven",
+   "zone": "hall-of-thanes",
+   "title": "Proven in Hall of Thanes",
+   "giver": "Keeper Brannoc",
+   "text": "Keeper Brannoc trusts only those who have grown strong in the field. Reach level 18 in a single run in Hall of Thanes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 18,
+     "text": "Reach level 18"
+    }
+   ],
+   "reward": {
+    "gold": 120,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
    "id": "stranglethorn.story",
    "zone": "stranglethorn",
    "title": "The Uncatchable",
@@ -2956,6 +3116,66 @@
    "requires": []
   },
   {
+   "id": "conquer.hall-of-thanes",
+   "category": "Zones",
+   "title": "Conqueror of Hall of Thanes",
+   "text": "Defeat Durgen Dirgehammer and clear Hall of Thanes.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Hall of Thanes"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.hall-of-thanes",
+   "category": "Bosses",
+   "title": "Most Wanted: Hall of Thanes",
+   "text": "Defeat every boss in Hall of Thanes.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Faldrim Anvilmar",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 1,
+     "text": "Faldrim Anvilmar"
+    },
+    {
+     "kind": "boss",
+     "target": "Magmatus",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 1,
+     "text": "Magmatus"
+    },
+    {
+     "kind": "boss",
+     "target": "Plunder",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 1,
+     "text": "Plunder"
+    },
+    {
+     "kind": "boss",
+     "target": "Durgen Dirgehammer",
+     "zone": "hall-of-thanes",
+     "class": 0,
+     "count": 1,
+     "text": "Durgen Dirgehammer"
+    }
+   ],
+   "requires": []
+  },
+  {
    "id": "conquer.stranglethorn",
    "category": "Zones",
    "title": "Conqueror of Stranglethorn Vale",
@@ -3089,6 +3309,7 @@
     "conquer.wailing",
     "conquer.duskwood",
     "conquer.stonetalon",
+    "conquer.hall-of-thanes",
     "conquer.stranglethorn"
    ]
   },

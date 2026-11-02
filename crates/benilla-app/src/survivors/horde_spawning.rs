@@ -31,19 +31,24 @@ impl Spawner {
 }
 
 pub(super) fn cost(def: &data::EnemyDef) -> f32 {
-    super::elwynn::regular_index(def).map_or(0.0, |i| super::elwynn_behavior::COSTS[i])
+    def.cost
 }
 
 /// Base credits/second; recent killed budget decays with a twelve-second time constant.
-fn rate(elapsed: f32, heat: f32, pressure: f32) -> f32 {
+pub(super) fn rate(elapsed: f32, heat: f32, pressure: f32) -> f32 {
     let minute = elapsed.max(0.0) / 60.0;
     let base = 0.6 * (0.9 + 0.32 * minute + 0.025 * minute * minute) * pressure;
     base * (heat / 12.0 * 1.25 / base.max(0.001)).clamp(1.0, 3.0)
 }
 
 /// This floor counts ordinary chasers, not bosses, lair guardians or roaming elites.
-fn population_floor(elapsed: f32, pressure: f32, party: f32) -> usize {
+pub(super) fn population_floor(elapsed: f32, pressure: f32, party: f32) -> usize {
     (((4.0 + 1.6 * elapsed.max(0.0) / 60.0) * pressure).min(36.0) * party) as usize
+}
+
+/// Seconds until the next roaming elite: 55 at the start, 25 from the twelfth minute.
+pub(super) fn elite_interval(elapsed: f32) -> f32 {
+    (55.0 - 2.5 * elapsed / 60.0).max(25.0)
 }
 
 fn boss_pressure(last: bool) -> f32 {
@@ -60,7 +65,7 @@ struct Center {
 /// Native online spawn scaling (0x5c15588/0x5c0048c), not the legacy Python bridge.
 /// The patched chapter lookup at 0x9dc2c70 selects 0.7 for chapters below three;
 /// Elwynn is chapter zero. Game+0xc88 counts living players (0x5bd91a0).
-fn party_multiplier(living: usize) -> f32 {
+pub(super) fn party_multiplier(living: usize) -> f32 {
     1.0 + living.saturating_sub(1) as f32 * 0.7 * 0.48
 }
 
@@ -209,8 +214,9 @@ pub(super) fn spawn(
             break;
         }
     }
+    let tier = super::difficulty::factors(roster.enemies.first().map_or(1, |e| e.tier));
     // The constructor calls roundf before converting its scaled hard limit.
-    let cap = (50.0 * party).round() as usize;
+    let cap = (50.0 * party * roster.crowd).round() as usize;
     let mut alive = enemies.iter().filter(|(e, _)| !e.dead).count() + new_bosses.len();
     run.horde_spawn_slots = Some(cap.saturating_sub(alive));
     let mut ordinary = enemies
@@ -254,7 +260,7 @@ pub(super) fn spawn(
         }
     }
     state.kill_heat *= (-dt / 12.0).exp();
-    state.budget += dt * rate(elapsed, state.kill_heat, pressure) * party;
+    state.budget += dt * rate(elapsed, state.kill_heat, pressure) * party * tier.density;
     // Native work limit: at most eight successful paid spawns per update.
     for _ in 0..8 {
         if state.budget < 1.0 {
@@ -275,7 +281,7 @@ pub(super) fn spawn(
         ordinary += 1;
     }
     // A separate unpriced floor tops up at most three ordinary mobs per update.
-    let fill = population_floor(elapsed, pressure, party)
+    let fill = ((population_floor(elapsed, pressure, party) as f32 * tier.density * roster.crowd) as usize)
         .saturating_sub(ordinary)
         .min(3);
     for _ in 0..fill {
@@ -291,7 +297,7 @@ pub(super) fn spawn(
         let elites: Vec<_> = roster
             .guardians
             .iter()
-            .filter(|e| super::elwynn::is_roaming_elite(e) && e.from <= elapsed)
+            .filter(|e| e.roaming_elite && e.from <= elapsed)
             .collect();
         if !elites.is_empty() {
             let def = elites[rng.index(elites.len())];
@@ -299,6 +305,6 @@ pub(super) fn spawn(
                 commands, run, rng, state, &centers, ground, &mut alive, cap, def,
             );
         }
-        state.elite_at = elapsed + (55.0 - 2.5 * elapsed / 60.0).max(25.0);
+        state.elite_at = elapsed + elite_interval(elapsed) * tier.elite_every;
     }
 }

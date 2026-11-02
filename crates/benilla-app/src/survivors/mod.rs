@@ -9,6 +9,7 @@ mod amulets;
 pub(crate) mod appearance;
 mod auto;
 mod auto_attack;
+mod boss_scripts;
 mod caches;
 mod card_content;
 mod card_view;
@@ -19,6 +20,8 @@ mod coop_ui;
 mod damage_meter;
 mod data;
 mod difficulty;
+#[cfg(test)]
+mod difficulty_sim;
 mod drive;
 mod dungeon;
 mod elwynn;
@@ -30,6 +33,8 @@ mod fill;
 mod frame_settings;
 mod front_end;
 mod gold;
+#[cfg(test)]
+mod golden;
 mod grade;
 mod guardian_behavior;
 mod guardians;
@@ -43,6 +48,7 @@ mod inventory_ui;
 pub(crate) mod inventory_outfit;
 mod loot_ground;
 mod magnets;
+mod mechanics;
 mod menu;
 mod menu_icons;
 mod menu_layout;
@@ -171,6 +177,7 @@ impl Plugin for SurvivorsPlugin {
                     guardians::keep_lairs.run_if(coop::authority),
                     enemies::move_enemies.run_if(coop::authority),
                     enemies::run_scripts.run_if(coop::authority),
+                    mechanics::run_mechanics.run_if(coop::authority),
                     abilities::cast_abilities.run_if(in_state(Phase::Playing)),
                     (auto_attack::start_on_right_click, auto_attack::swing)
                         .chain()
@@ -323,6 +330,12 @@ impl Selection {
     pub fn can_visit(&self, map: usize) -> bool {
         let race = self.look.and_then(|i| self.looks.get(i)).map(|look| look.1).unwrap_or(1);
         data::MAPS.get(map).is_some_and(|map| races::can_enter(race, map.name))
+    }
+    /// Whether the account has cleared the road to a battleground (co-op guests follow their host).
+    pub fn unlocked(&self, map: usize) -> bool {
+        data::MAPS
+            .get(map)
+            .is_some_and(|map| difficulty::unlocked(map.name, &self.cleared))
     }
     /// Keep the world preview on the same battleground the menu and next run select.
     pub fn select_map(&mut self, map: usize) {
@@ -521,6 +534,9 @@ pub(super) struct Run {
     /// Enemy attacks route through the host to this guest; zero means the local hero.
     pub coop_target: u32,
     pub coop_damage: Vec<(u32, f32)>,
+    /// A boss's pull still to move the local hero, and each guest by peer.
+    pub push: Vec3,
+    pub coop_push: Vec<(u32, Vec3)>,
     pub coop_run: bool,
     pub coop_unavailable: std::collections::HashSet<u32>,
     /// Living party members (native Game+0xc88, rebuilt at 0x5bd91a0); 1 when solo.
@@ -583,6 +599,8 @@ impl Default for Run {
             struck: false,
             coop_target: 0,
             coop_damage: Vec::new(),
+            push: Vec3::ZERO,
+            coop_push: Vec::new(),
             coop_run: false,
             coop_unavailable: Default::default(),
             coop_living: 1,
@@ -659,7 +677,6 @@ impl Run {
                 .map_or(0, |a| amulets::AMULETS[a.index].targets),
         };
         s.max_hp += self.gear[0];
-        s.might += self.gear[1];
         s.haste += self.gear[2];
         s.crit += self.gear[3];
         // Cloth starts quicker.
@@ -681,6 +698,8 @@ impl Run {
         s.might += t.stat(0);
         s.haste += t.stat(1);
         s.max_hp *= 1.0 + t.stat(2);
+        // Gear multiplies damage, so a higher tier's weapons keep pace with its tougher enemies.
+        s.might *= 1.0 + self.gear[1];
         s.crit += t.stat(3);
         s.crit_mult += t.stat(4);
         s.regen += t.stat(6) + t.stat(24) * s.max_hp;

@@ -7,7 +7,7 @@ pub mod ledger;
 pub mod quests;
 
 pub const PROTOCOL: u32 = 1;
-pub const BUILD: &str = "asr-elwynn-coop-economy-5";
+pub const BUILD: &str = "asr-elwynn-coop-economy-7";
 pub const MAX_PLAYERS: usize = 4;
 pub const MAX_MESSAGE: usize = 2 * 1024 * 1024;
 

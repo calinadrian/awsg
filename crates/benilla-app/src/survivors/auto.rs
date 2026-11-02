@@ -1,8 +1,8 @@
 //! `WOW_SURVIVORS_AUTO=<class name>`: a hands-off run for testing. It picks the class and its first
 //! look, begins once the world is up, takes a random card at every level, walks to the nearest
 //! gem away from the crowd and logs the run every ten seconds; `WOW_SURVIVORS_SHOTS=<dir>` also
-//! saves a screenshot every few seconds, which needs no window focus. A `:idle`, `:all` or `:late`
-//! suffix on the class name changes the run, as the fields below say. `WOW_SURVIVORS_MAP=<index or
+//! saves a screenshot every few seconds, which needs no window focus. A `:idle`, `:all`, `:late` or
+//! `:finale` suffix on the class name changes the run, as the fields below say. `WOW_SURVIVORS_MAP=<index or
 //! name>` picks the battleground.
 
 use bevy::prelude::*;
@@ -26,6 +26,13 @@ pub(super) struct Auto {
     /// `<class>:late`: the whole pool at its top level, two thirds of the way in, for the crowd at
     /// its thickest.
     late: bool,
+    /// `<class>:finale`: as `late`, ten seconds before the battleground's last boss, which comes at
+    /// half its health so its later phases play out; `WOW_SURVIVORS_BOSS_HP=<fraction>` picks another.
+    finale: bool,
+    boss_hp: f32,
+    /// Whether this run got the setup above. It happens on the run's first frame rather than where
+    /// the autopilot presses Play, so a run a stray click starts from the menu gets it too.
+    begun: bool,
     frames: u32,
     wait: f32,
     shots: Option<std::path::PathBuf>,
@@ -62,7 +69,8 @@ pub(super) fn from_env() -> Option<Auto> {
     let want = crate::webenv::var("WOW_SURVIVORS_AUTO")?;
     let (name, mode) = want.trim().split_once(':').unwrap_or((want.trim(), ""));
     let idle = mode.eq_ignore_ascii_case("idle");
-    let late = mode.eq_ignore_ascii_case("late");
+    let finale = mode.eq_ignore_ascii_case("finale");
+    let late = finale || mode.eq_ignore_ascii_case("late");
     let all = late || mode.eq_ignore_ascii_case("all");
     let class = data::CLASSES
         .iter()
@@ -90,6 +98,12 @@ pub(super) fn from_env() -> Option<Auto> {
         idle,
         all,
         late,
+        finale,
+        boss_hp: crate::webenv::var("WOW_SURVIVORS_BOSS_HP")
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|f| *f > 0.0 && *f <= 1.0)
+            .unwrap_or(0.5),
+        begun: false,
         frames: 0,
         wait: 0.0,
         shots,
@@ -174,12 +188,18 @@ pub(super) fn drive(
     mut rng: ResMut<Rng>,
     loading: Res<crate::loading_screen::LoadingScreen>,
     heroes: Query<(), With<Hero>>,
-    enemies: Query<&Enemy>,
+    mut enemies: Query<&mut Enemy>,
     gear: Res<super::inventory::Equipment>,
 ) {
     let dt = time.delta_secs();
     auto.wait += dt;
     auto.frames += 1;
+    if *phase.get() == Phase::Menu {
+        auto.begun = false;
+    } else if !auto.begun && matches!(phase.get(), Phase::Playing | Phase::LevelUp) {
+        auto.begun = true;
+        begin(&auto, &mut run, selection.map_def().name);
+    }
     match phase.get() {
         Phase::Menu => {
             if selection.map != auto.map {
@@ -191,41 +211,23 @@ pub(super) fn drive(
                 selection.look = None;
                 selection.version += 1;
                 auto.wait = 0.0;
+            } else if !selection.looks.is_empty() && !selection.can_visit(auto.map) {
+                // The class's first look may be the other faction's: take the first race the
+                // battleground lets in.
+                let zone = data::MAPS[auto.map].name;
+                let look = selection.looks.iter().position(|&(_, race, _)| {
+                    selection.race_unlocked(race) && super::races::can_enter(race, zone)
+                });
+                if let Some(look) = look.filter(|&l| selection.look != Some(l)) {
+                    selection.look = Some(look);
+                    selection.version += 1;
+                }
+                auto.wait = 0.0;
             } else if heroes.is_empty() || loading.covering() || gear.open {
                 auto.wait = 0.0;
             } else if auto.wait > 2.0 && auto.wait < 3.0 {
                 auto.capture_once(&mut commands, "menu".into());
             } else if auto.wait > 3.0 && hud::start_run(&mut run, &mut selection) {
-                info!(
-                    "survivors auto: run begins as {} at {}",
-                    run.class.name,
-                    selection.map_def().name
-                );
-                if crate::webenv::var("WOW_SURVIVORS_CACHE_PROBE").is_some() {
-                    run.gold = 100;
-                }
-                if auto.all {
-                    for key in run.class.pool {
-                        if !run.abilities.iter().any(|o| o.def.key == *key) {
-                            run.abilities.push(super::Owned::new(
-                                data::ability(key),
-                                super::rewards::Rarity::Common,
-                            ));
-                        }
-                    }
-                }
-                if auto.late {
-                    for o in &mut run.abilities {
-                        for _ in 1..data::MAX_ABILITY_LEVEL {
-                            o.upgrade(
-                                super::rewards::Rarity::Rare,
-                                [Some(super::rewards::Upgrade::Power), None],
-                            );
-                        }
-                    }
-                    run.elapsed = data::VICTORY_SECS * 2.0 / 3.0;
-                    run.bosses = 3;
-                }
                 if let Some(kind) = crate::webenv::var("WOW_SURVIVORS_REWARD_PREVIEW") {
                     if kind == "chest" {
                         run.pending_chests = 1;
@@ -262,6 +264,13 @@ pub(super) fn drive(
         }
         _ => auto.wait = 0.0,
     }
+    if auto.finale && *phase.get() == Phase::Playing {
+        for mut e in &mut enemies {
+            if e.boss && e.def.last && !e.dead && e.hp >= e.max_hp {
+                e.hp = e.max_hp * auto.boss_hp;
+            }
+        }
+    }
 
     auto.log_t -= dt;
     if auto.log_t <= 0.0 && *phase.get() != Phase::Menu {
@@ -296,5 +305,48 @@ pub(super) fn drive(
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(path));
         }
+    }
+}
+
+/// The run as the suffix asks for, on its first frame.
+fn begin(auto: &Auto, run: &mut Run, zone: &str) {
+    info!("survivors auto: run begins as {} at {zone}", run.class.name);
+    if crate::webenv::var("WOW_SURVIVORS_CACHE_PROBE").is_some() {
+        run.gold = 100;
+    }
+    if auto.all {
+        for key in run.class.pool {
+            if !run.abilities.iter().any(|o| o.def.key == *key) {
+                run.abilities.push(super::Owned::new(
+                    data::ability(key),
+                    super::rewards::Rarity::Common,
+                ));
+            }
+        }
+    }
+    if auto.late {
+        for o in &mut run.abilities {
+            for _ in 1..data::MAX_ABILITY_LEVEL {
+                o.upgrade(
+                    super::rewards::Rarity::Rare,
+                    [Some(super::rewards::Upgrade::Power), None],
+                );
+            }
+        }
+        run.elapsed = 600.0;
+        run.bosses = 3;
+        // About where the XP curve has an ordinary run by then; a level-1 hero folds at once.
+        run.level = 20;
+    }
+    if auto.finale {
+        let bosses = &data::roster(auto.map).bosses;
+        if let Some(last) = bosses.last() {
+            run.elapsed = (last.from - 10.0).max(0.0);
+            run.bosses = bosses.len() as u32 - 1;
+        }
+        run.level = 26;
+    }
+    if auto.late {
+        run.hp = run.stats().max_hp;
     }
 }

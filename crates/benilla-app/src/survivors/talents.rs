@@ -532,9 +532,13 @@ pub(super) fn low_health(run: &mut Run, rng: &mut super::Rng) {
 }
 
 /// Talent experience a finished run pays its class: time survived, kills, bosses, guardians and
-/// a win, more in a harder zone.
+/// a win, 15% more for each tier along the road.
 pub(super) fn run_pay(run: &Run, guardians: u32, map: usize) -> f32 {
-    let zone = 1.0 + map as f32 * 0.02;
+    let tier = super::data::MAPS
+        .get(map)
+        .and_then(|m| super::difficulty::tier(m.name))
+        .unwrap_or(1);
+    let zone = 1.0 + 0.15 * f32::from(tier - 1);
     let base = run.elapsed / 6.0
         + run.kills as f32 / 20.0
         + run.bosses as f32 * 25.0

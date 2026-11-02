@@ -1248,7 +1248,7 @@ pub(super) fn keys(
     // Play again: the menu is up, so start the same pick as Enter would. A co-op room starts
     // its runs from the host, so there it is only the way back to the menu.
     if *phase.get() == Phase::Menu && std::mem::take(&mut replay.0) {
-        if !coop.in_room() && start_run(&mut run, &mut selection) {
+        if !coop.in_room() && selection.unlocked(selection.map) && start_run(&mut run, &mut selection) {
             next.set(Phase::Playing);
         }
         return;
@@ -1271,7 +1271,10 @@ pub(super) fn keys(
     }
     match phase.get() {
         Phase::Menu => {
-            if keys.just_pressed(KeyCode::Enter) && start_run(&mut run, &mut selection) {
+            if keys.just_pressed(KeyCode::Enter)
+                && selection.unlocked(selection.map)
+                && start_run(&mut run, &mut selection)
+            {
                 next.set(Phase::Playing);
             }
         }
