@@ -182,10 +182,28 @@ static LEGACY_ABILITIES: &[AbilityDef] = &[
     ),
 ];
 
+// Racial procs the original names in its race rows but has no spell row for.
+static RACIAL_ABILITIES: &[AbilityDef] = &[ability!(
+    "arcane_torrent",
+    28730,
+    Nova {
+        damage: 6.0,
+        cooldown: 20.0,
+        range: 0.0,
+        radius: 8.0,
+        count: 0,
+        school: 6,
+        native_kind: 2,
+        effect: Effect::Stun(2.0),
+        mark: 20549
+    }
+)];
+
 pub(crate) fn ability(key: &str) -> &'static AbilityDef {
     ABILITIES
         .iter()
         .chain(LEGACY_ABILITIES.iter())
+        .chain(RACIAL_ABILITIES.iter())
         .find(|a| a.key == key)
         .unwrap_or_else(|| panic!("survivors: no ability {key:?}"))
 }

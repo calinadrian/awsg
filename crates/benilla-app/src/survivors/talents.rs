@@ -588,6 +588,11 @@ pub(super) fn begin_run(mut run: ResMut<Run>, mut book: ResMut<TalentBook>) {
                 .push(super::Owned::new(def, super::rewards::Rarity::Common));
         }
     }
+    run.racial = super::races::racial(run.race)
+        .and_then(|r| r.proc)
+        .map(|(_, key, _)| {
+            super::Owned::new(super::data::ability(key), super::rewards::Rarity::Common)
+        });
     run.hp = run.stats().max_hp;
     run.version += 1;
 }

@@ -54,31 +54,7 @@ pub(super) fn build_menu(
             heading,
         );
         adventure(ui, f);
-        ui.spawn(skin::panel(Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(MARGIN * 2. + HERO_WIDTH),
-            right: Val::Px(MARGIN * 2. + ADVENTURE_WIDTH),
-            bottom: Val::Px(PANELS_BOTTOM),
-            padding: UiRect::axes(Val::Px(18.), Val::Px(14.)),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(5.),
-            ..default()
-        }))
-        .with_children(|p| {
-            let centre = TextLayout::new_with_justify(Justify::Center);
-            let title = skin::label(p, f, "", 24., skin::GOLD);
-            p.commands().entity(title).insert((PickName, centre));
-            let description = skin::label(p, f, "", 12., skin::TEXT);
-            p.commands()
-                .entity(description)
-                .insert((PickDescription, centre));
-            skin::rule(p);
-            let progress = skin::label(p, f, "", 11., skin::MUTED);
-            p.commands()
-                .entity(progress)
-                .insert((super::talents::MenuProgress, centre));
-        });
+        pick_plate(ui, f);
         action_bar(ui, f);
         ui.spawn(Node {
             position_type: PositionType::Absolute,
@@ -362,6 +338,268 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
     });
 }
 
+/// A value box on the pick plate.
+#[derive(Component, Clone, Copy)]
+pub(super) enum PlateStat {
+    Health,
+    Reduction,
+    Start,
+    Zones,
+}
+
+/// The shown race's name over its bonuses.
+#[derive(Component)]
+pub(super) struct RaceTitle;
+
+/// A spell-pool icon's frame, `.0` into the class's pool; hidden past the pool's end.
+#[derive(Component)]
+pub(super) struct PoolSlot(usize);
+
+/// Enough frames for the longest class pool.
+const POOL_SLOTS: usize = 16;
+const POOL_ICON: f32 = 30.;
+
+/// Under the hero: the pick's name, its race's bonuses, the class's numbers and its spell pool.
+fn pick_plate(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
+    ui.spawn(skin::panel(Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(MARGIN * 2. + HERO_WIDTH),
+        right: Val::Px(MARGIN * 2. + ADVENTURE_WIDTH),
+        bottom: Val::Px(PANELS_BOTTOM),
+        padding: UiRect::axes(Val::Px(18.), Val::Px(14.)),
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(8.),
+        ..default()
+    }))
+    .with_children(|p| {
+        // Two columns side by side, stacked when the canvas is too narrow for both.
+        p.spawn(Node {
+            width: Val::Percent(100.),
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(18.),
+            row_gap: Val::Px(10.),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(Node {
+                flex_grow: 1.,
+                flex_basis: Val::Px(170.),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.),
+                ..default()
+            })
+            .with_children(|col| {
+                let title = skin::label(col, f, "", 24., skin::GOLD);
+                col.commands().entity(title).insert(PickName);
+            });
+            row.spawn(Node {
+                flex_grow: 3.,
+                flex_basis: Val::Px(340.),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.),
+                ..default()
+            })
+            .with_children(|col| {
+                col.spawn(Node {
+                    width: Val::Percent(100.),
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(6.),
+                    row_gap: Val::Px(6.),
+                    ..default()
+                })
+                .with_children(|boxes| {
+                    stat_box(boxes, f, "HEALTH", PlateStat::Health);
+                    stat_box(boxes, f, "REDUCTION", PlateStat::Reduction);
+                    stat_box(boxes, f, "STARTS WITH", PlateStat::Start);
+                    stat_box(boxes, f, "ZONES OPEN", PlateStat::Zones);
+                });
+                skin::label(col, f, "SPELL POOL", 10., skin::MUTED);
+                col.spawn(Node {
+                    width: Val::Percent(100.),
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.),
+                    row_gap: Val::Px(4.),
+                    ..default()
+                })
+                .with_children(|icons| {
+                    for i in 0..POOL_SLOTS {
+                        icons
+                            .spawn((
+                                PoolSlot(i),
+                                Node {
+                                    width: Val::Px(POOL_ICON),
+                                    height: Val::Px(POOL_ICON),
+                                    border: UiRect::all(Val::Px(1.)),
+                                    border_radius: BorderRadius::all(Val::Px(3.)),
+                                    display: Display::None,
+                                    ..default()
+                                },
+                                BorderColor::all(skin::EDGE),
+                            ))
+                            .with_children(|slot| {
+                                slot.spawn((
+                                    Node {
+                                        width: Val::Percent(100.),
+                                        height: Val::Percent(100.),
+                                        ..default()
+                                    },
+                                    ImageNode {
+                                        color: Color::srgba(0., 0., 0., 0.6),
+                                        ..default()
+                                    },
+                                    super::hud::SpellIcon(0),
+                                ));
+                            });
+                    }
+                });
+            });
+        });
+        // The race's traits, across the whole plate so each fits on its line.
+        p.spawn(Node {
+            width: Val::Percent(100.),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(3.),
+            ..default()
+        })
+        .with_children(|col| {
+            let race = skin::label(col, f, "", 14., skin::GOLD);
+            col.commands().entity(race).insert(RaceTitle);
+            let traits = skin::label(col, f, "", 12., skin::TEXT);
+            col.commands().entity(traits).insert(PickDescription);
+        });
+        skin::rule(p);
+        let progress = skin::label(p, f, "", 11., skin::MUTED);
+        p.commands().entity(progress).insert((
+            super::talents::MenuProgress,
+            Node {
+                width: Val::Percent(100.),
+                ..default()
+            },
+            TextLayout::new_with_justify(Justify::Center),
+        ));
+    });
+}
+
+fn stat_box(p: &mut ChildSpawnerCommands, f: &Handle<Font>, caption: &str, stat: PlateStat) {
+    p.spawn((
+        Node {
+            flex_grow: 1.,
+            padding: UiRect::axes(Val::Px(8.), Val::Px(6.)),
+            border: UiRect::all(Val::Px(1.)),
+            border_radius: BorderRadius::all(Val::Px(5.)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.),
+            ..default()
+        },
+        BackgroundColor(skin::SURFACE),
+        BorderColor::all(skin::EDGE),
+    ))
+    .with_children(|b| {
+        skin::label(b, f, caption, 9., skin::MUTED);
+        let value = skin::label(b, f, "", 15., skin::TEXT);
+        b.commands().entity(value).insert(stat);
+    });
+}
+
+/// The race's traits ([`super::races::RACIALS`]), one bullet each.
+fn race_traits(race: u8) -> String {
+    let lines = super::races::trait_lines(race);
+    if lines.is_empty() {
+        return "No racial traits".into();
+    }
+    lines
+        .iter()
+        .map(|l| format!("•  {l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The race the plate describes: the one under the pointer, else the picked one.
+fn shown_race(
+    selection: &super::Selection,
+    buttons: &Query<(&MenuAction, &Interaction)>,
+) -> Option<u8> {
+    buttons
+        .iter()
+        .find_map(|(a, i)| match a {
+            MenuAction::Race(r) if *i != Interaction::None => Some(*r),
+            _ => None,
+        })
+        .or_else(|| {
+            selection
+                .look
+                .and_then(|i| selection.looks.get(i))
+                .map(|l| l.1)
+        })
+}
+
+pub(super) fn refresh_pick_plate(
+    mut commands: Commands,
+    selection: Res<super::Selection>,
+    buttons: Query<(&MenuAction, &Interaction)>,
+    spells: Option<Res<crate::ui_action::Spells>>,
+    mut texts: ParamSet<(
+        Query<(&PlateStat, &mut Text)>,
+        Query<&mut Text, With<RaceTitle>>,
+        Query<&mut Text, With<PickDescription>>,
+    )>,
+    mut slots: Query<(&PoolSlot, &mut Node, &Children)>,
+    mut icons: Query<&mut super::hud::SpellIcon>,
+    mut shown: Local<Option<(Option<usize>, Option<u8>, bool, usize)>>,
+) {
+    let race = shown_race(&selection, &buttons);
+    let key = (selection.class, race, spells.is_some(), slots.iter().len());
+    if *shown == Some(key) {
+        return;
+    }
+    *shown = Some(key);
+    let class = selection.class_def();
+    let (hp, reduction) = class.map_or((0., 0.), |c| super::class_base(c.id));
+    let open = data::MAPS
+        .iter()
+        .filter(|m| super::dungeon::available(m))
+        .count();
+    for (stat, mut text) in &mut texts.p0() {
+        text.0 = match (stat, class) {
+            (_, None) => String::new(),
+            (PlateStat::Health, _) => format!("{hp:.0}"),
+            (PlateStat::Reduction, _) => format!("{:.0}%", reduction * 100.),
+            (PlateStat::Start, Some(c)) => {
+                super::hud::spell_name(spells.as_deref(), data::ability(c.start).spell, c.start)
+            }
+            (PlateStat::Zones, _) => format!("{open} of {}", data::MAPS.len()),
+        };
+    }
+    let name = race.map_or("", super::races::race_name);
+    for mut text in &mut texts.p1() {
+        text.0 = name.into();
+    }
+    for mut text in &mut texts.p2() {
+        text.0 = race.map_or_else(String::new, race_traits);
+    }
+    let pool = class.map_or(&[][..], |c| c.pool);
+    for (slot, mut node, children) in &mut slots {
+        let spell = pool.get(slot.0).map(|k| data::ability(k).spell);
+        node.display = if spell.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        let Some(spell) = spell else { continue };
+        for child in children {
+            if let Ok(mut icon) = icons.get_mut(*child) {
+                if icon.0 != spell {
+                    icon.0 = spell;
+                    commands.entity(*child).remove::<super::hud::IconDone>();
+                }
+            }
+        }
+    }
+}
+
 #[derive(Component)]
 pub(super) struct AdventureDetails;
 
@@ -535,18 +773,7 @@ pub(super) fn refresh_adventure(
         Query<&mut Text, With<RaceCaption>>,
     )>,
 ) {
-    let race = buttons
-        .iter()
-        .find_map(|(a, i)| match a {
-            MenuAction::Race(r) if *i != Interaction::None => Some(*r),
-            _ => None,
-        })
-        .or_else(|| {
-            selection
-                .look
-                .and_then(|i| selection.looks.get(i))
-                .map(|l| l.1)
-        });
+    let race = shown_race(&selection, &buttons);
     let name = race.map_or("", super::races::race_name);
     for mut text in &mut labels.p2() {
         if text.0 != name {

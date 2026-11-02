@@ -902,7 +902,7 @@ fn receive(
                             }
                             run.gold = run.gold.saturating_add(super::gold::collected(
                                 add_gold.min(u64::from(u32::MAX)) as u32,
-                                run.jewel_stat(13),
+                                run.gold_find(),
                                 run.party_factor(0.48),
                             ));
                             while run.level < data::MAX_LEVEL

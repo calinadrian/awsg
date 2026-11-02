@@ -298,7 +298,7 @@ fn slot_frame() -> impl Bundle {
     )
 }
 
-fn spell_name(spells: Option<&crate::ui_action::Spells>, spell: u32, fallback: &str) -> String {
+pub(super) fn spell_name(spells: Option<&crate::ui_action::Spells>, spell: u32, fallback: &str) -> String {
     spells
         .and_then(|s| s.catalog.get(spell))
         .map(|d| d.name.clone())
@@ -946,7 +946,7 @@ fn choices_for(run: &Run, rng: &mut Rng, chest: bool) -> Vec<Choice> {
             if owned.is_none() && slots >= 2 {
                 continue;
             }
-            let rarity = Rarity::roll(rng.f32(), run.jewel_stat(14));
+            let rarity = Rarity::roll(rng.f32(), run.luck());
             let gain = owned.map_or_else(
                 || super::rewards::jewel_gain(d.stat, d.base, rarity, None),
                 |j| j.gain(rarity),
@@ -955,7 +955,7 @@ fn choices_for(run: &Run, rng: &mut Rng, chest: bool) -> Vec<Choice> {
                 pool.push(Choice::Jewelry(i, rarity));
             }
         }
-        let rarity = Rarity::roll(rng.f32(), run.jewel_stat(14));
+        let rarity = Rarity::roll(rng.f32(), run.luck());
         for (i, a) in super::amulets::AMULETS.iter().enumerate() {
             if a.rarity == rarity {
                 pool.push(Choice::Amulet(i));
@@ -963,7 +963,7 @@ fn choices_for(run: &Run, rng: &mut Rng, chest: bool) -> Vec<Choice> {
         }
     } else {
         for (i, o) in run.abilities.iter().enumerate() {
-            let rarity = Rarity::roll(rng.f32(), run.jewel_stat(14));
+            let rarity = Rarity::roll(rng.f32(), run.luck());
             let mut axes = super::reward_axes::axes(o.def.key).to_vec();
             axes.retain(|a| match a {
                 Upgrade::Targets => o.progress.targets < 12,
@@ -988,7 +988,7 @@ fn choices_for(run: &Run, rng: &mut Rng, chest: bool) -> Vec<Choice> {
                 if !run.abilities.iter().any(|o| o.def.key == *key) {
                     pool.push(Choice::NewAbility(
                         data::ability(key),
-                        Rarity::roll(rng.f32(), run.jewel_stat(14)),
+                        Rarity::roll(rng.f32(), run.luck()),
                     ));
                 }
             }

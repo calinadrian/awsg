@@ -279,6 +279,24 @@ fn entities(foes: &[Foe]) -> Vec<Entity> {
     foes.iter().map(|f| f.e).collect()
 }
 
+/// Cast slot `i`: the bar's spells in order, then [`Run::racial`].
+fn slot(run: &Run, i: usize) -> &super::Owned {
+    run.abilities
+        .get(i)
+        .or(run.racial.as_ref())
+        .expect("a cast slot past the bar is the racial")
+}
+
+fn slot_mut(run: &mut Run, i: usize) -> &mut super::Owned {
+    if i < run.abilities.len() {
+        &mut run.abilities[i]
+    } else {
+        run.racial
+            .as_mut()
+            .expect("a cast slot past the bar is the racial")
+    }
+}
+
 pub(super) fn cast_abilities(
     mut commands: Commands,
     time: Res<Time>,
@@ -337,12 +355,14 @@ pub(super) fn cast_abilities(
             .map_or(0.0, |d| d.speed)
     };
 
-    for i in 0..run.abilities.len() {
-        run.abilities[i].cd -= dt;
-        if run.abilities[i].cd > 0.0 {
+    // The bar's spells, then the race's proc.
+    let bar = run.abilities.len();
+    for i in 0..bar + usize::from(run.racial.is_some()) {
+        slot_mut(&mut run, i).cd -= dt;
+        if slot_mut(&mut run, i).cd > 0.0 {
             continue;
         }
-        let o = &run.abilities[i];
+        let o = slot(&run, i);
         let def = o.def;
         if def.kind == Kind::Passive {
             continue;
@@ -674,7 +694,7 @@ pub(super) fn cast_abilities(
             }
             Kind::Passive => false,
         };
-        run.abilities[i].cd = if fired {
+        slot_mut(&mut run, i).cd = if fired {
             p.cooldown
                 + if def.kind == Kind::Immune {
                     p.duration
@@ -685,10 +705,13 @@ pub(super) fn cast_abilities(
             0.2
         };
         if fired {
-            // A talent's echo: the spell goes off again at once.
-            let echo = !run.abilities[i].echoing
+            // A talent's echo: a bar spell goes off again at once.
+            let echo = i < bar
+                && !run.abilities[i].echoing
                 && rng.f32() < (run.talents.stat(13) + run.jewel_stat(9)).min(0.6);
-            run.abilities[i].echoing = echo;
+            if i < bar {
+                run.abilities[i].echoing = echo;
+            }
             if echo {
                 run.abilities[i].cd = 0.15;
             }
@@ -913,7 +936,9 @@ pub(super) fn apply_hits(
                 elite: en.home.is_some() || super::elwynn::is_roaming_elite(en.def),
             });
             run.kills += 1;
-            let healing = run.talents.stat(15) + run.jewel_stat(15);
+            let healing = run.talents.stat(15)
+                + run.jewel_stat(15)
+                + super::races::bonus(run.race, super::races::Bonus::KillHeal);
             run.heal(healing);
             if en.boss {
                 run.banner = Some((format!("{} is slain!", en.def.name), 3.0));

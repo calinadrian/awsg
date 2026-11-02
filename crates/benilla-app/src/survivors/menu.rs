@@ -15,6 +15,7 @@ use crate::glue::art::{tc_rect, GlueArt, GOLD};
 use crate::glue::widgets::{GlueDisabled, HoverLabel, LockHighlight};
 use crate::glue::GlueClicks;
 
+/// The shown race's bonuses on the pick plate, one per line.
 #[derive(Component)]
 pub(super) struct PickDescription;
 
@@ -285,7 +286,6 @@ pub(super) fn refresh_menu_ui(
     mut labels: Query<&mut Visibility, (With<HoverLabel>, Without<MenuAction>)>,
     mut faces: Query<(&RaceFace, &mut ImageNode)>,
     mut name: Query<(&mut Text, &mut TextColor), With<PickName>>,
-    mut descriptions: Query<&mut Text, (With<PickDescription>, Without<PickName>)>,
     mut styles: Query<(&MenuAction, &mut skin::Control)>,
     mut class_slots: Query<(&ClassSlot, &mut Node)>,
     mut cache: Local<(Option<u32>, bool, Vec<Vec<(u32, u8, u8)>>)>,
@@ -407,11 +407,6 @@ pub(super) fn refresh_menu_ui(
         }
     }
     let class = selection.class_def();
-    for mut text in &mut descriptions {
-        text.0 = class.map_or_else(String::new, |c| {
-            format!("Starts with {}", c.start.replace('_', " "))
-        });
-    }
     if let Ok((mut t, mut color)) = name.single_mut() {
         let want = match (class, cur) {
             (Some(c), Some((r, _))) => format!("{} {}", race_name(r), c.name),

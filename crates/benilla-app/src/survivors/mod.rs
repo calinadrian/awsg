@@ -64,6 +64,7 @@ use benilla_world::schedule::WorldStage;
 use bevy::prelude::*;
 
 use data::{AbilityDef, ClassDef};
+use races::Bonus;
 
 /// Set by [`crate::run_survivors`] before the app builds. wasm32 has no process environment, so
 /// the flag lives here; `WOW_SURVIVORS` (`?survivors=1` / `__wenilla_env.survivors` on the web)
@@ -199,6 +200,7 @@ impl Plugin for SurvivorsPlugin {
                     (
                         menu::refresh_menu_ui.before(crate::glue::GlueVisuals),
                         menu_layout::refresh_adventure,
+                        menu_layout::refresh_pick_plate,
                     ).chain(),
                     talents::talent_screen,
                     talents::fill_talent_icons,
@@ -392,14 +394,37 @@ pub(super) struct Stats {
     pub area: f32,
     pub magnet: f32,
     pub growth: f32,
-    pub armor: f32,
+    /// The fraction of every blow the hero shrugs off (native Hero+0x4e8).
+    pub reduction: f32,
     pub crit: f32,
     /// A critical strike's multiplier.
     pub crit_mult: f32,
     pub extra_targets: u32,
 }
 
-pub(super) const BASE_HP: f32 = 120.0;
+/// Health and damage reduction from the native class rows (RVA 0x76bc450, +0x80 and +0x84);
+/// warriors and the unlisted ids share the default row at 0x6fe8ae0.
+pub(super) fn class_base(id: u8) -> (f32, f32) {
+    match id {
+        2 => (245.0, 0.20),
+        3 => (240.0, 0.16),
+        4 => (190.0, 0.18),
+        5 => (170.0, 0.08),
+        7 => (195.0, 0.17),
+        8 => (215.0, 0.08),
+        9 => (165.0, 0.06),
+        11 => (205.0, 0.12),
+        _ => (230.0, 0.22),
+    }
+}
+/// Native stat rebuild 0x5be8f80: each level past the first adds 9 health and 3% damage.
+const HP_PER_LEVEL: f32 = 9.0;
+const MIGHT_PER_LEVEL: f32 = 0.03;
+/// Damage reduction stops at 60% (0x5be95ca).
+const MAX_REDUCTION: f32 = 0.6;
+/// Every hero regenerates 0.8 health a second, and 0.08 more per level past the first.
+const BASE_REGEN: f32 = 0.8;
+const REGEN_PER_LEVEL: f32 = 0.08;
 pub(super) const BASE_SPEED: f32 = 7.0;
 /// Original ASR's base pickup radius (RVA 0x5be92f5).
 pub(super) const BASE_MAGNET: f32 = 9.0;
@@ -415,6 +440,8 @@ pub(super) struct Run {
     pub xp: f32,
     pub hp: f32,
     pub abilities: Vec<Owned>,
+    /// The race's proc, cast with the spells but off the six-slot bar.
+    pub racial: Option<Owned>,
     pub amulet: Option<amulets::Amulet>,
     pub shield: f32,
     pub shield_t: f32,
@@ -478,8 +505,9 @@ impl Default for Run {
             kills: 0,
             level: 1,
             xp: 0.0,
-            hp: BASE_HP,
+            hp: class_base(data::CLASSES[0].id).0,
             abilities: Vec::new(),
+            racial: None,
             amulet: None,
             shield: 0.0,
             shield_t: 0.0,
@@ -543,16 +571,18 @@ impl Run {
     }
 
     pub fn stats(&self) -> Stats {
+        let (base_hp, base_reduction) = class_base(self.class.id);
+        let levels = self.level.saturating_sub(1) as f32;
         let mut s = Stats {
-            might: 1.0,
-            max_hp: BASE_HP,
+            might: 1.0 + MIGHT_PER_LEVEL * levels,
+            max_hp: base_hp + HP_PER_LEVEL * levels,
             speed: BASE_SPEED,
-            regen: 0.0,
+            regen: BASE_REGEN + REGEN_PER_LEVEL * levels,
             haste: 0.0,
             area: 1.0,
             magnet: BASE_MAGNET,
             growth: 1.0,
-            armor: 0.0,
+            reduction: base_reduction,
             crit: 0.05,
             crit_mult: 2.0,
             extra_targets: self
@@ -564,22 +594,21 @@ impl Run {
         s.might += self.gear[1];
         s.haste += self.gear[2];
         s.crit += self.gear[3];
-        // Tanky classes start tougher, cloth starts quicker.
-        match self.class.id {
-            1 | 2 => s.max_hp += 40.0,
-            7 | 11 | 3 | 4 => s.max_hp += 15.0,
-            _ => s.speed += 0.5,
+        // Cloth starts quicker.
+        if !matches!(self.class.id, 1 | 2 | 7 | 11 | 3 | 4) {
+            s.speed += 0.5;
         }
-        s.might += self.jewel_stat(0);
-        s.haste += self.jewel_stat(1);
-        s.max_hp *= 1. + self.jewel_stat(2) + self.jewel_stat(6);
-        s.crit += self.jewel_stat(3);
+        let race = |kind| races::bonus(self.race, kind);
+        s.might += self.jewel_stat(0) + race(Bonus::Damage);
+        s.haste += self.jewel_stat(1) + race(Bonus::Cooldowns);
+        s.max_hp *= 1. + self.jewel_stat(2) + self.jewel_stat(6) + race(Bonus::Health);
+        s.crit += self.jewel_stat(3) + race(Bonus::Crit);
         s.crit_mult += self.jewel_stat(4);
-        s.regen += self.jewel_stat(7);
+        s.regen += self.jewel_stat(7) + race(Bonus::Regen);
         s.area += self.jewel_stat(8);
-        s.speed *= 1. + self.jewel_stat(10);
-        s.magnet *= 1. + self.jewel_stat(11) + races::pickup_bonus(self.race);
-        s.growth += self.jewel_stat(12) + races::xp_bonus(self.race);
+        s.speed *= 1. + self.jewel_stat(10) + race(Bonus::Speed);
+        s.magnet *= 1. + self.jewel_stat(11) + race(Bonus::Pickup);
+        s.growth += self.jewel_stat(12) + race(Bonus::Experience);
         let t = &self.talents;
         s.might += t.stat(0);
         s.haste += t.stat(1);
@@ -588,6 +617,12 @@ impl Run {
         s.crit_mult += t.stat(4);
         s.regen += t.stat(6) + t.stat(24) * s.max_hp;
         s.speed *= 1.0 + t.stat(7);
+        s.reduction = (s.reduction
+            + t.stat(5)
+            + self.jewel_stat(5)
+            + self.gear[4]
+            + race(Bonus::Reduction))
+        .min(MAX_REDUCTION);
         for &(_, effect, strength, _) in &self.buffs {
             match effect {
                 8 | 10 => s.might += strength,
@@ -596,6 +631,16 @@ impl Run {
             }
         }
         s
+    }
+
+    /// Gold find: jewelry and the race.
+    pub fn gold_find(&self) -> f32 {
+        self.jewel_stat(13) + races::bonus(self.race, Bonus::Gold)
+    }
+
+    /// Luck, which lifts reward rarity: jewelry and the race.
+    pub fn luck(&self) -> f32 {
+        self.jewel_stat(14) + races::bonus(self.race, Bonus::Luck)
     }
 
     pub fn jewel_stat(&self, stat: u8) -> f32 {

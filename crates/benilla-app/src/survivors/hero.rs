@@ -331,8 +331,8 @@ pub(super) fn place_camera(
     }
 }
 
-/// Damage the hero takes from one blow, after immunity, armour and the shield; returns what got
-/// through.
+/// Damage the hero takes from one blow, after immunity, damage reduction and the shield; returns
+/// what got through. Native intake 0x5be45e0 has no flat armour and no minimum.
 pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
     if run.coop_run && run.coop_unavailable.contains(&run.coop_target) { return 0.; }
     if run.coop_target != 0 {
@@ -344,8 +344,7 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
     }
     // Native co-op damage intake (0x5be466b..0x5be46d4): +4.48% per extra living player.
     let raw = raw * run.party_factor(0.064);
-    let mut dmg = (raw - run.stats().armor).max(1.0)
-        * (1.0 - run.talents.stat(5) - run.jewel_stat(5) - run.gear[4]).max(0.3);
+    let mut dmg = raw * (1.0 - run.stats().reduction);
     if run.shield_t > 0.0 && run.shield > 0.0 {
         let absorbed = dmg.min(run.shield);
         run.shield -= absorbed;
@@ -515,5 +514,27 @@ mod tests {
         });
         world.run_system_once(drop_stray_buttons).unwrap();
         assert!(!left_held(&world));
+    }
+
+    #[test]
+    fn blows_follow_the_native_class_rows_and_level_curve() {
+        let mut run = Run::default();
+        assert_eq!(run.class.id, 1);
+        let stats = run.stats();
+        assert_eq!(
+            (stats.max_hp, stats.reduction, stats.might),
+            (230.0, 0.22, 1.0)
+        );
+        run.hp = stats.max_hp;
+        let taken = hurt_hero(&mut run, 100.0);
+        assert!((taken - 78.0).abs() < 1e-3, "{taken}");
+
+        run.level = 11;
+        let stats = run.stats();
+        assert_eq!(stats.max_hp, 320.0);
+        assert!((stats.might - 1.3).abs() < 1e-5);
+
+        run.gear[4] = 0.9;
+        assert_eq!(run.stats().reduction, 0.6, "reduction stops at 60%");
     }
 }

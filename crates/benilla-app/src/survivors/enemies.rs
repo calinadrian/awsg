@@ -1422,7 +1422,7 @@ pub(super) fn collect_gems(
             // stay put; only collection credits the balance and applies gold-find.
             if flat(d).length() <= stats.magnet {
                 let earned =
-                    super::gold::collected(base, run.jewel_stat(13), run.party_factor(0.48));
+                    super::gold::collected(base, run.gold_find(), run.party_factor(0.48));
                 if run.dead_t.is_none() {
                     run.gold = run.gold.saturating_add(earned);
                 }
