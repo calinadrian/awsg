@@ -738,9 +738,18 @@ pub(crate) fn all_maps() -> &'static [MapDef] {
     ALL_MAPS
 }
 
-/// Stable menu/save/co-op indices: Elwynn remains 0 and Hall of Thanes remains 1.
+/// Stable menu/save/co-op indices: Elwynn remains 0, Hall of Thanes 1, and Durotar 2.
 pub(crate) static MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::new(|| {
-    ["Elwynn Forest", "Hall of Thanes", "Durotar"]
+    [
+        "Elwynn Forest",
+        "Hall of Thanes",
+        "Durotar",
+        "Westfall",
+        "Duskwood",
+        "The Barrens",
+        "Stonetalon Mountains",
+        "Stranglethorn Vale",
+    ]
         .into_iter()
         .map(|name| {
             *ALL_MAPS
