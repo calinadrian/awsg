@@ -129,6 +129,12 @@ function New-ASRPackage([string]$Path, [Collections.IDictionary]$Files) {
 $runtimeZip = Join-Path $output "ASRGame-$Version-win-x64.zip"
 New-ASRPackage $runtimeZip $runtimeFiles
 $update = [ordered]@{ schema = 1; product = 'asr-game-desktop'; version = $Version; archive = [IO.Path]::GetFileName($runtimeZip); size = (Get-Item -LiteralPath $runtimeZip).Length; sha256 = (Get-FileHash -LiteralPath $runtimeZip -Algorithm SHA256).Hash.ToLowerInvariant() }
+# The game-data pack published by Publish-Data.ps1; launchers download it when theirs differs.
+$dataPointer = Join-Path $PSScriptRoot 'data.json'
+if (Test-Path -LiteralPath $dataPointer) {
+    $pack = Get-Content -LiteralPath $dataPointer -Raw | ConvertFrom-Json
+    $update['data'] = [ordered]@{ path = $pack.path; tag = $pack.tag; asset = $pack.asset; size = [long]$pack.size; sha256 = $pack.sha256 }
+}
 [IO.File]::WriteAllText((Join-Path $output 'update.json'), ($update | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
 
 $setupZip = $runtimeZip

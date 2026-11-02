@@ -20,7 +20,10 @@ using Microsoft.Win32;
 namespace ASRDesktop {
     public sealed class OwnedFile { public string path; public long size; public string sha256; }
     public sealed class Package { public int schema; public string product; public string version; public List<OwnedFile> files; }
-    public sealed class Update { public int schema; public string product; public string version; public string archive; public long size; public string sha256; }
+    public sealed class Update { public int schema; public string product; public string version; public string archive; public long size; public string sha256; public DataPack data; }
+    // The game-data pack, published once under its own `desktop-data-*` prerelease and named by
+    // every later runtime manifest; launchers before 1.0.0.20 ignore the field.
+    public sealed class DataPack { public string path; public string tag; public string asset; public long size; public string sha256; }
     public sealed class Current { public string version; public string directory; }
     public sealed class Installation { public int schema; public string product; public string repository; public List<OwnedFile> data; }
     public sealed class ReleaseAsset { public string name; public string browser_download_url; }
@@ -214,7 +217,7 @@ namespace ASRDesktop {
         internal static void Launch(string root) {
             var pointer = Pointer(root); string folder = VersionFolder(root, pointer);
             string data = Path.Combine(root, "Data");
-            if (!Directory.Exists(data)) throw new DirectoryNotFoundException("Game data is missing. Run ASR Game Setup to repair the installation.");
+            if (!Directory.Exists(data) || Directory.GetFiles(data, "*.MPQ", SearchOption.AllDirectories).Length == 0) throw new FileNotFoundException("Game data has not been downloaded yet. Open ASR Game again and accept the game data download.");
             string home = Path.Combine(UserHome, "benilla-config");
             // Recover portable/version-local saves even if the shared folder already exists.
             // Do not touch a live game's save file; it will save its in-memory book at exit.
@@ -232,6 +235,45 @@ namespace ASRDesktop {
             info.EnvironmentVariables["BENILLA_HOME"] = home;
             info.EnvironmentVariables["ASR_GAME_INSTALL_ROOT"] = root;
             Process.Start(info);
+        }
+        /// Whether the installed copy of the pack's file is already the published one. A recorded
+        /// hash of the same size answers without reading 1.5 GB; otherwise the file is hashed once
+        /// and the answer recorded.
+        internal static bool DataCurrent(string root, DataPack pack) {
+            string target = Under(root, pack.path);
+            if (!File.Exists(target) || new FileInfo(target).Length != pack.size) return false;
+            var install = Managed(root);
+            var owned = install.data ?? new List<OwnedFile>();
+            var record = owned.FirstOrDefault(f => f.path.Equals(pack.path, StringComparison.OrdinalIgnoreCase));
+            if (record != null && record.size == pack.size && pack.sha256.Equals(record.sha256, StringComparison.OrdinalIgnoreCase)) return true;
+            string hash = Hash(target);
+            owned.RemoveAll(f => f.path.Equals(pack.path, StringComparison.OrdinalIgnoreCase));
+            owned.Add(new OwnedFile { path = pack.path, size = pack.size, sha256 = hash });
+            install.data = owned; Atomic(Path.Combine(root, "install.json"), install);
+            return hash.Equals(pack.sha256, StringComparison.OrdinalIgnoreCase);
+        }
+        /// Download the pack beside its target, verify it, and swap it in; the game must be closed.
+        internal static void InstallData(string root, DataPack pack, string url, Action<string, int> progress) {
+            string target = Under(root, pack.path);
+            if (!PlainPath(root, target)) throw new InvalidDataException("Invalid data destination.");
+            if (RunningGame(root)) throw new IOException("Close ASR Game and its co-op server before updating game data.");
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            string temporary = target + ".download-" + Guid.NewGuid().ToString("N");
+            try {
+                Download.Fetch(url, temporary, pack.size, pack.sha256, "Downloading game data…", progress);
+                progress("Installing game data…", 100);
+                if (File.Exists(target)) {
+                    string backup = target + ".previous-" + Guid.NewGuid().ToString("N");
+                    File.Replace(temporary, target, backup);
+                    try { File.Delete(backup); } catch (Exception error) { Log("Data backup cleanup: " + error.Message); }
+                } else File.Move(temporary, target);
+            } finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            var install = Managed(root);
+            var owned = install.data ?? new List<OwnedFile>();
+            owned.RemoveAll(f => f.path.Equals(pack.path, StringComparison.OrdinalIgnoreCase));
+            owned.Add(new OwnedFile { path = pack.path, size = pack.size, sha256 = pack.sha256 });
+            install.data = owned; Atomic(Path.Combine(root, "install.json"), install);
+            Log("Installed game data " + pack.tag + "/" + pack.asset);
         }
         internal static void CopyTree(string source, string target) {
             Directory.CreateDirectory(target);
@@ -365,18 +407,28 @@ namespace ASRDesktop {
                     || update.archive != "ASRGame-" + update.version + "-win-x64.zip" || update.size <= 0 || update.size > 1024L * 1024 * 1024
                     || update.sha256 == null || !Regex.IsMatch(update.sha256, "^[a-fA-F0-9]{64}$")
                     || !release.assets.Any(a => a.name == update.archive && a.browser_download_url == prefix + update.archive)) throw new InvalidDataException("Invalid desktop release manifest.");
+                if (update.data != null && !ValidPack(update.data)) throw new InvalidDataException("Invalid game data manifest.");
                 baseUrl = prefix; return update;
             }
             return null;
         }
-        internal static void Archive(string url, string path, Update update, Action<string, int> progress) {
+        internal static void Archive(string url, string path, Update update, Action<string, int> progress) { Fetch(url, path, update.size, update.sha256, "Downloading update…", progress); }
+        /// The pack's tag and asset are both named by its hash, so a manifest cannot point elsewhere.
+        internal static bool ValidPack(DataPack pack) {
+            if (pack.path != "Data/patch.MPQ" || pack.tag == null || !Regex.IsMatch(pack.tag, @"^desktop-data-[0-9a-f]{12}$")) return false;
+            string id = pack.tag.Substring(13);
+            return pack.asset == "patch-" + id + ".MPQ" && pack.size > 0 && pack.size <= 3L * 1024 * 1024 * 1024
+                && pack.sha256 != null && Regex.IsMatch(pack.sha256, "^[a-f0-9]{64}$") && pack.sha256.StartsWith(id, StringComparison.Ordinal);
+        }
+        internal static string DataUrl(DataPack pack) { return "https://github.com/" + ReleaseInfo.Repository + "/releases/download/" + pack.tag + "/" + pack.asset; }
+        internal static void Fetch(string url, string path, long size, string sha256, string label, Action<string, int> progress) {
             using (var response = Open(url)) using (var input = response.GetResponseStream()) using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write)) {
-                if (response.ContentLength >= 0 && response.ContentLength != update.size) throw new InvalidDataException("Unexpected download size.");
+                if (response.ContentLength >= 0 && response.ContentLength != size) throw new InvalidDataException("Unexpected download size.");
                 byte[] buffer = new byte[1024 * 1024]; int count; long done = 0;
-                while ((count = input.Read(buffer, 0, buffer.Length)) > 0) { done += count; if (done > update.size) throw new InvalidDataException("Update exceeds its manifest size."); output.Write(buffer, 0, count); progress("Downloading update…", (int)(done * 100 / update.size)); }
-                if (done != update.size) throw new InvalidDataException("Download was interrupted.");
+                while ((count = input.Read(buffer, 0, buffer.Length)) > 0) { done += count; if (done > size) throw new InvalidDataException("Download exceeds its manifest size."); output.Write(buffer, 0, count); progress(label, (int)(done * 100 / size)); }
+                if (done != size) throw new InvalidDataException("Download was interrupted.");
             }
-            if (!App.Hash(path).Equals(update.sha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("The update failed its SHA-256 check.");
+            if (!App.Hash(path).Equals(sha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("The download failed its SHA-256 check.");
         }
     }
 
@@ -405,7 +457,7 @@ namespace ASRDesktop {
             Shown += async (s, e) => await Run();
         }
         async Task Run() {
-            string staging = null, archive = null;
+            string staging = null, archive = null; bool offered = false;
             try {
                 var current = App.Pointer(root); string baseUrl = null;
                 var update = await Task.Run(() => Download.Latest(out baseUrl));
@@ -425,7 +477,24 @@ namespace ASRDesktop {
                         staging = null;
                         if (!play) MessageBox.Show(this, "ASR Game is up to date. The new version will open next time you launch the game.", App.Title);
                     }
-                } else if (!play) MessageBox.Show(this, update == null ? "No desktop releases have been published yet." : "You're running the latest version.", App.Title);
+                    offered = true;
+                }
+                // Game data is checked on its own: runtime updates never carry it.
+                if (update != null && update.data != null && !await Task.Run(() => App.DataCurrent(root, update.data))) {
+                    var pack = update.data; offered = true;
+                    Opacity = 1; ShowInTaskbar = true;
+                    string data = Path.Combine(root, "Data"), size = (pack.size / 1073741824.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " GB";
+                    bool missing = !Directory.Exists(data) || Directory.GetFiles(data, "*.MPQ", SearchOption.AllDirectories).Length == 0;
+                    string question = missing
+                        ? "ASR Game needs its game data before it can start (" + size + " download).\n\nDownload it now?"
+                        : "New game data is available (" + size + " download). It adds the maps for every zone.\n\nDownload it now? Your progress is kept.";
+                    if (MessageBox.Show(this, question, App.Title, MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes) {
+                        busy = true; Status.Text = "Preparing game data…";
+                        await Task.Run(() => App.InstallData(root, pack, Download.DataUrl(pack), Report));
+                        if (!play) MessageBox.Show(this, "ASR Game's game data is up to date.", App.Title);
+                    }
+                }
+                if (!offered && !play) MessageBox.Show(this, update == null ? "No desktop releases have been published yet." : "You're running the latest version.", App.Title);
             } catch (Exception error) {
                 App.Log(error.ToString());
                 if (!play || busy) { Opacity = 1; MessageBox.Show(this, "The update could not be completed. Your current installation is still available.\n\n" + error.Message, App.Title, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
@@ -490,9 +559,10 @@ namespace ASRDesktop {
                 var package = await Task.Run(() => App.Extract(payload, staging, true, Report));
                 bool haveData = package.files.Any(f => f.path.StartsWith("Data/", StringComparison.OrdinalIgnoreCase));
                 string source = null;
-                if (!haveData && (!Directory.Exists(Path.Combine(root, "Data")) || Directory.GetFiles(Path.Combine(root, "Data"), "*.MPQ", SearchOption.AllDirectories).Length == 0)) {
+                if (!haveData && (!Directory.Exists(Path.Combine(root, "Data")) || Directory.GetFiles(Path.Combine(root, "Data"), "*.MPQ", SearchOption.AllDirectories).Length == 0)
+                    && MessageBox.Show(this, "Do you have an existing ASR Game Data folder to copy?\n\nChoose No to download the game data automatically the first time you open ASR Game.", App.Title, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) {
                     using (var picker = new FolderBrowserDialog { Description = "Select your existing ASR Game Data folder (the folder containing your MPQ archives)." }) {
-                        if (picker.ShowDialog(this) != DialogResult.OK) throw new OperationCanceledException("Installation cancelled. A Data folder is required."); source = picker.SelectedPath;
+                        if (picker.ShowDialog(this) != DialogResult.OK) throw new OperationCanceledException("Installation cancelled."); source = picker.SelectedPath;
                     }
                 }
                 var owned = previousInstall != null && previousInstall.data != null ? new List<OwnedFile>(previousInstall.data) : new List<OwnedFile>();

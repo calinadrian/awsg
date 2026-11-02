@@ -1,5 +1,7 @@
-"""Build a local Elwynn-only player folder from the user's existing MPQ chain.
+"""Build a local player folder from the user's existing MPQ chain.
 
+It carries every arena defined in the survivors' ALL_MAPS (playable or locked),
+each as the terrain tiles around its centre, not whole continents.
 Python 3.10+ and Rust are required. No game files are downloaded or committed.
 The full source Data directory is opened read-only. Output stays under out/.
 """
@@ -17,7 +19,9 @@ import zipfile
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
-TILES = {(x, y) for x in range(32, 35) for y in range(48, 51)}
+TILE_YARDS = 1600 / 3
+# Detailed tiles around each arena's centre, and coarse horizon tiles around those.
+TILE_RADIUS, HORIZON_RADIUS = 1, 5
 MASK = 0xFFFFFFFF
 
 
@@ -80,7 +84,11 @@ def chunks(raw):
     while at + 8 <= len(raw):
         magic, size = struct.unpack_from('<4sI', raw, at)
         if at + 8 + size > len(raw):
-            raise ValueError('Truncated world chunk')
+            # Some shipped files declare a final chunk a byte or so past their end
+            # (undercity_144.wmo's MOGP); the bytes are packed unchanged either way.
+            if at + 8 + size - len(raw) > 16:
+                raise ValueError('Truncated world chunk')
+            size = len(raw) - at - 8
         yield magic[::-1], raw[at + 8:at + 8 + size]
         at += 8 + size
     if at != len(raw):
@@ -167,7 +175,7 @@ class Archive:
         self.file.write(encrypt(blocks, name_hash('(block table)', 0x300)))
         size = self.file.tell()
         if size >= 2**32:
-            raise ValueError('Elwynn archive exceeds the MPQ v1 size limit')
+            raise ValueError('Arena archive exceeds the MPQ v1 size limit')
         self.file.seek(0)
         self.file.write(struct.pack('<4sIIHHIIII', b'MPQ\x1a', 32, size, 0, 3, hash_at, block_at, slots, len(self.entries)))
         self.file.close()
@@ -210,17 +218,22 @@ class Package:
                     for index in range(count):
                         self.add(name[:-4] + f'_{index:03}.wmo', name)
                 elif tag == b'MCNK':
-                    if name.endswith('azeroth_33_49.adt'):
+                    if name.endswith('.adt'):
                         self.area_ids.add(struct.unpack_from('<I', data, 52)[0])
-                    for child, payload in chunks(data[128:]):
-                        if child == b'MCLY':
-                            for row in struct.iter_unpack('<4I', payload):
-                                if row[3]:
-                                    self.effect_ids.add(row[3] & 0xFFFF)
-                        elif child == b'MCSE':
-                            # SoundEmitter IDs are resolved through SoundEntries.
-                            if len(payload) % 28 == 0:
-                                self.sound_ids.update(struct.unpack_from('<I', payload, i)[0] for i in range(0, len(payload), 28))
+                    # Sub-chunks are found through the header's offsets (from the MCNK chunk's own
+                    # header), not walked: some tiles' sub-chunk sizes do not tile the body.
+                    def sub(ofs_at, tag):
+                        at = struct.unpack_from('<I', data, ofs_at)[0] - 8
+                        if at < 128 or at + 8 > len(data) or data[at:at + 4][::-1] != tag:
+                            return None
+                        return data[at + 8:at + 8 + struct.unpack_from('<I', data, at + 4)[0]]
+                    if layers := sub(0x1C, b'MCLY'):
+                        for row in struct.iter_unpack('<4I', layers[:len(layers) // 16 * 16]):
+                            if row[3]:
+                                self.effect_ids.add(row[3] & 0xFFFF)
+                    # SoundEmitter IDs are resolved through SoundEntries.
+                    if (emitters := sub(0x5C, b'MCSE')) and len(emitters) % 28 == 0:
+                        self.sound_ids.update(struct.unpack_from('<I', emitters, i)[0] for i in range(0, len(emitters), 28))
         elif name.endswith('.m2'):
             if raw[:8] != b'MD20\x00\x01\x00\x00':
                 # Some unused vanilla spell effects contain older model formats.
@@ -317,7 +330,7 @@ class Package:
                 for identifier in row[1:5]:
                     if identifier != MASK and identifier in by_internal:
                         path = doodads.text(by_internal[identifier][2]).replace('/', '\\').rsplit('\\', 1)[-1]
-                        self.add('World/NoDXT/Detail/' + path, 'Elwynn ground cover')
+                        self.add('World/NoDXT/Detail/' + path, 'arena ground cover')
         areas = self.table('AreaTable')
         music, intros, beds = (self.table(name) for name in ('ZoneMusic', 'ZoneIntroMusicTable', 'SoundAmbience'))
         wmo_areas = self.table('WMOAreaTable')
@@ -378,6 +391,9 @@ def build():
                 (name.startswith('interface\\') and not name.startswith(('interface\\worldmap\\', 'interface\\taxiframe\\', 'interface\\cinematics\\'))) or
                 name.startswith(('sound\\ambience\\water\\', 'sound\\ambience\\weather\\'))):
                 package.add(name, 'shared gameplay/UI assets')
+            elif name.endswith('.ground'):
+                # A custom arena's walk grid (Hall of Thanes' arena.ground); no asset references it.
+                package.add(name, 'custom arena walk grid')
 
         gameplay = ROOT / 'crates/benilla-app/src/survivors'
         definitions = (gameplay / 'data.rs').read_text()
@@ -392,6 +408,8 @@ def build():
                     if identifier in package.table('CreatureDisplayInfo').by_id:
                         ids.add(identifier)
         ids.update(int(n) for n in re.findall(r'totem:\s*\((\d+)', (gameplay / 'spell_data.rs').read_text()))
+        # Every arena's foes and bosses: `foe(..)`/`giant(..)` rows and The Barrens' `en(..)`.
+        ids.update(int(n) for n in re.findall(r'\b(?:foe|giant|en)\(\s*"[^"\n]+",\s*(\d+)', definitions))
         equipment = package.creatures(ids)
         for weapons in re.findall(r'weapons:\s*&\[(.*?)\]', definitions, re.S):
             equipment.update(int(n) for n in re.findall(r'\(\s*\d+,\s*(\d+)', weapons))
@@ -406,57 +424,102 @@ def build():
                 if path.lower().endswith(('.mdx', '.mdl', '.m2', '.blp')) and ('/' in path or '\\' in path):
                     package.add(path, table_name)
 
-        for x, y in sorted(TILES):
-            package.add(f'World/Maps/Azeroth/Azeroth_{x}_{y}.adt', 'Elwynn arena and visible surroundings')
-        wdt_path = canonical('World/Maps/Azeroth/Azeroth.wdt')
-        wdt = bytearray()
-        for tag, raw in chunks(reader.read(wdt_path)):
-            if tag == b'MAIN':
-                raw = bytearray(raw)
-                for y in range(64):
-                    for x in range(64):
-                        if (x, y) not in TILES:
-                            raw[(y * 64 + x) * 8:(y * 64 + x + 1) * 8] = b'\0' * 8
-            wdt += struct.pack('<4sI', tag[::-1], len(raw)) + raw
-        package.add(wdt_path, 'Elwynn-only tile index')
+        # Every arena in ALL_MAPS, playable or locked, so an unlock never lands on an empty map.
+        arenas = [(int(m), float(x), float(y)) for m, x, y in
+                  re.findall(r'\bmap:\s*(\d+),.*?\bcenter:\s*\[\s*(-?[\d.]+),\s*(-?[\d.]+)', definitions, re.S)]
+        if not arenas:
+            raise ValueError('No arena definitions found in data.rs')
+        map_table = package.table('Map')
+        wanted = collections.defaultdict(set)  # map directory -> ADT (x, y) around its arenas
+        for map_id, x, y in arenas:
+            row = map_table.by_id.get(map_id)
+            if row is None:
+                package.source_missing.append(dict(map=map_id, reason='arena map absent from source Map.dbc'))
+                continue
+            # ADT names run x along -WoW y and y along -WoW x.
+            tx, ty = int(32 - y / TILE_YARDS), int(32 - x / TILE_YARDS)
+            wanted[map_table.text(row[1])].update(
+                (tx + dx, ty + dy) for dx in range(-TILE_RADIUS, TILE_RADIUS + 1) for dy in range(-TILE_RADIUS, TILE_RADIUS + 1))
 
-        # Coarse, untextured horizon heights for the renderer's five-tile radius.
-        # Exclude the rest of the continent from the distant-terrain index too.
-        wdl_path = canonical('World/Maps/Azeroth/Azeroth.wdl')
-        original_wdl = reader.read(wdl_path)
-        wdl_chunks = dict(chunks(original_wdl))
-        maof = bytearray(64 * 64 * 4)
-        wdl_header = struct.pack('<4sII', b'REVM', 4, 18)
-        wdl_body = bytearray()
-        for y in range(44, 55):
-            for x in range(28, 39):
-                offset = struct.unpack_from('<I', wdl_chunks[b'MAOF'], (y * 64 + x) * 4)[0]
-                if offset:
-                    tag, length = struct.unpack_from('<4sI', original_wdl, offset)
-                    if tag != b'ERAM':
-                        raise ValueError('Unexpected distant-terrain tile')
-                    struct.pack_into('<I', maof, (y * 64 + x) * 4, len(wdl_header) + 8 + len(maof) + len(wdl_body))
-                    wdl_body += original_wdl[offset:offset + 8 + length]
-        wdl = wdl_header + struct.pack('<4sI', b'FOAM', len(maof)) + maof + wdl_body
-        package.add(wdl_path, 'local coarse horizon heights')
+        overrides, tiles = {}, {}
+        for directory, near in sorted(wanted.items()):
+            base = f'World/Maps/{directory}/{directory}'
+            wdt_path = canonical(base + '.wdt')
+            original_wdt = reader.read(wdt_path, optional=True)
+            if original_wdt is None:
+                package.source_missing.append(dict(path=wdt_path, reason='arena map tile index'))
+                continue
+            # A tile index with no terrain tiles is a WMO-only map (a dungeon): its MODF/MWMO carries it whole.
+            present = set()
+            wdt = bytearray()
+            for tag, raw in chunks(original_wdt):
+                if tag == b'MAIN':
+                    raw = bytearray(raw)
+                    for ty in range(64):
+                        for tx in range(64):
+                            slot = (ty * 64 + tx) * 8
+                            if (tx, ty) in near and struct.unpack_from('<I', raw, slot)[0]:
+                                present.add((tx, ty))
+                            else:
+                                raw[slot:slot + 8] = b'\0' * 8
+                wdt += struct.pack('<4sI', tag[::-1], len(raw)) + raw
+            overrides[wdt_path] = bytes(wdt)
+            package.add(wdt_path, f'{directory} arena tile index')
+            tiles[directory] = sorted(present)
+            for tx, ty in sorted(present):
+                package.add(f'{base}_{tx}_{ty}.adt', f'{directory} arena and visible surroundings')
+            if not present:
+                continue
 
+            # Coarse, untextured horizon heights for the renderer's five-tile radius around the
+            # arenas; the rest of the continent stays out of the distant-terrain index too.
+            wdl_path = canonical(base + '.wdl')
+            original_wdl = reader.read(wdl_path, optional=True)
+            if original_wdl is None:
+                continue
+            wdl_chunks = dict(chunks(original_wdl))
+            horizon = {(tx + dx, ty + dy) for tx, ty in present
+                       for dx in range(-HORIZON_RADIUS, HORIZON_RADIUS + 1) for dy in range(-HORIZON_RADIUS, HORIZON_RADIUS + 1)}
+            maof = bytearray(64 * 64 * 4)
+            wdl_header = struct.pack('<4sII', b'REVM', 4, 18)
+            wdl_body = bytearray()
+            for ty in range(64):
+                for tx in range(64):
+                    if (tx, ty) not in horizon:
+                        continue
+                    offset = struct.unpack_from('<I', wdl_chunks[b'MAOF'], (ty * 64 + tx) * 4)[0]
+                    if offset:
+                        tag, length = struct.unpack_from('<4sI', original_wdl, offset)
+                        if tag != b'ERAM':
+                            raise ValueError('Unexpected distant-terrain tile')
+                        struct.pack_into('<I', maof, (ty * 64 + tx) * 4, len(wdl_header) + 8 + len(maof) + len(wdl_body))
+                        wdl_body += original_wdl[offset:offset + 8 + length]
+            overrides[wdl_path] = bytes(wdl_header + struct.pack('<4sI', b'FOAM', len(maof)) + maof + wdl_body)
+            package.add(wdl_path, f'{directory} coarse horizon heights')
+
+        # The minimap index, cut to the packed terrain tiles; entries stay under their map's header.
         translate_path = canonical('Textures/Minimap/md5translate.trs')
         translate = reader.read(translate_path).decode('ascii')
-        lines = []
+        by_dir = {directory.lower(): set(present) for directory, present in tiles.items()}
+        sections = collections.defaultdict(list)
         for line in translate.splitlines():
             columns = line.split('\t')
-            match = re.fullmatch(r'azeroth[\\/]map(\d+)_(\d+)\.blp', columns[0], re.I)
-            if match and tuple(map(int, match.groups())) in TILES:
-                if len(columns) != 2:
-                    raise ValueError('Malformed outdoor minimap mapping')
-                lines.append(line)
-                package.add('Textures/Minimap/' + columns[1], 'Elwynn minimap')
-        if len(lines) != len(TILES):
-            raise ValueError('Elwynn minimap mappings are incomplete')
-        # The parser expects the continent header before its entries.
-        minimap = ('dir: Azeroth\r\n' + '\r\n'.join(lines) + '\r\n').encode('ascii')
-        package.add(translate_path, 'Elwynn-only minimap index')
-        package.drain({wdt_path: bytes(wdt), wdl_path: bytes(wdl), translate_path: minimap})
+            match = re.fullmatch(r'([^\\/]+)[\\/]map(\d+)_(\d+)\.blp', columns[0], re.I)
+            if not match or (int(match[2]), int(match[3])) not in by_dir.get(match[1].lower(), ()):
+                continue
+            if len(columns) != 2:
+                raise ValueError('Malformed outdoor minimap mapping')
+            sections[match[1]].append(line)
+            package.add('Textures/Minimap/' + columns[1], f'{match[1]} minimap')
+        for directory, present in tiles.items():
+            found = sum(len(lines) for name, lines in sections.items() if name.lower() == directory.lower())
+            if found != len(present):
+                print(f'Note: {directory} has minimap entries for {found} of {len(present)} packed tiles', flush=True)
+        # The parser expects each continent's header before its entries.
+        minimap = ''.join(f'dir: {directory}\r\n' + ''.join(line + '\r\n' for line in lines) for directory, lines in sections.items())
+        overrides[translate_path] = minimap.encode('ascii')
+        package.add(translate_path, 'arena-only minimap index')
+        package.drain(overrides)
         package.environment()
 
         sounds = package.table('SoundEntries')
@@ -469,7 +532,7 @@ def build():
             if shared or row[0] in package.sound_ids or label in ('ghost (donotrename)', 'underwater (donotrename)') or directory.lower().startswith(('sound\\music\\zonemusic\\forest', 'sound\\music\\gluescreenmusic', 'sound\\doodad')):
                 for offset in row[3:13]:
                     if file := sounds.text(offset):
-                        package.add(directory.rstrip('\\') + '/' + file, 'Elwynn/creature/environment audio')
+                        package.add(directory.rstrip('\\') + '/' + file, 'arena/creature/environment audio')
         package.drain()
         archive.finish()
         temporary.replace(output / 'Data/patch.MPQ')
@@ -478,7 +541,7 @@ def build():
             archive.file.close()
         reader.close()
 
-    report = dict(source=str(source), tiles=sorted(TILES), assets=len(package.manifest),
+    report = dict(source=str(source), tiles=tiles, assets=len(package.manifest),
                   raw_asset_bytes=sum(row['bytes'] for row in package.manifest),
                   archive_bytes=(output / 'Data/patch.MPQ').stat().st_size,
                   files=package.manifest, source_missing=package.source_missing,
@@ -497,9 +560,9 @@ def build():
             relay = 'asr-coop.exe' if os.name == 'nt' else 'asr-coop'
             shutil.copy2(ROOT / 'target/release' / relay, output / relay)
             (output / 'Host Server.cmd').write_text('@echo off\ncd /d "%~dp0"\n"%~dp0asr-coop.exe" --bind 0.0.0.0:47771\npause\n')
-        (output / 'README.txt').write_text('Elwynn Forest local player package\n\nRun Play.cmd. No Rust installation is needed to play.\nKeep Data beside the executable. This package contains assets from your own\nlocal game installation; keep game data out of the source repository.\nBuild and packaging do not establish gameplay correctness; gameplay is untested.\n')
+        (output / 'README.txt').write_text('ASR Game local player package\n\nRun Play.cmd. No Rust installation is needed to play.\nKeep Data beside the executable. This package contains assets from your own\nlocal game installation; keep game data out of the source repository.\nBuild and packaging do not establish gameplay correctness; gameplay is untested.\n')
     total = sum(path.stat().st_size for path in output.rglob('*') if path.is_file())
-    print(f'Elwynn output: {output}\n{len(package.manifest):,} assets; {report["archive_bytes"]:,} archive bytes; {total:,} total bytes', flush=True)
+    print(f'Player package: {output}\n{len(package.manifest):,} assets; {report["archive_bytes"]:,} archive bytes; {total:,} total bytes', flush=True)
     if args.zip:
         zip_path = output.with_suffix('.zip')
         temporary_zip = zip_path.with_suffix('.zip.tmp')

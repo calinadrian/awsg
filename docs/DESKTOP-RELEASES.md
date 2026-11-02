@@ -20,11 +20,34 @@ The Start-menu **Check for updates** shortcut checks manually. A manual update
 while a match is running takes effect the next time the game is opened; it does
 not terminate the match.
 
-The full local installer built with `-EmbedData` includes the existing Elwynn
-runtime data. The automatically published runtime installer asks a new player
-to select an existing compatible ASR Game `Data` folder. It copies the archives
-without modifying that source. Reinstalling an existing managed installation
-can reuse its installed data.
+The full local installer built with `-EmbedData` includes the packaged arena
+runtime data. The published runtime installer asks a new player whether they
+have an existing ASR Game `Data` folder to copy; it copies the archives without
+modifying that source. A player who has none downloads the game data the first
+time they open ASR Game. Reinstalling an existing managed installation can reuse
+its installed data.
+
+## Game data updates
+
+Runtime updates never carry game data. The data pack, `Data/patch.MPQ` built by
+`scripts/package_elwynn.py`, is published separately, once per change:
+
+```powershell
+.\desktop\Publish-Data.ps1
+```
+
+This uploads the pack to a `desktop-data-<hash>` prerelease, which the launcher
+never offers as a program update and pruning never removes, and writes
+`desktop/data.json`. Commit that file: `Build.ps1` copies it into every later
+`update.json`, so each release, including CI's, names the current pack.
+
+On every start, a launcher from 1.0.0.20 on compares the installed
+`Data/patch.MPQ` against that pointer by size, then by the hash recorded in
+`install.json`, and offers the download when they differ. The pack's tag and
+asset name both come from its SHA-256, and the download is checked against size
+and hash before it replaces the old file. Launchers before 1.0.0.20 ignore the
+pointer; they pick the new launcher up through a normal update, and the data
+follows on the next start.
 
 ## Progress and uninstalling
 
@@ -86,7 +109,8 @@ number, starting above the local `1.0.0.0` installer. Desktop release versions
 also advance past explicitly numbered desktop releases already on GitHub, so a
 manual publication does not stall the automatic channel. These versions
 are separate from the engine's Cargo version. Runtime releases do not bundle or
-upload game data, player state, local configuration or private keys.
+upload player state, local configuration or private keys; game data goes up only
+through `Publish-Data.ps1` (see Game data updates).
 
 For an explicit version from committed source already present on `origin/main`:
 
