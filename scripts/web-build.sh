@@ -35,6 +35,8 @@ strip=(--remove-name-section --remove-producers-section)
 [ "${WEB_DEBUG:-0}" = 1 ] && strip=()
 wasm-bindgen --target web --no-typescript ${strip[@]+"${strip[@]}"} --out-dir "${DIST}" "${WASM}"
 cp web/index.html web/favicon.svg web/wasi_stubs.js web/boot.js web/platform.js web/bridge.js "${DIST}/"
+# The standalone class balance simulator is a page in the same local build.
+cp web/balance.html web/balance.js web/balance-data.js "${DIST}/"
 # The bridge examples (web/README.md § "JavaScript bridge"): a HUD, an idle loop.
 mkdir -p "${DIST}/examples" && cp web/examples/*.js "${DIST}/examples/"
 # The boot prefetch manifest (see web/boot.js) — optional so a tree that hasn't captured one

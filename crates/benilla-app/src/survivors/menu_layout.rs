@@ -429,6 +429,8 @@ fn pick_plate(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
                         icons
                             .spawn((
                                 PoolSlot(i),
+                                super::hud::TipFor::Pool(""),
+                                Interaction::None,
                                 Node {
                                     width: Val::Px(POOL_ICON),
                                     height: Val::Px(POOL_ICON),
@@ -546,7 +548,7 @@ pub(super) fn refresh_pick_plate(
         Query<&mut Text, With<RaceTitle>>,
         Query<&mut Text, With<PickDescription>>,
     )>,
-    mut slots: Query<(&PoolSlot, &mut Node, &Children)>,
+    mut slots: Query<(&PoolSlot, &mut Node, &Children, &mut super::hud::TipFor)>,
     mut icons: Query<&mut super::hud::SpellIcon>,
     mut shown: Local<Option<(Option<usize>, Option<u8>, bool, usize)>>,
 ) {
@@ -581,8 +583,12 @@ pub(super) fn refresh_pick_plate(
         text.0 = race.map_or_else(String::new, race_traits);
     }
     let pool = class.map_or(&[][..], |c| c.pool);
-    for (slot, mut node, children) in &mut slots {
-        let spell = pool.get(slot.0).map(|k| data::ability(k).spell);
+    for (slot, mut node, children, mut tip) in &mut slots {
+        let key = pool.get(slot.0).copied();
+        if let Some(key) = key {
+            *tip = super::hud::TipFor::Pool(key);
+        }
+        let spell = key.map(|k| data::ability(k).spell);
         node.display = if spell.is_some() {
             Display::Flex
         } else {

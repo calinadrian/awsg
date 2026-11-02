@@ -23,6 +23,8 @@ struct Job {
 struct Save {
     heroes: BTreeMap<String, HeroSave>,
     pending: Vec<Job>,
+    #[serde(default)]
+    linked: BTreeMap<String, String>,
 }
 #[derive(Resource)]
 pub(super) struct Equipment {
@@ -33,9 +35,12 @@ pub(super) struct Equipment {
     pub revision: u64,
     pub open: bool,
     pub market: bool,
+    pub search: String,
+    pub search_active: bool,
+    pub search_cursor: super::text_edit::Cursor,
+    pub show_loot: bool,
     pub selected: Option<u64>,
     pub listing: Option<u64>,
-    pub page: usize,
     pub filter: usize,
     /// An index into `SLOTS`: the bags and the market show only items for that slot.
     pub slot_filter: Option<usize>,
@@ -53,6 +58,7 @@ pub(super) struct Equipment {
     reward_t: f32,
     finished: bool,
     read_only: bool,
+    link_failed: bool,
 }
 fn path() -> Option<std::path::PathBuf> {
     crate::local_state::home().map(|p| p.join("survivors-inventory.json"))
@@ -100,9 +106,12 @@ impl Default for Equipment {
             revision: 0,
             open: false,
             market: false,
+            search: String::new(),
+            search_active: false,
+            search_cursor: Default::default(),
+            show_loot: false,
             selected: None,
             listing: None,
-            page: 0,
             filter: 0,
             slot_filter: None,
             price: 10,
@@ -119,6 +128,7 @@ impl Default for Equipment {
             reward_t: 0.,
             finished: true,
             read_only,
+            link_failed: false,
         }
     }
 }
@@ -127,10 +137,92 @@ impl Equipment {
         format!("{}:{class}", server.trim_end_matches('/'))
     }
     pub fn hero(&self, server: &str, class: u8) -> Option<&HeroSave> {
-        self.save.heroes.get(&Self::key(server, class))
+        self.save.heroes.get(&Self::key(server, class)).or_else(|| {
+            let prefix = format!("{}:", server.trim_end_matches('/'));
+            self.save
+                .heroes
+                .iter()
+                .find(|(key, _)| key.starts_with(&prefix))
+                .map(|(_, hero)| hero)
+        })
+    }
+    pub fn view(&self, server: &str, class: u8) -> Option<HeroSave> {
+        let mut hero = self.hero(server, class)?.clone();
+        let original_class = hero.inventory.class;
+        for item in &mut hero.inventory.items {
+            if item.slot.is_some() && item.equipped_class.is_none() {
+                item.equipped_class = Some(original_class);
+            }
+        }
+        hero.inventory.class = class;
+        Some(hero)
     }
     pub fn busy(&self) -> bool {
-        self.read_only || self.flight || !self.save.pending.is_empty()
+        self.read_only
+    }
+    pub fn online(&self) -> bool {
+        self.connected
+    }
+    pub fn item_busy(&self, item: u64) -> bool {
+        self.read_only
+            || self
+                .save
+                .pending
+                .iter()
+                .any(|job| match job.request.action {
+                    Action::Equip { item: pending, .. }
+                    | Action::Lock { item: pending, .. }
+                    | Action::Upgrade { item: pending }
+                    | Action::Scrap { item: pending }
+                    | Action::List { item: pending, .. } => pending == item,
+                    _ => false,
+                })
+    }
+    fn link_classes(&mut self, server: &str, class: u8) {
+        if self.link_failed {
+            return;
+        }
+        let prefix = format!("{}:", server.trim_end_matches('/'));
+        if self.save.pending.iter().any(|job| {
+            job.key.starts_with(&prefix)
+                && matches!(
+                    job.request.action,
+                    Action::Register { .. } | Action::LinkInventory { .. }
+                )
+        }) {
+            return;
+        }
+        let tokens: Vec<_> = self
+            .save
+            .heroes
+            .iter()
+            .filter(|(key, hero)| key.starts_with(&prefix) && !hero.token.is_empty())
+            .map(|(_, hero)| hero.token.clone())
+            .collect();
+        if !tokens.is_empty()
+            && self.save.heroes.contains_key(&Self::key(server, class))
+            && self.save.linked.get(&prefix) != Some(&tokens.join("|"))
+        {
+            self.action(server, class, Action::LinkInventory { tokens });
+            // Linking must precede unsent item actions against another class's former bags.
+            if let Some(job) = self.save.pending.pop() {
+                let index = self
+                    .save
+                    .pending
+                    .iter()
+                    .rposition(|pending| {
+                        matches!(
+                            pending.request.action,
+                            Action::Register { .. }
+                                | Action::BeginRun { .. }
+                                | Action::Reward { .. }
+                        )
+                    })
+                    .map_or(0, |i| i + 1);
+                self.save.pending.insert(index, job);
+            }
+            self.persist();
+        }
     }
     fn persist(&mut self) -> bool {
         let result = path()
@@ -163,6 +255,9 @@ impl Equipment {
         self.revision += 1;
     }
     pub fn action(&mut self, server: &str, class: u8, action: Action) {
+        if matches!(action, Action::Refresh) {
+            self.link_failed = false;
+        }
         self.queue(Self::key(server, class), action);
     }
     fn ensure_hero(&mut self, server: &str, class: u8, name: &str) {
@@ -247,14 +342,18 @@ fn begin(
         gear.finished = true;
         gear.status = "Equipment drops are not available for this map".into();
     }
-    if let Some(hero) = gear.hero(&coop.url, run.class.id) {
+    if let Some(hero) = gear.view(&coop.url, run.class.id) {
         run.gear_look = hero
             .inventory
             .items
             .iter()
+            .filter(|item| item.equipped_for(run.class.id))
             .filter_map(|item| {
                 let slot = item.slot.as_ref()?;
                 let d = gear.catalog.definition(&item.definition)?;
+                if !d.fits(run.class.id, slot) {
+                    return None;
+                }
                 Some(asr_coop::economy::LookItem {
                     slot: slot.clone(),
                     display: d.display_id,
@@ -262,7 +361,9 @@ fn begin(
                 })
             })
             .collect();
-        let bonuses = hero.inventory.bonuses(&gear.catalog);
+        let mut inventory = hero.inventory.clone();
+        inventory.class = run.class.id;
+        let bonuses = inventory.bonuses(&gear.catalog);
         run.gear = std::array::from_fn(|i| {
             let key = [
                 "max_health",
@@ -327,6 +428,7 @@ fn network(
             gear.flight = false;
             gear.server = coop.url.clone();
             gear.listings.clear();
+            gear.link_failed = false;
         }
         let relevant = gear.save.pending.iter().any(|j| {
             j.key
@@ -373,6 +475,15 @@ fn network(
                     let job = gear.save.pending.remove(0);
                     gear.flight = false;
                     if reply.ok {
+                        let prefix = format!("{}:", coop.url.trim_end_matches('/'));
+                        let linked = if let Action::LinkInventory { tokens } = &job.request.action {
+                            gear.save.linked.insert(prefix.clone(), tokens.join("|"));
+                            true
+                        } else {
+                            gear.save.linked.contains_key(&prefix)
+                                && !matches!(job.request.action, Action::Register { .. })
+                        };
+                        let shared = reply.inventory.clone();
                         let hero = gear.save.heroes.entry(job.key).or_default();
                         if let Some(token) = reply.token {
                             hero.token = token;
@@ -383,9 +494,23 @@ fn network(
                         if let Some(run) = reply.run {
                             hero.run = run;
                         }
+                        if linked {
+                            if let Some(inventory) = shared {
+                                for (key, hero) in &mut gear.save.heroes {
+                                    if key.starts_with(&prefix) {
+                                        let class = hero.inventory.class;
+                                        hero.inventory = inventory.clone();
+                                        hero.inventory.class = class;
+                                    }
+                                }
+                            }
+                        }
                         gear.listings = reply.listings;
                         gear.status = "Inventory synchronized".into();
                     } else {
+                        if matches!(job.request.action, Action::LinkInventory { .. }) {
+                            gear.link_failed = true;
+                        }
                         gear.status = reply.message;
                     }
                     gear.persist();
@@ -411,6 +536,7 @@ fn network(
             gear.revision += 1;
         }
         if gear.connected && !gear.flight {
+            gear.link_classes(&coop.url, class);
             if gear.save.pending.is_empty() && gear.open && gear.refresh_t > 5. {
                 gear.refresh_t = 0.;
                 gear.action(&coop.url, class, Action::Refresh);

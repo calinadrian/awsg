@@ -13,6 +13,8 @@ use crate::net::{FieldChanged, Guid, ObjectStore};
 /// One blow landing on one enemy.
 #[derive(Message, Clone)]
 pub(super) struct Hit {
+    pub source: Option<super::damage_meter::Source>,
+    pub contributors: Vec<(super::damage_meter::Source, f32)>,
     pub proc_depth: u8,
     pub spell: u32,
     pub dot_every: f32,
@@ -32,6 +34,8 @@ pub(super) struct Hit {
 impl Hit {
     pub fn direct(target: Entity, damage: f32, crit: bool) -> Self {
         Self {
+            source: None,
+            contributors: Vec::new(),
             proc_depth: 0,
             spell: 0,
             dot_every: 1.0,
@@ -56,6 +60,7 @@ pub(super) struct PendingHits(pub Vec<(f32, Hit)>);
 /// A ground spell's area, ticking on whatever stands in it.
 #[derive(Component)]
 pub(super) struct GroundArea {
+    source: Option<super::damage_meter::Source>,
     spell: u32,
     damage: f32,
     dot: f32,
@@ -72,6 +77,7 @@ pub(super) struct GroundArea {
 
 #[derive(Component)]
 pub(super) struct Totem {
+    source: Option<super::damage_meter::Source>,
     spell: u32,
     cast: u32,
     damage: f32,
@@ -114,6 +120,11 @@ pub(super) fn parameters(o: &super::Owned, run: &Run) -> Params {
             1.0
         } else {
             stats.might
+        }
+        * if matches!(def.kind, Kind::Buff | Kind::Heal | Kind::Shield | Kind::Immune) {
+            1.0
+        } else {
+            run.class.damage_scale
         }
         * (1. + t.modifier(def, 0))
         * if matches!(def.kind, Kind::Shield | Kind::Heal | Kind::Thorns) {
@@ -162,8 +173,10 @@ fn mark_secs(def: &AbilityDef, duration: f32) -> f32 {
     }
 }
 
-fn hit_for(def: &AbilityDef, p: &Params, target: Entity, damage: f32, crit: bool) -> Hit {
+fn hit_for(def: &AbilityDef, p: &Params, target: Entity, damage: f32, crit: bool, source: Option<super::damage_meter::Source>) -> Hit {
     Hit {
+        source,
+        contributors: Vec::new(),
         proc_depth: 0,
         spell: def.spell,
         dot_every: if def.ticks > 0 {
@@ -364,6 +377,7 @@ pub(super) fn cast_abilities(
         }
         let o = slot(&run, i);
         let def = o.def;
+        let source = o.next_source.or(o.damage_source);
         if def.kind == Kind::Passive {
             continue;
         }
@@ -417,7 +431,7 @@ pub(super) fn cast_abilities(
                             &mut hits,
                             now,
                             delay,
-                            hit_for(def, &p, f.e, dmg, crit),
+                            hit_for(def, &p, f.e, dmg, crit, source),
                         );
                     }
                     true
@@ -446,7 +460,7 @@ pub(super) fn cast_abilities(
                             &mut hits,
                             now,
                             delay,
-                            hit_for(def, &p, f.e, dmg, crit),
+                            hit_for(def, &p, f.e, dmg, crit, source),
                         );
                     }
                     true
@@ -480,6 +494,7 @@ pub(super) fn cast_abilities(
                         };
                         let burst = def.duration <= 0.0;
                         commands.entity(area).insert(GroundArea {
+                            source,
                             spell: def.spell,
                             damage: if def.ticks > 0 {
                                 p.dmg / def.ticks as f32
@@ -536,7 +551,7 @@ pub(super) fn cast_abilities(
                             &mut hits,
                             now,
                             0.08 * k as f32,
-                            hit_for(def, &p, f.e, dmg, crit),
+                            hit_for(def, &p, f.e, dmg, crit, source),
                         );
                     }
                     true
@@ -563,7 +578,7 @@ pub(super) fn cast_abilities(
                             &mut hits,
                             now,
                             delay,
-                            hit_for(def, &p, f.e, 0.0, false),
+                            hit_for(def, &p, f.e, 0.0, false, source),
                         );
                     }
                     true
@@ -579,7 +594,7 @@ pub(super) fn cast_abilities(
                     }
                     for f in &targets {
                         let (dmg, crit) = roll(&mut rng, &stats, p.dmg);
-                        hits.write(hit_for(def, &p, f.e, dmg, crit));
+                        hits.write(hit_for(def, &p, f.e, dmg, crit, source));
                     }
                     true
                 }
@@ -611,6 +626,7 @@ pub(super) fn cast_abilities(
                     run.thorns = p.dmg;
                     run.thorns_t = p.duration;
                     run.thorns_spell = def.spell;
+                    run.thorns_source = source;
                     fx.cast(me, def.spell, &[me], None);
                     true
                 } else {
@@ -657,6 +673,7 @@ pub(super) fn cast_abilities(
                         0.0,
                     );
                     commands.entity(totem).insert(Totem {
+                        source,
                         spell: def.spell,
                         cast: def.totem.1,
                         damage: p.dmg,
@@ -705,15 +722,25 @@ pub(super) fn cast_abilities(
             0.2
         };
         if fired {
+            slot_mut(&mut run, i).next_source = None;
             // A talent's echo: a bar spell goes off again at once.
-            let echo = i < bar
-                && !run.abilities[i].echoing
-                && rng.f32() < (run.talents.stat(13) + run.jewel_stat(9)).min(0.6);
+            let chance = (run.talents.stat(13) + run.jewel_stat(9)).min(0.6);
+            let echo_roll = if i < bar && !run.abilities[i].echoing { Some(rng.f32()) } else { None };
+            let echo = echo_roll.is_some_and(|roll| roll < chance);
             if i < bar {
                 run.abilities[i].echoing = echo;
             }
             if echo {
                 run.abilities[i].cd = 0.15;
+                let sources = run.effect_sources(13, 9);
+                let mut roll = echo_roll.unwrap_or(0.0) / chance * sources.iter().map(|(_, v)| v).sum::<f32>();
+                for (source, weight) in sources {
+                    roll -= weight;
+                    if roll <= 0.0 {
+                        run.abilities[i].next_source = Some(source);
+                        break;
+                    }
+                }
             }
             super::talents::trigger(&mut run, &mut rng, 7, None);
             super::talents::trigger(&mut run, &mut rng, 3, Some(def.key));
@@ -771,6 +798,8 @@ pub(super) fn tick_areas(
                 }
                 let (dmg, crit) = roll(&mut rng, &stats, area.damage);
                 hits.write(Hit {
+                    source: area.source,
+                    contributors: Vec::new(),
                     proc_depth: 0,
                     spell: area.spell,
                     dot_every: 1.0,
@@ -818,6 +847,7 @@ pub(super) fn tick_areas(
                 for f in &targets {
                     let (dmg, crit) = roll(&mut rng, &stats, totem.damage);
                     hits.write(Hit {
+                        source: totem.source,
                         spell: totem.spell,
                         color: COLOR_SPELL,
                         ..Hit::direct(f.e, dmg, crit)
@@ -849,6 +879,7 @@ pub(super) fn tick_areas(
                         now,
                         delay,
                         Hit {
+                            source: totem.source,
                             spell: totem.spell,
                             color: COLOR_SPELL,
                             ..Hit::direct(f.e, dmg, crit)
@@ -1009,7 +1040,14 @@ pub(super) fn apply_hits(
             {
                 en.stun_t = en.stun_t.max(10.0);
             }
-            run.damage_done += f64::from(landed);
+            let weight: f32 = h.contributors.iter().map(|(_, weight)| weight).sum();
+            if weight > 0.0 {
+                for &(source, share) in &h.contributors {
+                    run.record_damage(Some(source), h.spell, landed * share / weight);
+                }
+            } else {
+                run.record_damage(h.source, h.spell, landed);
+            }
             fx.number(e, dmg, h.crit, h.color);
             if let Effect::Drain(frac) = h.effect {
                 run.heal(dmg * frac);
@@ -1018,6 +1056,7 @@ pub(super) fn apply_hits(
         if h.dot > 0.0 && h.dot_dur > 0.0 {
             en.dots.retain(|d| d.spell != h.spell);
             en.dots.push(enemies::Dot {
+                source: h.source,
                 spell: h.spell,
                 damage: h.dot * h.dot_every,
                 every: h.dot_every,
@@ -1087,19 +1126,22 @@ pub(super) fn apply_hits(
         }
         let mut dealt = 0.0;
         let mut drained = 0.0;
+        let mut remaining_hp = en.hp.max(0.0);
         for d in &mut en.dots {
             d.left -= dt;
             d.tick -= dt.min((d.left + dt).max(0.0)) * (1.0 + run.jewel_stat(19));
             while d.tick <= 0.00001 {
                 d.tick += d.every.max(0.01);
                 dealt += d.damage;
+                let landed = d.damage.max(0.0).min(remaining_hp);
+                run.record_damage(d.source, d.spell, landed);
+                remaining_hp -= landed;
                 drained += d.damage * d.drain;
             }
         }
         en.dots.retain(|d| d.left > 0.0);
         if dealt > 0.0 {
             run.heal(drained);
-            run.damage_done += f64::from(dealt.min(en.hp.max(0.0)));
             en.hp -= dealt;
             fx.number(e, dealt, false, COLOR_SPELL);
             if coop.guest() {

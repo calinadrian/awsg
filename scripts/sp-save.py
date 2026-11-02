@@ -174,22 +174,37 @@ def parse_book(text):
             cid, xp = int(w[0]), float(w[1])
         except ValueError:
             continue
-        ranks = []
+        specs = [[], [], []]
+        active = 0
         for tok in w[2:]:
+            if tok.startswith('active='):
+                try:
+                    active = min(2, max(0, int(tok[7:])))
+                except ValueError:
+                    pass
+                continue
+            spec, sep, entries = tok.partition(':')
+            if sep and spec in ('S0', 'S1', 'S2'):
+                for entry in entries.split(','):
+                    k, eq, r = entry.partition('=')
+                    if eq and r.isdigit():
+                        specs[int(spec[1])].append((k, int(r)))
+                continue
             k, sep, r = tok.partition('=')
             if sep and r.isdigit():
-                ranks.append((k, int(r)))
-        book[cid] = (xp, ranks)
+                specs[0].append((k, int(r)))
+        book[cid] = (xp, specs, active)
     return book
 
 
 def render_book(book):
-    # The shape TalentBook::save writes: sorted lines, sorted key=rank pairs.
+    # Preserve all saved specs when importing any class from the original game.
     lines = []
-    for cid, (xp, ranks) in sorted(book.items()):
+    for cid, (xp, specs, active) in sorted(book.items()):
         xp_s = str(int(xp)) if xp == int(xp) else repr(xp)
-        rk = ' '.join('%s=%d' % (k, r) for k, r in sorted(ranks))
-        lines.append(('%d %s %s' % (cid, xp_s, rk)).rstrip())
+        slots = ' '.join('S%d:%s' % (i, ','.join('%s=%d' % (k, r) for k, r in sorted(ranks)))
+                         for i, ranks in enumerate(specs))
+        lines.append('%d %s active=%d %s' % (cid, xp_s, active, slots))
     lines.sort()
     return '\n'.join(lines) + '\n'
 
@@ -283,7 +298,9 @@ def import_book(args, text, only):
                 ranks.append((k, int(r)))
         spent = sum(r for _, r in ranks)
         xp1 = xp0 + spent_cost(spent)
-        book[cid] = (xp1, sorted(ranks))
+        _, specs, active = book.get(cid, (0, [[], [], []], 0))
+        specs[0] = sorted(ranks)
+        book[cid] = (xp1, specs, active)
         pts, _ = earned_points(xp1)
         print('%s: save balance %d + spent cost %d (%d ranks) -> book xp %d  =>  %d earned, '
               '%d spent, %d unspent%s'

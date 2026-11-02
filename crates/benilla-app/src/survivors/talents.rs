@@ -170,7 +170,8 @@ pub(super) fn text_at(t: &TalentDef, rank: u8) -> String {
 #[derive(Default, Clone)]
 pub(super) struct ClassBook {
     pub exp: f32,
-    pub ranks: HashMap<&'static str, u8>,
+    specs: [HashMap<&'static str, u8>; 3],
+    active_spec: usize,
 }
 
 impl ClassBook {
@@ -221,11 +222,30 @@ impl ClassBook {
     }
 
     pub fn spent(&self) -> u32 {
-        self.ranks.values().map(|&r| u32::from(r)).sum()
+        self.specs[self.active_spec]
+            .values()
+            .map(|&r| u32::from(r))
+            .sum()
     }
 
     pub fn rank(&self, key: &str) -> u8 {
-        self.ranks.get(key).copied().unwrap_or(0)
+        self.specs[self.active_spec].get(key).copied().unwrap_or(0)
+    }
+
+    fn ranks_mut(&mut self) -> &mut HashMap<&'static str, u8> {
+        &mut self.specs[self.active_spec]
+    }
+
+    fn switch_spec(&mut self, spec: usize) -> bool {
+        if spec >= self.specs.len() || spec == self.active_spec {
+            return false;
+        }
+        self.active_spec = spec;
+        true
+    }
+
+    fn active_spec(&self) -> usize {
+        self.active_spec
     }
 
     fn tree_spent(&self, tree: &TreeDef, below: u8) -> u32 {
@@ -257,7 +277,7 @@ impl ClassBook {
         if self.spent() >= self.earned() || self.rank(t.key) >= t.ranks {
             return false;
         }
-        *self.ranks.entry(t.key).or_default() += 1;
+        *self.ranks_mut().entry(t.key).or_default() += 1;
         if self.valid(trees) {
             true
         } else {
@@ -275,23 +295,24 @@ impl ClassBook {
         if self.valid(trees) {
             true
         } else {
-            *self.ranks.entry(t.key).or_default() += 1;
+            *self.ranks_mut().entry(t.key).or_default() += 1;
             false
         }
     }
 
     fn unlearn_raw(&mut self, key: &str) {
-        if let Some(r) = self.ranks.get_mut(key) {
+        let ranks = self.ranks_mut();
+        if let Some(r) = ranks.get_mut(key) {
             *r -= 1;
             if *r == 0 {
-                self.ranks.remove(key);
+                ranks.remove(key);
             }
         }
     }
 }
 
 /// Every class's talents, kept in `benilla-config/survivors-talents.txt`, one class a line:
-/// `class exp key=rank key=rank ...`.
+/// `class exp active=n S0:key=rank,... S1:key=rank,... S2:key=rank,...`.
 #[derive(Resource, Default)]
 pub(super) struct TalentBook {
     pub classes: HashMap<u8, ClassBook>,
@@ -336,12 +357,31 @@ impl TalentBook {
             };
             let mut book = ClassBook {
                 exp,
-                ranks: HashMap::new(),
+                ..Default::default()
             };
             for w in words {
-                if let Some((k, r)) = w.split_once('=') {
+                if let Some(spec) = w
+                    .strip_prefix("active=")
+                    .and_then(|s| s.parse::<usize>().ok())
+                {
+                    book.active_spec = spec.min(2);
+                } else if let Some((spec, entries)) = w.split_once(':') {
+                    if let Some(i) = spec
+                        .strip_prefix('S')
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .filter(|&i| i < 3)
+                    {
+                        for entry in entries.split(',') {
+                            if let Some((k, r)) = entry.split_once('=') {
+                                if let (Some(k), Ok(r)) = (key_of(class, k), r.parse::<u8>()) {
+                                    book.specs[i].insert(k, r);
+                                }
+                            }
+                        }
+                    }
+                } else if let Some((k, r)) = w.split_once('=') {
                     if let (Some(k), Ok(r)) = (key_of(class, k), r.parse::<u8>()) {
-                        book.ranks.insert(k, r);
+                        book.specs[0].insert(k, r);
                     }
                 }
             }
@@ -355,10 +395,19 @@ impl TalentBook {
             .classes
             .iter()
             .map(|(c, b)| {
-                let mut ranks: Vec<String> =
-                    b.ranks.iter().map(|(k, r)| format!("{k}={r}")).collect();
-                ranks.sort();
-                format!("{c} {} {}", b.exp, ranks.join(" "))
+                let specs = b
+                    .specs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ranks)| {
+                        let mut entries: Vec<_> =
+                            ranks.iter().map(|(k, r)| format!("{k}={r}")).collect();
+                        entries.sort();
+                        format!("S{i}:{}", entries.join(","))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("{c} {} active={} {specs}", b.exp, b.active_spec)
             })
             .collect();
         lines.sort();
@@ -368,6 +417,7 @@ impl TalentBook {
 
 /// A proc in a run, with the run second it may fire again.
 pub(super) struct ProcState {
+    pub source: &'static str,
     pub chance: f32,
     pub every: f32,
     pub cast: &'static str,
@@ -380,6 +430,8 @@ pub(super) struct ProcState {
 /// The hero's talents as a run counts them.
 #[derive(Default)]
 pub(super) struct Build {
+    pub granted_by: HashMap<&'static str, &'static str>,
+    pub sources: Vec<(&'static str, u32, f32)>,
     /// [`Eff::Stat`] totals, by the old game's stat number.
     pub stats: HashMap<u32, f32>,
     mods: Vec<(&'static Target, u32, f32)>,
@@ -399,9 +451,15 @@ impl Build {
             let r = f32::from(rank);
             for e in t.effects {
                 match e {
-                    Eff::Stat(s, per) => *b.stats.entry(*s).or_default() += per * r,
+                    Eff::Stat(s, per) => {
+                        *b.stats.entry(*s).or_default() += per * r;
+                        b.sources.push((t.key, *s, per * r));
+                    }
                     Eff::Mod { target, what, per } => b.mods.push((target, *what, per * r)),
-                    Eff::Grant(k) => b.grants.push(canonical(k)),
+                    Eff::Grant(k) => {
+                        b.grants.push(canonical(k));
+                        b.granted_by.insert(canonical(k), t.key);
+                    }
                     Eff::Proc {
                         chance,
                         every,
@@ -410,6 +468,7 @@ impl Build {
                         on,
                         arg,
                     } => b.procs.push(ProcState {
+                        source: t.key,
                         chance: chance * if t.ranks > 1 { r } else { 1.0 },
                         every: *every,
                         cast: canonical(cast),
@@ -453,11 +512,12 @@ pub(super) fn trigger(run: &mut Run, rng: &mut super::Rng, trigger: u32, spell: 
             continue;
         }
         p.ready_at = now + p.every;
-        ready.push(p.cast);
+        ready.push((p.cast, p.source));
     }
-    for key in ready {
+    for (key, source) in ready {
         if let Some(o) = run.abilities.iter_mut().find(|o| o.def.key == key) {
             o.cd = o.cd.min(0.0);
+            o.next_source = Some(super::damage_meter::Source::Talent(source));
         }
     }
 }
@@ -584,8 +644,9 @@ pub(super) fn begin_run(mut run: ResMut<Run>, mut book: ResMut<TalentBook>) {
         if run.abilities.len() < super::data::MAX_ABILITIES
             && !run.abilities.iter().any(|o| o.def.key == key)
         {
-            run.abilities
-                .push(super::Owned::new(def, super::rewards::Rarity::Common));
+            let mut owned = super::Owned::new(def, super::rewards::Rarity::Common);
+            owned.damage_source = run.talents.granted_by.get(key).map(|&key| super::damage_meter::Source::Talent(key));
+            run.abilities.push(owned);
         }
     }
     run.racial = super::races::racial(run.race)
@@ -604,6 +665,9 @@ pub(super) struct CloseTalents;
 
 #[derive(Component, Clone, Copy)]
 pub(super) struct ResetTalents;
+
+#[derive(Component, Clone, Copy)]
+pub(super) struct SelectSpec(usize);
 
 /// The open screen.
 #[derive(Component)]
@@ -646,6 +710,7 @@ pub(super) fn talent_screen(
     opens: Query<(Entity, &MenuAction)>,
     closes: Query<Entity, With<CloseTalents>>,
     resets: Query<Entity, With<ResetTalents>>,
+    spec_buttons: Query<(Entity, &SelectSpec)>,
     cells: Query<(&Cell, &Interaction)>,
 ) {
     let in_menu = *phase.get() == Phase::Menu;
@@ -666,9 +731,15 @@ pub(super) fn talent_screen(
     let trees_now = class.and_then(trees);
     if let (Some(class), Some(trees_now)) = (class, trees_now) {
         if resets.iter().any(|e| clicks.hit(e)) {
-            book.class(class).ranks.clear();
+            book.class(class).ranks_mut().clear();
             book.save();
             screen.version += 1;
+        }
+        if let Some((_, spec)) = spec_buttons.iter().find(|(e, _)| clicks.hit(*e)) {
+            if book.class(class).switch_spec(spec.0) {
+                book.save();
+                screen.version += 1;
+            }
         }
         let hovered = cells
             .iter()
@@ -824,6 +895,37 @@ fn side_panel(
             13.0,
             class_def.map_or(skin::GOLD, |c| rgb(c.color)),
         );
+        centred(p, f, format!("TALENT SPEC {}", page.active_spec() + 1), 12.0, skin::MUTED);
+        p.spawn(Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|tabs| {
+            for spec in 0..3 {
+                let selected = page.active_spec() == spec;
+                tabs.spawn((
+                    Button,
+                    SelectSpec(spec),
+                    skin::Control { primary: false, selected, enabled: true },
+                    Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        min_height: Val::Px(34.0),
+                        border: UiRect::all(Val::Px(1.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(skin::SURFACE),
+                    BorderColor::all(if selected { skin::GOLD } else { skin::EDGE }),
+                ))
+                .with_children(|button| {
+                    text(button, f, format!("Spec {}", spec + 1), 12.0, skin::GOLD);
+                });
+            }
+        });
         centred(p, f, "TALENT POINTS", 18.0, skin::GOLD);
         skin::rule(p);
         centred(p, f, page.available().to_string(), 40.0, skin::GOLD);
@@ -898,7 +1000,7 @@ fn side_panel(
                     ..default()
                 })
                 .with_children(|p| {
-                    skin::button(p, f, "Reset", "", ResetTalents, false, false, true);
+                    skin::button(p, f, "Reset spec", "", ResetTalents, false, false, true);
                 });
             buttons
                 .spawn(Node {

@@ -160,6 +160,7 @@ pub(super) struct ArtDone;
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum TipFor {
     Ability(usize),
+    Pool(&'static str),
     Amulet,
     Jewelry(usize),
     Character,
@@ -2084,10 +2085,7 @@ fn spawn_tooltip(
                 Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(2.0),
-                    padding: UiRect {
-                        top: Val::Px(106.0),
-                        ..UiRect::all(Val::Px(10.0))
-                    },
+                    padding: UiRect::all(Val::Px(10.0)),
                     ..default()
                 },
             ))
@@ -2103,6 +2101,8 @@ pub(super) fn icon_tooltip(
     mut commands: Commands,
     phase: Res<State<Phase>>,
     run: Res<Run>,
+    selection: Res<Selection>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     spells: Option<Res<crate::ui_action::Spells>>,
     font: Res<HudFont>,
     ui_scale: Res<UiScale>,
@@ -2114,9 +2114,9 @@ pub(super) fn icon_tooltip(
         &ComputedNode,
         &bevy::ui::UiGlobalTransform,
     )>,
-    mut frames: Query<(&mut Node, &mut Visibility), With<GameTooltip>>,
+    mut frames: Query<(&mut Node, &mut Visibility, &ComputedNode), With<GameTooltip>>,
     mut built: Local<Option<(Entity, Entity)>>,
-    mut shown: Local<Option<(TipFor, u32)>>,
+    mut shown: Local<Option<(TipFor, u32, u32, bool)>>,
 ) {
     let Some((frame, body)) = *built else {
         if let Some(assets) = assets.as_deref_mut() {
@@ -2129,13 +2129,15 @@ pub(super) fn icon_tooltip(
         }
         return;
     };
-    let Ok((mut node, mut vis)) = frames.get_mut(frame) else {
+    let Ok((mut node, mut vis, frame_size)) = frames.get_mut(frame) else {
         return;
     };
     let hovered = slots
         .iter()
-        .find(|(i, ..)| **i != Interaction::None)
-        .filter(|_| *phase.get() != Phase::Menu);
+        .find(|(i, tip, ..)| {
+            **i != Interaction::None
+                && (matches!(tip, TipFor::Pool(_)) == (*phase.get() == Phase::Menu))
+        });
     let Some((_, &tip, computed, at)) = hovered else {
         if *vis != Visibility::Hidden {
             *vis = Visibility::Hidden;
@@ -2145,15 +2147,24 @@ pub(super) fn icon_tooltip(
     };
     // Physical pixels to the 768-unit canvas the `Val`s are on.
     let inv = computed.inverse_scale_factor;
-    let (left, top) = (
-        Val::Px((at.translation.x - computed.size().x / 2.0) * inv),
-        Val::Px((at.translation.y + computed.size().y / 2.0) * inv + 4.0),
-    );
+    let mut x = (at.translation.x - computed.size().x / 2.0) * inv;
+    let mut y = (at.translation.y + computed.size().y / 2.0) * inv + 4.0;
+    if let Ok(window) = windows.single() {
+        let viewport = Vec2::new(window.physical_width() as f32, window.physical_height() as f32) * inv;
+        let size = frame_size.size() * inv;
+        x = x.clamp(4.0, (viewport.x - size.x - 4.0).max(4.0));
+        if y + size.y > viewport.y - 4.0 {
+            y = (at.translation.y - computed.size().y / 2.0) * inv - size.y - 4.0;
+        }
+        y = y.max(4.0);
+    }
+    let (left, top) = (Val::Px(x), Val::Px(y));
     if node.left != left || node.top != top {
         node.left = left;
         node.top = top;
     }
-    if *shown == Some((tip, run.version)) {
+    let content_key = (tip, run.version, selection.version, spells.is_some());
+    if *shown == Some(content_key) {
         if *vis != Visibility::Inherited {
             *vis = Visibility::Inherited;
         }
@@ -2164,6 +2175,12 @@ pub(super) fn icon_tooltip(
             .abilities
             .get(i)
             .map(|o| ability_tip(o, &run, spells.as_deref())),
+        TipFor::Pool(key) => selection.class_def().map(|class| {
+            let preview = Run { class, ..Run::default() };
+            let mut lines = ability_tip(&Owned::new(data::ability(key), Rarity::Common), &preview, spells.as_deref());
+            lines.push(TipLine::new("Base values before racial bonuses, talents and equipment.", DIM));
+            lines
+        }),
         TipFor::Jewelry(i) => run.jewelry.get(i).map(|j| {
             let d = &JEWELS[j.index];
             let mut lines = vec![TipLine::new(d.name, Color::WHITE).header()];
@@ -2213,8 +2230,12 @@ pub(super) fn icon_tooltip(
             TipLine::new("Talent trees are coming.", DIM),
         ]),
     };
-    let Some(lines) = lines else { return };
-    *shown = Some((tip, run.version));
+    let Some(lines) = lines else {
+        *vis = Visibility::Hidden;
+        *shown = None;
+        return;
+    };
+    *shown = Some(content_key);
     // Shown from the next frame, once the new lines have laid out.
     *vis = Visibility::Hidden;
     let f = &font.0;

@@ -10,6 +10,9 @@ pub(crate) struct ClassDef {
     pub name: &'static str,
     /// `RAID_CLASS_COLORS`, 0xRRGGBB.
     pub color: u32,
+    /// Outgoing damage tuning for the damage-only six-spell benchmark (L1 Common and L8 Legendary,
+    /// one and ten targets); class talent procs are outside that baseline.
+    pub damage_scale: f32,
     /// `UNIT_FIELD_BYTES_0` byte 3.
     pub power: u8,
     pub start: &'static str,
@@ -216,6 +219,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 1,
         name: "Warrior",
         color: 0xC79C6E,
+        damage_scale: 0.81,
         power: 1,
         start: "cleave",
         pool: &[
@@ -243,6 +247,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 2,
         name: "Paladin",
         color: 0xF58CBA,
+        damage_scale: 1.05,
         power: 0,
         start: "consecration",
         pool: &[
@@ -268,6 +273,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 3,
         name: "Hunter",
         color: 0xABD473,
+        damage_scale: 0.86,
         power: 0,
         start: "auto_shot",
         pool: &[
@@ -295,6 +301,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 4,
         name: "Rogue",
         color: 0xFFF569,
+        damage_scale: 1.11,
         power: 3,
         start: "sinister_strike",
         pool: &[
@@ -321,6 +328,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 5,
         name: "Priest",
         color: 0xFFFFFF,
+        damage_scale: 1.11,
         power: 0,
         start: "smite",
         pool: &[
@@ -348,6 +356,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 7,
         name: "Shaman",
         color: 0x0070DE,
+        damage_scale: 0.95,
         power: 0,
         start: "lightning_bolt",
         pool: &[
@@ -373,6 +382,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 8,
         name: "Mage",
         color: 0x69CCF0,
+        damage_scale: 1.01,
         power: 0,
         start: "fireball",
         pool: &[
@@ -402,6 +412,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 9,
         name: "Warlock",
         color: 0x9482C9,
+        damage_scale: 1.37,
         power: 0,
         start: "shadow_bolt",
         pool: &[
@@ -429,6 +440,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 11,
         name: "Druid",
         color: 0xFF7D0A,
+        damage_scale: 0.93,
         power: 0,
         start: "wrath",
         pool: &[

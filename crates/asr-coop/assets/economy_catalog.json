@@ -78238,8 +78238,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 1,
@@ -78540,8 +78540,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 1,
@@ -78883,8 +78883,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 2,
@@ -79229,8 +79229,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 2,
@@ -79571,8 +79571,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 3,
@@ -79910,8 +79910,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 3,
@@ -80290,8 +80290,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 4,
@@ -80663,8 +80663,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 4,
@@ -81112,8 +81112,8 @@
       ],
       "equipment_chance_bp": {
         "normal": 0,
-        "elite": 3500,
-        "boss": 10000
+        "elite": 500,
+        "boss": 4000
       },
       "gold": {
         "normal": 5,

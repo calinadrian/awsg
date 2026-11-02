@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub type Amounts = BTreeMap<String, u32>;
+/// Permanent equipment is scarce; materials and reward-card abilities have separate rules.
+pub const MAX_EQUIPMENT_PER_RUN: u32 = 3;
 
 #[derive(Clone, Deserialize)]
 pub struct Catalog {
@@ -15,6 +17,10 @@ pub struct Definition {
     pub zone: String,
     pub slot: String,
     pub category: String,
+    #[serde(default = "common_quality")]
+    pub quality: String,
+    #[serde(default)]
+    pub armor: Option<String>,
     pub icon: String,
     pub display_id: u32,
     pub source_item_id: u32,
@@ -23,6 +29,9 @@ pub struct Definition {
     pub base_bonuses: Amounts,
     pub upgrades: Vec<Upgrade>,
     pub scrap: Amounts,
+}
+fn common_quality() -> String {
+    "common".into()
 }
 #[derive(Clone, Deserialize)]
 pub struct Upgrade {
@@ -53,6 +62,25 @@ impl Catalog {
     }
 }
 impl Definition {
+    pub fn can_use(&self, class: u8) -> bool {
+        if !self.classes.contains(&class) {
+            return false;
+        }
+        if !matches!(
+            self.slot.as_str(),
+            "head" | "shoulders" | "chest" | "wrists" | "hands" | "belt" | "legs" | "feet"
+        ) {
+            return true;
+        }
+        let armor = match class {
+            1 | 2 => "plate",
+            3 | 7 => "mail",
+            4 | 11 => "leather",
+            5 | 8 | 9 => "cloth",
+            _ => return false,
+        };
+        self.armor.as_deref().is_none_or(|kind| kind == armor)
+    }
     pub fn bonuses(&self, level: u8) -> &Amounts {
         if level == 0 {
             &self.base_bonuses
@@ -63,7 +91,7 @@ impl Definition {
         }
     }
     pub fn fits(&self, class: u8, slot: &str) -> bool {
-        self.classes.contains(&class)
+        self.can_use(class)
             && (self.slot == slot
                 || (self.slot == "finger_1" && matches!(slot, "finger_1" | "finger_2"))
                 || (self.slot == "trinket_1" && matches!(slot, "trinket_1" | "trinket_2"))
@@ -101,8 +129,15 @@ pub struct Item {
     pub definition: String,
     pub level: u8,
     pub slot: Option<String>,
+    #[serde(default)]
+    pub equipped_class: Option<u8>,
     pub locked: bool,
     pub listed: bool,
+}
+impl Item {
+    pub fn equipped_for(&self, class: u8) -> bool {
+        self.slot.is_some() && self.equipped_class.is_none_or(|owner| owner == class)
+    }
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Inventory {
@@ -115,8 +150,11 @@ pub struct Inventory {
 impl Inventory {
     pub fn bonuses(&self, catalog: &Catalog) -> Amounts {
         let mut result = Amounts::new();
-        for item in self.items.iter().filter(|i| i.slot.is_some()) {
-            if let Some(d) = catalog.definition(&item.definition) {
+        for item in self.items.iter().filter(|i| i.equipped_for(self.class)) {
+            if let Some(d) = catalog
+                .definition(&item.definition)
+                .filter(|d| d.can_use(self.class))
+            {
                 for (key, value) in d.bonuses(item.level) {
                     let entry = result.entry(key.clone()).or_default();
                     *entry = entry.saturating_add(*value);
@@ -143,6 +181,9 @@ pub struct Request {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Action {
+    LinkInventory {
+        tokens: Vec<String>,
+    },
     Register {
         name: String,
         class: u8,

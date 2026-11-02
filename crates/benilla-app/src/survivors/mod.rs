@@ -8,6 +8,7 @@ mod abilities;
 mod amulets;
 pub(crate) mod appearance;
 mod auto;
+mod auto_attack;
 mod caches;
 mod card_content;
 mod card_view;
@@ -54,6 +55,7 @@ mod resurrection_ui;
 mod ring;
 pub(crate) mod spell_flight;
 mod spell_passives;
+mod text_edit;
 mod talents;
 mod talents_data;
 mod telegraphs;
@@ -85,13 +87,14 @@ impl Plugin for SurvivorsPlugin {
             .add_plugins(grade::plugin)
             .add_plugins(options::plugin)
             .add_plugins((coop::plugin, coop_ui::plugin, progress::plugin, party_frames::plugin))
-            .add_plugins(damage_meter::plugin)
+            .add_plugins((damage_meter::plugin, text_edit::plugin))
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
             .init_resource::<Run>()
             .init_resource::<hero::CamRig>()
             .init_resource::<hero::AimPoint>()
+            .init_resource::<auto_attack::AutoAttack>()
             .init_resource::<drive::EntryPending>()
             .init_resource::<abilities::PendingHits>()
             .add_systems(
@@ -163,6 +166,9 @@ impl Plugin for SurvivorsPlugin {
                     enemies::move_enemies.run_if(coop::authority),
                     enemies::run_scripts.run_if(coop::authority),
                     abilities::cast_abilities.run_if(in_state(Phase::Playing)),
+                    (auto_attack::start_on_right_click, auto_attack::swing)
+                        .chain()
+                        .run_if(in_state(Phase::Playing)),
                     abilities::tick_areas.run_if(in_state(Phase::Playing)),
                     abilities::apply_hits,
                     coop::apply_guest_hits,
@@ -256,7 +262,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(OnEnter(Phase::LevelUp), (pause, hud::roll_offer))
             .add_systems(OnEnter(Phase::Paused), pause)
             .add_systems(OnEnter(Phase::GameOver), (unpause, talents::pay_run))
-            .add_systems(OnEnter(Phase::Menu), (unpause, reset_run));
+            .add_systems(OnEnter(Phase::Menu), (unpause, reset_run, auto_attack::reset));
         if let Some(auto) = auto::from_env() {
             app.insert_resource(auto)
                 .add_systems(
@@ -331,6 +337,8 @@ pub(super) struct Owned {
     pub cd: f32,
     pub progress: rewards::SpellProgress,
     echoing: bool,
+    damage_source: Option<damage_meter::Source>,
+    next_source: Option<damage_meter::Source>,
 }
 
 impl Owned {
@@ -340,6 +348,8 @@ impl Owned {
             level: 1,
             cd: 0.5,
             echoing: false,
+            damage_source: None,
+            next_source: None,
             progress: rewards::SpellProgress::learned(
                 rarity,
                 reward_axes::axes(def.key).contains(&rewards::Upgrade::Power),
@@ -422,9 +432,6 @@ const HP_PER_LEVEL: f32 = 9.0;
 const MIGHT_PER_LEVEL: f32 = 0.03;
 /// Damage reduction stops at 60% (0x5be95ca).
 const MAX_REDUCTION: f32 = 0.6;
-/// Every hero regenerates 0.8 health a second, and 0.08 more per level past the first.
-const BASE_REGEN: f32 = 0.8;
-const REGEN_PER_LEVEL: f32 = 0.08;
 pub(super) const BASE_SPEED: f32 = 7.0;
 /// Original ASR's base pickup radius (RVA 0x5be92f5).
 pub(super) const BASE_MAGNET: f32 = 9.0;
@@ -452,6 +459,7 @@ pub(super) struct Run {
     pub thorns: f32,
     pub thorns_t: f32,
     pub thorns_spell: u32,
+    thorns_source: Option<damage_meter::Source>,
     pub heal_rate: f32,
     pub heal_t: f32,
     pub pending_levels: u32,
@@ -468,6 +476,7 @@ pub(super) struct Run {
     pub dead_t: Option<f32>,
     pub next_guid: u64,
     pub damage_done: f64,
+    damage_by_source: std::collections::HashMap<damage_meter::Source, f64>,
     /// Bumped whenever spells or jewelry change, so the HUD rebuilds the icon rows once.
     pub version: u32,
     /// A centre-screen announcement and its seconds left.
@@ -518,6 +527,7 @@ impl Default for Run {
             thorns: 0.0,
             thorns_t: 0.0,
             thorns_spell: 0,
+            thorns_source: None,
             heal_rate: 0.0,
             heal_t: 0.0,
             pending_levels: 0,
@@ -532,6 +542,7 @@ impl Default for Run {
             dead_t: None,
             next_guid: 1,
             damage_done: 0.0,
+            damage_by_source: Default::default(),
             version: 0,
             banner: None,
             yell: None,
@@ -553,6 +564,31 @@ impl Default for Run {
 }
 
 impl Run {
+    fn record_damage(&mut self, source: Option<damage_meter::Source>, spell: u32, damage: f32) {
+        if damage > 0.0 && damage.is_finite() {
+            let damage = f64::from(damage);
+            self.damage_done += damage;
+            let source = source.or_else(|| self.abilities.iter().find(|o| o.def.spell == spell).and_then(|o| o.damage_source))
+                .unwrap_or(damage_meter::Source::Spell(spell));
+            *self.damage_by_source.entry(source).or_default() += damage;
+        }
+    }
+
+    /// Independent effects keep their owner; stat increases stay on the spell they boost.
+    fn effect_sources(&self, talent_stat: u32, item_stat: u8) -> Vec<(damage_meter::Source, f32)> {
+        let mut sources: Vec<_> = self.talents.sources.iter().filter(|(_, stat, _)| *stat == talent_stat)
+            .map(|&(key, _, value)| (damage_meter::Source::Talent(key), value)).collect();
+        for j in &self.jewelry {
+            let value = jewelry::stat(j.index, j.strength, item_stat);
+            if value > 0.0 { sources.push((damage_meter::Source::Jewelry(j.index), value)); }
+        }
+        if let Some(a) = &self.amulet {
+            let value: f32 = amulets::AMULETS[a.index].stats.iter().filter(|(stat, _)| *stat == item_stat)
+                .map(|(_, value)| value * a.scale()).sum();
+            if value > 0.0 { sources.push((damage_meter::Source::Amulet(a.index), value)); }
+        }
+        sources
+    }
     /// Native online scaling `1 + (living - 1) * chapter * coefficient`; the patched
     /// chapter lookup (0x9dc2c70) gives 0.7 below chapter three. Co-op is Elwynn only.
     /// Coefficients: 0.48 density and pickup shares, 0.72 ordinary health
@@ -577,7 +613,9 @@ impl Run {
             might: 1.0 + MIGHT_PER_LEVEL * levels,
             max_hp: base_hp + HP_PER_LEVEL * levels,
             speed: BASE_SPEED,
-            regen: BASE_REGEN + REGEN_PER_LEVEL * levels,
+            // No base regeneration: the native 0.8/s (+0.08 a level) outhealed the early horde.
+            // Racials, talents and jewelry still add theirs below.
+            regen: 0.0,
             haste: 0.0,
             area: 1.0,
             magnet: BASE_MAGNET,

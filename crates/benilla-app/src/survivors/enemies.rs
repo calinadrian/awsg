@@ -146,6 +146,7 @@ pub(super) struct Script {
 }
 
 pub(super) struct Dot {
+    pub source: Option<super::damage_meter::Source>,
     pub spell: u32,
     pub damage: f32,
     pub every: f32,
@@ -815,7 +816,9 @@ pub(super) fn move_enemies(
                 let scale = e.def.scale;
                 let speed = e.speed * e.slow;
                 if let Some(approach) = e.approach.as_mut() {
-                    if now >= approach.next {
+                    // A slot reached out of reach is stale (the hero moved on): re-aim now rather
+                    // than stand idle until the timer.
+                    if now >= approach.next || flat(approach.goal - pos).length() < 0.1 {
                         // WoW XY -> Bevy XZ reverses the native angle's handedness.
                         approach.angle -= 0.15;
                         // The native minimum slot radius is 1.5. This renderer's smaller
@@ -918,13 +921,18 @@ pub(super) fn move_enemies(
                 fx.number(hero_e, taken, false, COLOR_HURT);
             }
             if peer == 0 && run.thorns_t > 0.0 {
-                hits.write(Hit::direct(ent, run.thorns * run.stats().might, false));
+                let mut hit = Hit::direct(ent, run.thorns * run.stats().might, false);
+                hit.source = Some(run.thorns_source.unwrap_or(super::damage_meter::Source::Spell(run.thorns_spell)));
+                hits.write(hit);
             }
             if taken > 0.0 && peer == 0 {
                 run.struck = true;
-                let reflect = run.talents.stat(22) + run.jewel_stat(20);
+                let sources = run.effect_sources(22, 20);
+                let reflect: f32 = sources.iter().map(|(_, value)| value).sum();
                 if reflect > 0.0 {
-                    hits.write(Hit::direct(ent, raw * reflect, false));
+                    let mut hit = Hit::direct(ent, raw * reflect, false);
+                    hit.contributors = sources;
+                    hits.write(hit);
                 }
             }
         }

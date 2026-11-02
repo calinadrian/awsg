@@ -13,9 +13,13 @@ use std::{
 const MAX_GOLD: u64 = 1_000_000_000_000;
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Account {
+    #[serde(default)]
+    owner: Option<String>,
     inventory: Inventory,
     receipts: BTreeMap<String, (String, Option<String>)>,
     session: Option<(String, String, u32, u32)>,
+    #[serde(default)]
+    session_equipment: u32,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct State {
@@ -192,6 +196,9 @@ impl Store {
             }
             req.token.clone()
         };
+        let class = next.accounts[&token].inventory.class;
+        let credential = token.clone();
+        let token = next.accounts[&token].owner.clone().unwrap_or(token);
         let fingerprint = serde_json::to_string(&req.action).map_err(|e| e.to_string())?;
         let receipt = next.accounts[&token].receipts.get(&req.id).cloned();
         if let Some((old, result)) = receipt {
@@ -201,6 +208,102 @@ impl Store {
             run = result;
         } else {
             match &req.action {
+                Action::LinkInventory { tokens } => {
+                    if tokens.len() > 9 {
+                        return Err("Too many class inventories".into());
+                    }
+                    let mut owners = vec![token.clone()];
+                    for credential in tokens {
+                        let account = next
+                            .accounts
+                            .get(credential)
+                            .ok_or("Class credential not recognized")?;
+                        let owner = account.owner.clone().unwrap_or_else(|| credential.clone());
+                        if !owners.contains(&owner) {
+                            owners.push(owner);
+                        }
+                    }
+                    for owner in &owners {
+                        let account = next
+                            .accounts
+                            .get_mut(owner)
+                            .ok_or("Inventory unavailable")?;
+                        for item in &mut account.inventory.items {
+                            if item.slot.is_some() && item.equipped_class.is_none() {
+                                item.equipped_class = Some(account.inventory.class);
+                            }
+                            if item.equipped_class.zip(item.slot.as_deref()).is_some_and(
+                                |(class, slot)| {
+                                    self.catalog
+                                        .definition(&item.definition)
+                                        .is_none_or(|d| !d.fits(class, slot))
+                                },
+                            ) {
+                                item.slot = None;
+                                item.equipped_class = None;
+                            }
+                        }
+                    }
+                    for owner in owners.iter().filter(|owner| **owner != token) {
+                        let old = next
+                            .accounts
+                            .get_mut(owner)
+                            .ok_or("Inventory unavailable")?;
+                        let items = std::mem::take(&mut old.inventory.items);
+                        let materials = std::mem::take(&mut old.inventory.materials);
+                        let gold = std::mem::take(&mut old.inventory.gold);
+                        let receipts = old.receipts.clone();
+                        let shared = next
+                            .accounts
+                            .get_mut(&token)
+                            .ok_or("Inventory unavailable")?;
+                        shared.inventory.gold = shared
+                            .inventory
+                            .gold
+                            .checked_add(gold)
+                            .filter(|&v| v <= MAX_GOLD)
+                            .ok_or("Combined gold exceeds limit")?;
+                        shared.inventory.items.extend(items);
+                        for (material, count) in materials {
+                            let value = shared.inventory.materials.entry(material).or_default();
+                            *value = value
+                                .checked_add(count)
+                                .ok_or("Combined materials exceed limit")?;
+                        }
+                        for (id, receipt) in receipts {
+                            if !id.starts_with("registration:") {
+                                shared.receipts.entry(id).or_insert(receipt);
+                            }
+                        }
+                        for listing in &mut next.listings {
+                            if listing.seller == *owner {
+                                listing.seller = token.clone();
+                            }
+                        }
+                    }
+                    for (credential, account) in &mut next.accounts {
+                        let owner = account.owner.as_ref().unwrap_or(credential);
+                        if owners.contains(owner) && *credential != token {
+                            account.owner = Some(token.clone());
+                        }
+                    }
+                    let mut occupied = std::collections::BTreeSet::new();
+                    for item in &mut next
+                        .accounts
+                        .get_mut(&token)
+                        .ok_or("Inventory unavailable")?
+                        .inventory
+                        .items
+                    {
+                        if let (Some(class), Some(slot)) = (item.equipped_class, item.slot.as_ref())
+                        {
+                            if !occupied.insert((class, slot.clone())) {
+                                item.slot = None;
+                                item.equipped_class = None;
+                            }
+                        }
+                    }
+                }
                 Action::Register { .. } | Action::Refresh => {}
                 Action::Buy { listing } => {
                     let index = next
@@ -264,10 +367,9 @@ impl Store {
                         return Err("No equipment table for this zone".into());
                     }
                     let id = secret();
-                    next.accounts
-                        .get_mut(&token)
-                        .ok_or("Hero unavailable")?
-                        .session = Some((id.clone(), zone.clone(), 0, 0));
+                    let account = next.accounts.get_mut(&token).ok_or("Hero unavailable")?;
+                    account.session = Some((id.clone(), zone.clone(), 0, 0));
+                    account.session_equipment = 0;
                     run = Some(id);
                 }
                 Action::Reward {
@@ -311,7 +413,7 @@ impl Store {
                         .filter_map(|d| {
                             self.catalog
                                 .definition(&d.item)
-                                .filter(|i| i.classes.contains(&account.inventory.class))
+                                .filter(|i| i.zone == zone_id && i.can_use(class))
                                 .map(|i| (i, d.weight))
                         })
                         .collect();
@@ -333,6 +435,7 @@ impl Store {
                             // Ordinary enemies never award equipment; their row remains in the
                             // shared table for materials, while elites and bosses use this zone's pool.
                             if kind != "normal"
+                                && account.session_equipment < MAX_EQUIPMENT_PER_RUN
                                 && weight > 0
                                 && account.inventory.items.len() < 5000
                                 && random(10_000) < table.equipment_chance_bp[kind]
@@ -352,6 +455,7 @@ impl Store {
                                         definition: definition.id.clone(),
                                         ..Item::default()
                                     });
+                                    account.session_equipment += 1;
                                 }
                             }
                         }
@@ -383,15 +487,22 @@ impl Store {
                     }
                     match action {
                         Action::Equip { slot, .. } => {
+                            if item.slot.is_some()
+                                && item.equipped_class.is_some_and(|owner| owner != class)
+                            {
+                                return Err("Unequip this item on its other class first".into());
+                            }
                             if let Some(slot) = slot {
-                                if !definition.fits(account.inventory.class, slot)
-                                    || !SLOTS.contains(&slot.as_str())
+                                if !definition.fits(class, slot) || !SLOTS.contains(&slot.as_str())
                                 {
                                     return Err(
                                         "Your class cannot equip this item in that slot".into()
                                     );
                                 }
                                 for other in &mut account.inventory.items {
+                                    if !other.equipped_for(class) {
+                                        continue;
+                                    }
                                     let two_handed = self
                                         .catalog
                                         .definition(&other.definition)
@@ -402,10 +513,13 @@ impl Store {
                                         || (slot == "off_hand" && two_handed)
                                     {
                                         other.slot = None;
+                                        other.equipped_class = None;
                                     }
                                 }
                             }
                             account.inventory.items[index].slot = slot.clone();
+                            account.inventory.items[index].equipped_class =
+                                slot.as_ref().map(|_| class);
                         }
                         Action::Lock { locked, .. } => {
                             account.inventory.items[index].locked = *locked
@@ -494,13 +608,14 @@ impl Store {
             self.commit(next)
                 .map_err(|e| format!("Could not save transaction: {e}"))?;
         }
-        let inventory = self
+        let mut inventory = self
             .state
             .accounts
             .get(&token)
             .ok_or("Hero unavailable")?
             .inventory
             .clone();
+        inventory.class = class;
         let listings = self
             .state
             .listings
@@ -521,7 +636,7 @@ impl Store {
             .collect();
         Ok(Reply {
             id: req.id.clone(),
-            token: matches!(req.action, Action::Register { .. }).then_some(token),
+            token: matches!(req.action, Action::Register { .. }).then_some(credential),
             inventory: Some(inventory),
             listings,
             run,

@@ -53,7 +53,7 @@ struct Editor {
     page: Page,
     settings: bool,
     field: Option<u8>,
-    selected: bool,
+    cursor: super::text_edit::Cursor,
     signature: String,
     pending: Option<Pending>,
     room_seen: String,
@@ -135,7 +135,8 @@ fn controls(
     keys: Res<ButtonInput<KeyCode>>,
     mut next: ResMut<NextState<Phase>>,
     mut clipboard: NonSendMut<HostClipboard>,
-    window: Query<&bevy::window::RawHandleWrapper, With<bevy::window::PrimaryWindow>>,
+    window: Query<(&Window, &bevy::window::RawHandleWrapper), With<bevy::window::PrimaryWindow>>,
+    fields: super::text_edit::FieldQuery,
     real: Res<Time<Real>>,
 ) {
     // Deferred actions survive the asynchronous connection handshake.
@@ -177,20 +178,24 @@ fn controls(
         keyboard.clear();
         return;
     }
-    let wl = wayland_display(window.single().ok());
+    let wl = wayland_display(window.single().ok().map(|(_, raw)| raw));
     for (entity, action, style) in &buttons {
         if !clicks.hit(entity) || !style.enabled {
             continue;
         }
         match action {
             Action::Field(field) => {
+                let value = match field { 0 => &coop.url, 1 => &coop.name, _ => &coop.code };
+                let point = window.single().ok().and_then(|(w, _)| w.cursor_position().map(|p| p * w.scale_factor()));
+                let at = super::text_edit::clicked(*field, value, point, &fields);
+                let extend = editor.field == Some(*field) && keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+                editor.cursor.place(value, at, extend);
                 editor.field = Some(*field);
-                editor.selected = true;
             }
             Action::Page(page) => {
                 editor.page = *page;
                 editor.field = if *page == Page::Join { Some(2) } else { None };
-                editor.selected = true;
+                editor.cursor.select_all(&coop.code);
                 if *page == Page::Browse {
                     request(&mut coop, &mut editor, Pending::Browse);
                 }
@@ -269,58 +274,24 @@ fn controls(
             KeyCode::SuperLeft,
             KeyCode::SuperRight,
         ]);
-        if control && event.key_code == KeyCode::KeyA {
-            editor.selected = true;
-            continue;
-        }
-        let pasted = if control && event.key_code == KeyCode::KeyV {
-            clipboard.read(wl)
-        } else {
-            None
-        };
-        if control && pasted.is_none() {
-            continue;
-        }
-        let value = match field {
-            0 => &mut coop.url,
-            1 => &mut coop.name,
-            _ => &mut coop.code,
-        };
-        if event.key_code == KeyCode::Backspace {
-            if editor.selected {
-                value.clear();
-                editor.selected = false;
-            } else {
-                value.pop();
+        let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+        let value = match field { 0 => &mut coop.url, 1 => &mut coop.name, _ => &mut coop.code };
+        let old = value.clone();
+        if control && matches!(event.key_code, KeyCode::KeyC | KeyCode::KeyX) {
+            if !editor.cursor.selected(value).is_empty() {
+                clipboard.write(wl, editor.cursor.selected(value));
+                if event.key_code == KeyCode::KeyX { editor.cursor.key(value, KeyCode::Backspace, false, false); }
             }
-            if field == 0 {
-                editor.dirty = true;
-            }
-        } else if let Some(text) = pasted.as_deref().or(event.text.as_deref()) {
-            if editor.selected && text.chars().any(|c| !c.is_control()) {
-                value.clear();
-                editor.selected = false;
-            }
-            let limit = match field {
-                0 => 256,
-                1 => 24,
-                _ => 6,
-            };
-            for mut c in text.chars().filter(|c| !c.is_control()) {
-                if field == 2 {
-                    if !c.is_ascii_alphanumeric() {
-                        continue;
-                    }
-                    c = c.to_ascii_uppercase();
-                }
-                if value.chars().count() < limit {
-                    value.push(c);
-                }
-            }
-            if field == 0 {
-                editor.dirty = true;
+        } else if !editor.cursor.key(value, event.key_code, shift, control) {
+            let pasted = if control && event.key_code == KeyCode::KeyV { clipboard.read(wl) } else { None };
+            let text = pasted.as_deref().or_else(|| if !control { event.text.as_deref() } else { None });
+            if let Some(text) = text {
+                let filtered: String = text.chars().filter(|c| !c.is_control() && (field != 2 || c.is_ascii_alphanumeric()))
+                    .map(|c| if field == 2 { c.to_ascii_uppercase() } else { c }).collect();
+                editor.cursor.insert(value, &filtered, match field { 0 => 256, 1 => 24, _ => 6 });
             }
         }
+        if field == 0 && *value != old { editor.dirty = true; }
     }
 }
 fn field(
@@ -342,20 +313,14 @@ fn field(
     } else {
         value.to_string()
     };
-    skin::button(
-        p,
-        f,
-        &format!(
-            "{}{}",
-            shown,
-            if editor.field == Some(id) { " |" } else { "" }
-        ),
-        "",
-        Action::Field(id),
-        false,
-        editor.field == Some(id),
-        true,
-    );
+    p.spawn((Button, Action::Field(id), skin::Control { primary: false, selected: editor.field == Some(id), enabled: true },
+        Node { width: Val::Percent(100.), padding: UiRect::axes(Val::Px(12.), Val::Px(8.)),
+            min_height: Val::Px(36.), border: UiRect::all(Val::Px(1.)), overflow: Overflow::clip(), ..default() },
+        BackgroundColor(skin::SURFACE), BorderColor::all(skin::EDGE)))
+        .with_children(|p| {
+            let text = skin::label(p, f, shown, 17., skin::TEXT);
+            super::text_edit::mark(p, text, id, &editor.cursor, editor.field == Some(id));
+        });
 }
 fn nav(p: &mut ChildSpawnerCommands, f: &Handle<Font>, editor: &Editor) {
     p.spawn(Node {
@@ -453,6 +418,7 @@ fn render(
         selection.version,
         phase.get()
     );
+    let signature = format!("{signature}|{:?}", editor.cursor);
     if signature == editor.signature {
         return;
     }
