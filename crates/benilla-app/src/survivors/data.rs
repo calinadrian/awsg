@@ -478,6 +478,8 @@ pub(crate) struct EnemyDef {
     pub level: u32,
     /// A great beast, which takes more room in the crowd.
     pub big: bool,
+    /// An elite row that may join the horde independently of the lair.
+    pub roaming_elite: bool,
     /// Seconds between swings; 0 for the mode's own pace.
     pub attack: f32,
     /// On a timed roster, the run second it first joins the horde (a boss: the second it comes).
@@ -565,6 +567,7 @@ pub(super) const fn en(
         xp,
         level,
         big: false,
+        roaming_elite: false,
         attack: 0.0,
         from: 0.0,
         ranged: None,
@@ -689,6 +692,7 @@ pub(crate) fn xp_to_next(level: u32) -> f32 {
 
 /// A creature on a battleground's roster: who it is, its pace and its size. Its health, damage
 /// and experience come from its place on the roster, read off The Barrens' tuned ladder.
+#[derive(Clone, Copy)]
 pub(crate) struct Foe {
     name: &'static str,
     display: u32,
@@ -750,7 +754,7 @@ pub(crate) fn all_maps() -> &'static [MapDef] {
     ALL_MAPS
 }
 
-/// Stable menu/save/co-op indices: Elwynn remains 0, Hall of Thanes 1, and Durotar 2.
+/// Stable menu/save/co-op indices: append new maps so existing picks keep their meaning.
 pub(crate) static MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::new(|| {
     [
         "Elwynn Forest",
@@ -761,6 +765,12 @@ pub(crate) static MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::
         "The Barrens",
         "Stonetalon Mountains",
         "Stranglethorn Vale",
+        "Teldrassil",
+        "Mulgore",
+        "Tirisfal Glades",
+        "The Deadmines",
+        "Wailing Caverns",
+        "Dun Morogh",
     ]
         .into_iter()
         .map(|name| {
@@ -1486,19 +1496,37 @@ static ROSTERS: std::sync::LazyLock<Vec<Roster>> = std::sync::LazyLock::new(|| {
                     enemies: ENEMIES.to_vec(),
                     bosses: BOSSES.to_vec(),
                     timed: false,
-                    guardians: Vec::new(),
+                    guardians: zone_guardians(m, ENEMIES),
                 }
             } else {
                 Roster {
                     enemies: ladder(m.foes, ENEMIES),
                     bosses: ladder(m.bosses, BOSSES),
                     timed: false,
-                    guardians: Vec::new(),
+                    guardians: zone_guardians(m, ENEMIES),
                 }
             }
         })
         .collect()
 });
+
+/// Four local creature rows become elite variants; outdoor maps also place them in lairs.
+fn zone_guardians(map: &MapDef, tuned: &[EnemyDef]) -> Vec<EnemyDef> {
+    let mut guardians = if map.foes.is_empty() {
+        tuned.iter().filter(|foe| foe.big).copied().take(4).collect()
+    } else {
+        let mut rows = map.foes.to_vec();
+        rows.sort_by(|a, b| b.big.cmp(&a.big).then_with(|| b.level.cmp(&a.level)));
+        rows.truncate(4);
+        rows.sort_by_key(|foe| foe.level);
+        ladder(&rows, tuned)
+    };
+    for (index, guardian) in guardians.iter_mut().enumerate() {
+        guardian.roaming_elite = true;
+        guardian.from = [210.0, 420.0, 630.0, 780.0][index];
+    }
+    guardians
+}
 
 pub(crate) fn roster(map: usize) -> &'static Roster {
     &ROSTERS[map.min(ROSTERS.len() - 1)]

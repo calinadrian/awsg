@@ -115,6 +115,7 @@ pub(super) fn parameters(o: &super::Owned, run: &Run) -> Params {
     let def = o.def;
     let stats = run.stats();
     let t = &run.talents;
+    // An equipped rare affix multiplies only its named spell's direct and periodic damage.
     let mult = o.damage_mult()
         * if def.kind == Kind::Buff {
             1.0
@@ -125,6 +126,13 @@ pub(super) fn parameters(o: &super::Owned, run: &Run) -> Params {
             1.0
         } else {
             run.class.damage_scale
+        }
+        * if !matches!(def.kind, Kind::Buff | Kind::Heal | Kind::Shield | Kind::Immune)
+            && (def.damage > 0. || def.dot > 0.)
+        {
+            1. + run.spell_damage.get(def.key).copied().unwrap_or(0.)
+        } else {
+            1.
         }
         * (1. + t.modifier(def, 0))
         * if matches!(def.kind, Kind::Shield | Kind::Heal | Kind::Thorns) {
@@ -958,6 +966,7 @@ pub(super) fn apply_hits(
                 pos,
                 xp: en.xp,
                 boss: en.boss,
+                boss_name: en.boss.then(|| en.def.name.to_owned()),
                 spawn_cost: if en.home.is_none() {
                     super::horde_spawning::cost(en.def)
                 } else {

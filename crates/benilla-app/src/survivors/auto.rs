@@ -182,8 +182,7 @@ pub(super) fn drive(
     match phase.get() {
         Phase::Menu => {
             if selection.map != auto.map {
-                selection.map = auto.map;
-                selection.version += 1;
+                selection.select_map(auto.map);
                 auto.wait = 0.0;
             } else if selection.class != Some(auto.class) {
                 selection.class = Some(auto.class);

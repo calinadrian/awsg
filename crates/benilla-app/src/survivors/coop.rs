@@ -127,6 +127,8 @@ enum Packet {
         revive_progress: HashMap<u32, f32>,
         #[serde(default)]
         equipment_kills: [u32; 3],
+        #[serde(default)]
+        boss_loot: Vec<String>,
         /// Each guest's last applied `seq`, so guests can drop acknowledged hits.
         #[serde(default, with = "peer_map")]
         acks: HashMap<u32, u32>,
@@ -722,6 +724,13 @@ fn receive(
                 let Some(member) = room.members.iter().find(|m| m.peer == coop.peer) else {
                     continue;
                 };
+                if !selection.race_unlocked(member.hero.race)
+                    || !data::MAPS.get(room.map).is_some_and(|map| super::races::can_enter(member.hero.race, map.name))
+                {
+                    coop.leave();
+                    coop.status = "This race is locked or the zone belongs to the other faction.".into();
+                    continue;
+                }
                 selection.class = Some(member.hero.class);
                 selection.looks = vec![(member.hero.display, member.hero.race, member.hero.sex)];
                 selection.look = Some(0);
@@ -845,6 +854,7 @@ fn receive(
                         players,
                         revive_progress,
                         equipment_kills,
+                        boss_loot,
                         acks,
                         elapsed,
                         kills,
@@ -870,6 +880,7 @@ fn receive(
                         }
                         coop.revive_progress = revive_progress;
                         run.equipment_kills = equipment_kills;
+                        run.boss_loot = boss_loot;
                         telegraphs.restore(warnings);
                         let me = coop.peer;
                         coop.replay.extend(
@@ -1427,6 +1438,7 @@ fn transmit(
             players: coop.players.values().cloned().collect(),
             revive_progress: coop.revive_progress.clone(),
             equipment_kills: run.equipment_kills,
+            boss_loot: run.boss_loot.clone(),
             acks: coop.acks.clone(),
             elapsed: run.elapsed,
             kills: run.kills,
@@ -1575,6 +1587,7 @@ pub(super) fn apply_guest_hits(
                 pos: tf.translation,
                 xp: enemy.xp,
                 boss: enemy.boss,
+                boss_name: enemy.boss.then(|| enemy.def.name.to_owned()),
                 spawn_cost: if enemy.home.is_none() {
                     super::horde_spawning::cost(enemy.def)
                 } else {
@@ -1650,6 +1663,7 @@ mod tests {
             players: Vec::new(),
             revive_progress: HashMap::from([(1, 0.5)]),
             equipment_kills: [0; 3],
+            boss_loot: Vec::new(),
             acks: HashMap::from([(1, 42)]),
             elapsed: 3.,
             kills: 0,

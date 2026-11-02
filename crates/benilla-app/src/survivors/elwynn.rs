@@ -263,6 +263,7 @@ const CHARGE: u32 = 100;
 /// Elite base stats; lair availability and kits are independent of enemy unlock times.
 static GUARDIANS: [EnemyDef; 4] = [
     EnemyDef {
+        roaming_elite: true,
         from: 210.0,
         ..foe(
             (
@@ -280,6 +281,7 @@ static GUARDIANS: [EnemyDef; 4] = [
         )
     },
     EnemyDef {
+        roaming_elite: true,
         from: 480.0,
         ..foe(
             ("Gruff Swiftbite", 246, 1.62, 800.0, 22.0, 1.6, 6.6, 28, 0.0),
@@ -291,6 +293,7 @@ static GUARDIANS: [EnemyDef; 4] = [
         11,
     ),
     EnemyDef {
+        roaming_elite: true,
         from: 780.0,
         ..foe(
             ("Bellygrub", 377, 2.97, 1000.0, 26.0, 2.4, 5.0, 30, 0.0),
@@ -330,9 +333,7 @@ pub(super) fn is_boss(def: &EnemyDef) -> bool {
 
 /// The three elite enemy-table rows also spawn as roaming chasers, independently of lairs.
 pub(super) fn is_roaming_elite(def: &EnemyDef) -> bool {
-    [0, 1, 3].iter().any(|&i| {
-        GUARDIANS[i].name == def.name && GUARDIANS[i].display == def.display
-    })
+    def.roaming_elite
 }
 
 #[cfg(test)]

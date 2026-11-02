@@ -39,6 +39,11 @@ pub(super) struct Equipment {
     pub search_active: bool,
     pub search_cursor: super::text_edit::Cursor,
     pub show_loot: bool,
+    pub show_journal: bool,
+    pub loot_class: Option<u8>,
+    pub loot_slot: Option<usize>,
+    pub loot_quality: usize,
+    pub loot_source: usize,
     pub selected: Option<u64>,
     pub listing: Option<u64>,
     pub filter: usize,
@@ -55,6 +60,7 @@ pub(super) struct Equipment {
     refresh_t: f32,
     run_key: String,
     counted: [u32; 3],
+    boss_counted: usize,
     reward_t: f32,
     finished: bool,
     read_only: bool,
@@ -110,6 +116,11 @@ impl Default for Equipment {
             search_active: false,
             search_cursor: Default::default(),
             show_loot: false,
+            show_journal: false,
+            loot_class: None,
+            loot_slot: None,
+            loot_quality: 0,
+            loot_source: 0,
             selected: None,
             listing: None,
             filter: 0,
@@ -125,6 +136,7 @@ impl Default for Equipment {
             refresh_t: 0.,
             run_key: String::new(),
             counted: [0; 3],
+            boss_counted: 0,
             reward_t: 0.,
             finished: true,
             read_only,
@@ -287,7 +299,8 @@ impl Equipment {
         let delta = std::array::from_fn::<_, 3, _>(|i| {
             run.equipment_kills[i].saturating_sub(self.counted[i])
         });
-        if delta != [0; 3] || gold > 0 {
+        let boss_names = run.boss_loot.iter().skip(self.boss_counted).cloned().collect::<Vec<_>>();
+        if delta != [0; 3] || gold > 0 || !boss_names.is_empty() {
             self.queue(
                 self.run_key.clone(),
                 Action::Reward {
@@ -295,10 +308,12 @@ impl Equipment {
                     normal: delta[0],
                     elite: delta[1],
                     boss: delta[2],
+                    boss_names,
                     gold,
                 },
             );
             self.counted = run.equipment_kills;
+            self.boss_counted = run.boss_loot.len();
         }
     }
 }
@@ -324,9 +339,11 @@ fn begin(
     selection: Res<Selection>,
 ) {
     gear.open = false;
+    run.spell_damage.clear();
     gear.ensure_hero(&coop.url, run.class.id, &coop.name);
     gear.run_key = Equipment::key(&coop.url, run.class.id);
     gear.counted = [0; 3];
+    gear.boss_counted = 0;
     gear.reward_t = 0.;
     gear.finished = false;
     let zone_name = selection.stage_def().name;
@@ -363,6 +380,11 @@ fn begin(
             .collect();
         let mut inventory = hero.inventory.clone();
         inventory.class = run.class.id;
+        run.spell_damage = inventory
+            .spell_damage_bonuses(&gear.catalog)
+            .into_iter()
+            .map(|(spell, value)| (spell, value as f32 / 10_000.))
+            .collect();
         let bonuses = inventory.bonuses(&gear.catalog);
         run.gear = std::array::from_fn(|i| {
             let key = [
@@ -386,7 +408,7 @@ fn rewards(
         return;
     }
     gear.reward_t += time.delta_secs();
-    if gear.reward_t >= 10. {
+    if gear.reward_t >= 10. || run.boss_loot.len() > gear.boss_counted {
         gear.reward_t = 0.;
         gear.rewards(&run, 0);
     }

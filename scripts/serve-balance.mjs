@@ -8,6 +8,9 @@ const files = new Map([
   ['/balance.html', ['balance.html', 'text/html; charset=utf-8']],
   ['/balance.js', ['balance.js', 'text/javascript; charset=utf-8']],
   ['/balance-data.js', ['balance-data.js', 'text/javascript; charset=utf-8']],
+  ['/zones.html', ['zones.html', 'text/html; charset=utf-8']],
+  ['/zones.js', ['zones.js', 'text/javascript; charset=utf-8']],
+  ['/zones-data.js', ['zones-data.js', 'text/javascript; charset=utf-8']],
 ]);
 
 const server = createServer(async (request, response) => {
@@ -35,5 +38,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(8091, '127.0.0.1', () => {
-  process.stdout.write('Class Balance Lab: http://127.0.0.1:8091/balance.html\nPress Ctrl+C to stop.\n');
+  process.stdout.write('Azeroth Survivors tools: http://127.0.0.1:8091/balance.html and http://127.0.0.1:8091/zones.html\nPress Ctrl+C to stop.\n');
 });

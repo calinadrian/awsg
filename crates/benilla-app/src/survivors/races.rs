@@ -10,6 +10,27 @@ pub(super) struct Race {
 }
 include!("races_data.rs");
 
+pub(super) fn unlock_zone(race: u8) -> Option<&'static str> {
+    match race {
+        3 | 7 => Some("Dun Morogh"),
+        4 => Some("Teldrassil"),
+        5 => Some("Tirisfal Glades"),
+        6 => Some("Mulgore"),
+        8 => Some("Durotar"),
+        _ => None,
+    }
+}
+
+pub(super) fn can_enter(race: u8, zone: &str) -> bool {
+    let faction = RACES.iter().find(|r| r.id == race).map(|r| r.faction);
+    let required = match zone {
+        "Elwynn Forest" | "Westfall" | "Duskwood" | "Dun Morogh" | "Teldrassil" | "The Deadmines" => Some(0),
+        "Durotar" | "The Barrens" | "Stonetalon Mountains" | "Mulgore" | "Tirisfal Glades" | "Wailing Caverns" => Some(1),
+        _ => None,
+    };
+    required.is_none_or(|required| faction == Some(required))
+}
+
 /// A racial stat: the original race effect tags 0-11, in tag order, as the stat rebuild
 /// (RVA 0x5be8f80, dispatch 0x76bc59c) applies them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

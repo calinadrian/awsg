@@ -2,13 +2,20 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub type Amounts = BTreeMap<String, u32>;
-/// Permanent equipment is scarce; materials and reward-card abilities have separate rules.
+/// Elite equipment is scarce; named bosses have their own separate drop assignments.
 pub const MAX_EQUIPMENT_PER_RUN: u32 = 3;
 
 #[derive(Clone, Deserialize)]
 pub struct Catalog {
     pub items: Vec<Definition>,
     pub zones: BTreeMap<String, Zone>,
+    #[serde(default)]
+    pub sets: BTreeMap<String, SetBonus>,
+}
+#[derive(Clone, Deserialize)]
+pub struct SetBonus {
+    pub pieces: u8,
+    pub spell_damage_bp: Amounts,
 }
 #[derive(Clone, Deserialize)]
 pub struct Definition {
@@ -26,6 +33,11 @@ pub struct Definition {
     pub source_item_id: u32,
     pub classes: Vec<u8>,
     pub two_handed: bool,
+    /// Per-spell damage bonuses in basis points; 1000 is +10% to the named spell.
+    #[serde(default)]
+    pub spell_damage_bp: Amounts,
+    #[serde(default)]
+    pub set_name: Option<String>,
     pub base_bonuses: Amounts,
     pub upgrades: Vec<Upgrade>,
     pub scrap: Amounts,
@@ -42,10 +54,17 @@ pub struct Upgrade {
 pub struct Zone {
     pub name: String,
     pub equipment: Vec<Drop>,
+    #[serde(default)]
+    pub boss_drops: Vec<BossDrop>,
     pub equipment_chance_bp: Amounts,
     pub material_chance_bp: Amounts,
     pub materials: Amounts,
     pub material_pool: Vec<String>,
+}
+#[derive(Clone, Deserialize)]
+pub struct BossDrop {
+    pub boss: String,
+    pub item: String,
 }
 #[derive(Clone, Deserialize)]
 pub struct Drop {
@@ -66,6 +85,17 @@ impl Definition {
         if !self.classes.contains(&class) {
             return false;
         }
+        if matches!(class, 1 | 2 | 7) {
+            if self.slot == "ranged" {
+                return false;
+            }
+            if self.slot == "main_hand" && self.two_handed {
+                return false;
+            }
+            if self.slot == "off_hand" && !self.icon.to_ascii_lowercase().contains("shield") {
+                return false;
+            }
+        }
         if !matches!(
             self.slot.as_str(),
             "head" | "shoulders" | "chest" | "wrists" | "hands" | "belt" | "legs" | "feet"
@@ -79,7 +109,9 @@ impl Definition {
             5 | 8 | 9 => "cloth",
             _ => return false,
         };
-        self.armor.as_deref().is_none_or(|kind| kind == armor)
+        self.armor.as_deref().is_none_or(|kind| {
+            kind == armor || (matches!(class, 1 | 2) && kind == "mail")
+        })
     }
     pub fn bonuses(&self, level: u8) -> &Amounts {
         if level == 0 {
@@ -141,6 +173,10 @@ impl Item {
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Inventory {
+    #[serde(default)]
+    pub achievement_points: u32,
+    #[serde(default)]
+    pub cleared_zones: std::collections::BTreeSet<String>,
     pub name: String,
     pub class: u8,
     pub gold: u64,
@@ -157,6 +193,34 @@ impl Inventory {
             {
                 for (key, value) in d.bonuses(item.level) {
                     let entry = result.entry(key.clone()).or_default();
+                    *entry = entry.saturating_add(*value);
+                }
+            }
+        }
+        result
+    }
+
+    pub fn spell_damage_bonuses(&self, catalog: &Catalog) -> Amounts {
+        let mut result = Amounts::new();
+        let mut equipped_sets = BTreeMap::<String, u8>::new();
+        for item in self.items.iter().filter(|i| i.equipped_for(self.class)) {
+            if let Some(definition) = catalog
+                .definition(&item.definition)
+                .filter(|definition| definition.can_use(self.class))
+            {
+                for (spell, value) in &definition.spell_damage_bp {
+                    let entry = result.entry(spell.clone()).or_default();
+                    *entry = entry.saturating_add(*value);
+                }
+                if let Some(set_name) = &definition.set_name {
+                    *equipped_sets.entry(set_name.clone()).or_default() += 1;
+                }
+            }
+        }
+        for (set_name, count) in equipped_sets {
+            if let Some(set) = catalog.sets.get(&set_name).filter(|set| count >= set.pieces) {
+                for (spell, value) in &set.spell_damage_bp {
+                    let entry = result.entry(spell.clone()).or_default();
                     *entry = entry.saturating_add(*value);
                 }
             }
@@ -181,6 +245,7 @@ pub struct Request {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Action {
+    RedeemAchievement { gear: bool },
     LinkInventory {
         tokens: Vec<String>,
     },
@@ -223,6 +288,8 @@ pub enum Action {
         normal: u32,
         elite: u32,
         boss: u32,
+        #[serde(default)]
+        boss_names: Vec<String>,
         gold: u32,
     },
 }

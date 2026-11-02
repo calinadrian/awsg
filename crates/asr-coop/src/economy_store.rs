@@ -20,6 +20,8 @@ struct Account {
     session: Option<(String, String, u32, u32)>,
     #[serde(default)]
     session_equipment: u32,
+    #[serde(default)]
+    session_bosses: Vec<String>,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct State {
@@ -252,6 +254,8 @@ impl Store {
                         let items = std::mem::take(&mut old.inventory.items);
                         let materials = std::mem::take(&mut old.inventory.materials);
                         let gold = std::mem::take(&mut old.inventory.gold);
+                        let points = std::mem::take(&mut old.inventory.achievement_points);
+                        let cleared = std::mem::take(&mut old.inventory.cleared_zones);
                         let receipts = old.receipts.clone();
                         let shared = next
                             .accounts
@@ -264,6 +268,9 @@ impl Store {
                             .filter(|&v| v <= MAX_GOLD)
                             .ok_or("Combined gold exceeds limit")?;
                         shared.inventory.items.extend(items);
+                        let overlap = cleared.intersection(&shared.inventory.cleared_zones).count() as u32;
+                        shared.inventory.achievement_points = shared.inventory.achievement_points.saturating_add(points).saturating_sub(overlap * 10);
+                        shared.inventory.cleared_zones.extend(cleared);
                         for (material, count) in materials {
                             let value = shared.inventory.materials.entry(material).or_default();
                             *value = value
@@ -362,6 +369,33 @@ impl Store {
                     }
                     next.listings.retain(|l| l.id != *listing);
                 }
+                Action::RedeemAchievement { gear } => {
+                    let account = next.accounts.get_mut(&token).ok_or("Hero unavailable")?;
+                    let price = if *gear { 30 } else { 10 };
+                    if account.inventory.achievement_points < price {
+                        return Err("Not enough achievement points".into());
+                    }
+                    if *gear {
+                        if account.inventory.items.len() >= 5000 { return Err("Inventory is full".into()); }
+                        let mut pool: Vec<_> = account.inventory.cleared_zones.iter()
+                            .filter_map(|zone| self.catalog.zones.get(zone))
+                            .flat_map(|zone| zone.equipment.iter())
+                            .filter_map(|drop| self.catalog.definition(&drop.item))
+                            .filter(|item| item.can_use(class)).collect();
+                        let rank = |item: &&Definition| match item.quality.as_str() { "rare" => 2, "uncommon" => 1, _ => 0 };
+                        let highest = pool.iter().map(rank).max().ok_or("Complete a zone quest first")?;
+                        pool.retain(|item| rank(&item) == highest);
+                        let item = pool[random(pool.len() as u32) as usize];
+                        next.serial += 1;
+                        account.inventory.items.push(Item { id: next.serial, definition: item.id.clone(), ..Item::default() });
+                    } else {
+                        for material in ["cloth", "leather", "iron", "wood"] {
+                            let amount = account.inventory.materials.entry(material.into()).or_default();
+                            *amount = amount.saturating_add(20);
+                        }
+                    }
+                    account.inventory.achievement_points -= price;
+                }
                 Action::BeginRun { zone } => {
                     if !self.catalog.zones.contains_key(zone) {
                         return Err("No equipment table for this zone".into());
@@ -370,6 +404,7 @@ impl Store {
                     let account = next.accounts.get_mut(&token).ok_or("Hero unavailable")?;
                     account.session = Some((id.clone(), zone.clone(), 0, 0));
                     account.session_equipment = 0;
+                    account.session_bosses.clear();
                     run = Some(id);
                 }
                 Action::Reward {
@@ -377,6 +412,7 @@ impl Store {
                     normal,
                     elite,
                     boss,
+                    boss_names,
                     gold,
                 } => {
                     let account = next.accounts.get_mut(&token).ok_or("Hero unavailable")?;
@@ -388,6 +424,7 @@ impl Store {
                         || *normal > 2000
                         || *elite > 100
                         || *boss > 20
+                        || boss_names.len() > *boss as usize
                         || *gold > 100_000
                     {
                         return Err("Invalid run reward batch".into());
@@ -402,6 +439,17 @@ impl Store {
                     *paid_gold += gold;
                     let zone_id = zone.clone();
                     let table = self.catalog.zones.get(&zone_id).ok_or("Unknown zone")?;
+                    if boss_names.iter().any(|name| {
+                        !table.boss_drops.iter().any(|entry| entry.boss == *name)
+                    }) {
+                        return Err("Unknown boss loot entry".into());
+                    }
+                    let has_named_bosses = !boss_names.is_empty();
+                    let fresh_boss_names: Vec<_> = boss_names.iter()
+                        .filter(|name| !account.session_bosses.contains(name))
+                        .cloned()
+                        .collect();
+                    account.session_bosses.extend(fresh_boss_names.iter().cloned());
                     account.inventory.gold = account
                         .inventory
                         .gold
@@ -413,13 +461,15 @@ impl Store {
                         .filter_map(|d| {
                             self.catalog
                                 .definition(&d.item)
-                                .filter(|i| i.zone == zone_id && i.can_use(class))
+                                .filter(|i| i.can_use(class))
                                 .map(|i| (i, d.weight))
                         })
                         .collect();
                     let weight: u32 = pool.iter().map(|(_, w)| *w).sum();
+                    let mut boss_names = fresh_boss_names.iter();
                     for (kind, count) in [("normal", *normal), ("elite", *elite), ("boss", *boss)] {
                         for _ in 0..count {
+                            let boss_name = if kind == "boss" { boss_names.next() } else { None };
                             if random(10_000) < table.material_chance_bp[kind]
                                 && !table.material_pool.is_empty()
                             {
@@ -435,29 +485,50 @@ impl Store {
                             // Ordinary enemies never award equipment; their row remains in the
                             // shared table for materials, while elites and bosses use this zone's pool.
                             if kind != "normal"
-                                && account.session_equipment < MAX_EQUIPMENT_PER_RUN
                                 && weight > 0
                                 && account.inventory.items.len() < 5000
+                                && !(kind == "boss" && has_named_bosses && boss_name.is_none())
                                 && random(10_000) < table.equipment_chance_bp[kind]
                             {
-                                let mut roll = random(weight);
-                                if let Some((definition, _)) = pool.iter().find(|(_, w)| {
-                                    if roll < *w {
-                                        true
-                                    } else {
-                                        roll -= w;
-                                        false
-                                    }
-                                }) {
+                                let selected_boss_item = boss_name
+                                    .and_then(|name| table.boss_drops.iter().find(|entry| entry.boss == *name))
+                                    .and_then(|entry| self.catalog.definition(&entry.item));
+                                let named_boss_drop = selected_boss_item.is_some();
+                                if !named_boss_drop && account.session_equipment >= MAX_EQUIPMENT_PER_RUN {
+                                    continue;
+                                }
+                                let random_pool_item = || {
+                                    let mut roll = random(weight);
+                                    pool.iter().find(|(_, w)| {
+                                        if roll < *w { true } else { roll -= w; false }
+                                    }).map(|(definition, _)| *definition)
+                                };
+                                if let Some(definition) = selected_boss_item.or_else(random_pool_item) {
                                     next.serial += 1;
                                     account.inventory.items.push(Item {
                                         id: next.serial,
                                         definition: definition.id.clone(),
                                         ..Item::default()
                                     });
-                                    account.session_equipment += 1;
+                                    if !named_boss_drop {
+                                        account.session_equipment += 1;
+                                    }
                                 }
                             }
+                        }
+                    }
+                    let final_slain = table.boss_drops.last().is_some_and(|boss| account.session_bosses.contains(&boss.boss));
+                    if final_slain && !account.inventory.cleared_zones.contains(&zone_id) {
+                        account.inventory.cleared_zones.insert(zone_id);
+                        account.inventory.achievement_points = account.inventory.achievement_points.saturating_add(10);
+                        account.inventory.gold = account.inventory.gold.saturating_add(100).min(MAX_GOLD);
+                        for material in &table.material_pool {
+                            let amount = account.inventory.materials.entry(material.clone()).or_default();
+                            *amount = amount.saturating_add(5);
+                        }
+                        if let Some((item, _)) = pool.first() {
+                            next.serial += 1;
+                            account.inventory.items.push(Item { id: next.serial, definition: item.id.clone(), ..Item::default() });
                         }
                     }
                 }

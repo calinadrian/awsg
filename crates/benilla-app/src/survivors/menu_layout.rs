@@ -116,6 +116,7 @@ fn header(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
         })
         .with_children(|p| {
             skin::tab(p, f, "Inventory", super::inventory_ui::Action::Open(false));
+            skin::tab(p, f, "Journal", super::inventory_ui::Action::Journal);
             skin::tab(
                 p,
                 f,
@@ -550,10 +551,10 @@ pub(super) fn refresh_pick_plate(
     )>,
     mut slots: Query<(&PoolSlot, &mut Node, &Children, &mut super::hud::TipFor)>,
     mut icons: Query<&mut super::hud::SpellIcon>,
-    mut shown: Local<Option<(Option<usize>, Option<u8>, bool, usize)>>,
+    mut shown: Local<Option<(Option<usize>, Option<u8>, bool, usize, bool)>>,
 ) {
     let race = shown_race(&selection, &buttons);
-    let key = (selection.class, race, spells.is_some(), slots.iter().len());
+    let key = (selection.class, race, spells.is_some(), slots.iter().len(), race.is_some_and(|race| selection.race_unlocked(race)));
     if *shown == Some(key) {
         return;
     }
@@ -562,7 +563,7 @@ pub(super) fn refresh_pick_plate(
     let (hp, reduction) = class.map_or((0., 0.), |c| super::class_base(c.id));
     let open = data::MAPS
         .iter()
-        .filter(|m| super::dungeon::available(m))
+        .filter(|m| super::dungeon::available(m) && super::races::can_enter(race.unwrap_or(1), m.name))
         .count();
     for (stat, mut text) in &mut texts.p0() {
         text.0 = match (stat, class) {
@@ -575,9 +576,14 @@ pub(super) fn refresh_pick_plate(
             (PlateStat::Zones, _) => format!("{open} of {}", data::MAPS.len()),
         };
     }
-    let name = race.map_or("", super::races::race_name);
+    let name = race.map_or(String::new(), |race| {
+        let name = super::races::race_name(race);
+        if selection.race_unlocked(race) { name.into() }
+        else if let Some(zone) = super::races::unlock_zone(race) { format!("{name} · Locked: defeat the final boss in {zone}") }
+        else { format!("{name} · Locked: future expansion") }
+    });
     for mut text in &mut texts.p1() {
-        text.0 = name.into();
+        text.0 = name.clone();
     }
     for mut text in &mut texts.p2() {
         text.0 = race.map_or_else(String::new, race_traits);
@@ -606,9 +612,6 @@ pub(super) fn refresh_pick_plate(
     }
 }
 
-#[derive(Component)]
-pub(super) struct AdventureDetails;
-
 /// The detail line of the play button, naming the selected arena.
 #[derive(Component)]
 pub(super) struct PlayTarget;
@@ -619,77 +622,27 @@ fn adventure(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
         right: Val::Px(MARGIN),
         // Under the FEATURES panel.
         top: Val::Px(HEADER + 16. + super::features_ui::HEIGHT + 12.),
-        bottom: Val::Px(PANELS_BOTTOM),
+        height: Val::Px(180.),
         width: Val::Px(ADVENTURE_WIDTH),
         padding: UiRect::all(Val::Px(16.)),
         flex_direction: FlexDirection::Column,
         row_gap: Val::Px(8.),
-        overflow: Overflow::clip_y(),
         ..default()
     }))
     .with_children(|p| {
         heading(p, f, "YOUR ADVENTURE");
-        skin::button(
-            p,
-            f,
-            "Story · Dungeons · Raids",
-            "The road so far",
-            super::adventure_atlas::Action::Open,
-            false,
-            false,
-            true,
-        );
-        for (i, map) in data::MAPS.iter().enumerate() {
-            let ready = super::dungeon::available(map);
-            // Selection and availability are painted by [`skin::hover`] from the [`skin::Control`].
-            p.spawn((
-                Button,
-                MenuAction::Map(i),
-                GlueDisabled(!ready),
-                skin::Control {
-                    primary: false,
-                    selected: false,
-                    enabled: ready,
-                },
-                Node {
-                    width: Val::Percent(100.),
-                    min_height: Val::Px(64.),
-                    padding: UiRect::axes(Val::Px(14.), Val::Px(10.)),
-                    border: UiRect::all(Val::Px(1.)),
-                    border_radius: BorderRadius::all(Val::Px(5.)),
-                    flex_direction: FlexDirection::Column,
-                    justify_content: JustifyContent::Center,
-                    row_gap: Val::Px(3.),
-                    flex_shrink: 0.,
-                    ..default()
-                },
-                BackgroundColor(skin::SURFACE),
-                BorderColor::all(skin::EDGE),
-            ))
-            .with_children(|p| {
-                skin::label(
-                    p,
-                    f,
-                    map.name,
-                    20.,
-                    if ready { skin::GOLD } else { skin::MUTED },
-                );
-                skin::label(
-                    p,
-                    f,
-                    if ready {
-                        map.zone
-                    } else {
-                        "Dungeon pack required"
-                    },
-                    10.,
-                    skin::MUTED,
-                );
-            });
+        for (title, tab) in [("Story", 0), ("Dungeons", 1), ("Raids", 2)] {
+            skin::button(
+                p,
+                f,
+                title,
+                "",
+                super::adventure_atlas::Action::Open(tab),
+                false,
+                false,
+                true,
+            );
         }
-        skin::rule(p);
-        let details = skin::label(p, f, "", 12., skin::TEXT);
-        p.commands().entity(details).insert(AdventureDetails);
     });
 }
 
@@ -774,41 +727,24 @@ pub(super) fn refresh_adventure(
     selection: Res<super::Selection>,
     buttons: Query<(&MenuAction, &Interaction)>,
     mut labels: ParamSet<(
-        Query<&mut Text, With<AdventureDetails>>,
         Query<&mut Text, With<PlayTarget>>,
         Query<&mut Text, With<RaceCaption>>,
     )>,
 ) {
     let race = shown_race(&selection, &buttons);
-    let name = race.map_or("", super::races::race_name);
-    for mut text in &mut labels.p2() {
-        if text.0 != name {
-            text.0 = name.into();
-        }
-    }
-    let Some(map) = data::MAPS.get(selection.map) else {
-        return;
-    };
-    let mut description = format!(
-        "Hold your ground in {}. Defeat the final boss to claim victory.\n\nENCOUNTERS\n",
-        map.name
-    );
-    for boss in &data::roster(selection.map).bosses {
-        // A dungeon's bosses wait in their rooms rather than arriving on the clock.
-        let at = boss.from as u32;
-        if at == 0 {
-            description.push_str(&format!("·  {}\n", boss.name));
-        } else {
-            description.push_str(&format!("{:02}:{:02}  {}\n", at / 60, at % 60, boss.name));
-        }
-    }
-    for mut text in &mut labels.p0() {
-        if text.0 != description {
-            text.0.clone_from(&description);
-        }
-    }
-    let target = format!("Enter {}", map.name);
+    let name = race.map_or(String::new(), |race| {
+        let name = super::races::race_name(race);
+        if selection.race_unlocked(race) { name.into() }
+        else if let Some(zone) = super::races::unlock_zone(race) { format!("{name} · Locked: clear {zone}") }
+        else { format!("{name} · Future race (locked)") }
+    });
     for mut text in &mut labels.p1() {
+        if text.0 != name {
+            text.0 = name.clone();
+        }
+    }
+    let target = format!("Enter {}", selection.map_def().name);
+    for mut text in &mut labels.p0() {
         if text.0 != target {
             text.0.clone_from(&target);
         }

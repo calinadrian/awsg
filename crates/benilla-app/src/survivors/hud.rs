@@ -918,6 +918,9 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     ) else {
         return false;
     };
+    if !selection.race_unlocked(race) || !selection.can_visit(selection.map) {
+        return false;
+    }
     // The world goes to the battleground picked; until now it stood in the last one.
     selection.stage = selection.map;
     let next_guid = run.next_guid;

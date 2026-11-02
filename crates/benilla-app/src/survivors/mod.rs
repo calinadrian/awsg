@@ -292,15 +292,14 @@ pub(super) struct RunEntity;
 /// The class, look and battleground picked at the menu; the battleground holds for the run.
 #[derive(Resource, Default)]
 pub(super) struct Selection {
+    pub unlocked_races: Vec<u8>,
     pub class: Option<usize>,
     /// `(display, race, sex)`, one per race and sex the class's trainers come in.
     pub looks: Vec<(u32, u8, u8)>,
     pub look: Option<usize>,
     /// An index into [`data::MAPS`].
     pub map: usize,
-    /// The battleground the world is standing in: the last one entered (or the saved pick at
-    /// boot). Picking another at the menu changes only `map`, so the menu hero stays put and no
-    /// loading screen rises until Enter World.
+    /// The battleground shown behind the menu or used for the run.
     pub stage: usize,
     /// Bumped on every change, so the menu rebuilds once.
     pub version: u32,
@@ -310,6 +309,20 @@ pub(super) struct Selection {
 }
 
 impl Selection {
+    pub fn race_unlocked(&self, race: u8) -> bool {
+        matches!(race, 1 | 2) || self.unlocked_races.contains(&race)
+    }
+    pub fn can_visit(&self, map: usize) -> bool {
+        let race = self.look.and_then(|i| self.looks.get(i)).map(|look| look.1).unwrap_or(1);
+        data::MAPS.get(map).is_some_and(|map| races::can_enter(race, map.name))
+    }
+    /// Keep the world preview on the same battleground the menu and next run select.
+    pub fn select_map(&mut self, map: usize) {
+        self.map = map;
+        self.stage = map;
+        self.version += 1;
+    }
+
     /// The picked hero's dials, if any were set.
     pub fn current_features(&self) -> Option<appearance::Features> {
         let &(_, race, sex) = self.looks.get(self.look?)?;
@@ -454,8 +467,12 @@ pub(super) struct Run {
     pub shield_t: f32,
     pub immune_t: f32,
     pub gear: [f32; 5],
+    /// Item affixes keyed by spell, as fractions (1000 basis points = 10%).
+    pub spell_damage: std::collections::HashMap<String, f32>,
     pub gear_look: Vec<asr_coop::economy::LookItem>,
     pub equipment_kills: [u32; 3],
+    /// Boss names whose kills are ready to resolve through the zone's named loot table.
+    pub boss_loot: Vec<String>,
     pub thorns: f32,
     pub thorns_t: f32,
     pub thorns_spell: u32,
@@ -522,8 +539,10 @@ impl Default for Run {
             shield_t: 0.0,
             immune_t: 0.0,
             gear: [0.; 5],
+            spell_damage: Default::default(),
             gear_look: Vec::new(),
             equipment_kills: [0; 3],
+            boss_loot: Vec::new(),
             thorns: 0.0,
             thorns_t: 0.0,
             thorns_spell: 0,

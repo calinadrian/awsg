@@ -54,7 +54,10 @@ pub(super) fn keep_lairs(
     coop: Res<super::coop::Coop>,
 ) {
     let roster = data::roster(selection.map);
-    if roster.guardians.is_empty() || (run.dead_t.is_some() && !coop.living_guests()) {
+    if roster.guardians.is_empty()
+        || super::dungeon::is_dungeon(selection.stage_def())
+        || (run.dead_t.is_some() && !coop.living_guests())
+    {
         return;
     }
     if hero.single().is_err() {

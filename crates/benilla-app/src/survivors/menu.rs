@@ -24,7 +24,6 @@ pub(super) enum MenuAction {
     Race(u8),
     Sex(u8),
     Class(usize),
-    Map(usize),
     Randomize,
     Enter,
     /// Opens the talents screen ([`super::talents`]).
@@ -113,9 +112,7 @@ pub(super) fn restore_pick(
         return;
     };
     if data::MAPS.get(map).is_some_and(super::dungeon::available) {
-        selection.map = map;
-        selection.stage = map;
-        selection.version += 1;
+        selection.select_map(map);
     }
     if class < data::CLASSES.len() {
         let all = all_looks(creatures);
@@ -126,7 +123,7 @@ pub(super) fn restore_pick(
 }
 
 /// Every class's looks, `(display, race, sex)`, indexed like [`data::CLASSES`].
-fn all_looks(creatures: &crate::entities::Creatures) -> Vec<Vec<(u32, u8, u8)>> {
+pub(super) fn all_looks(creatures: &crate::entities::Creatures) -> Vec<Vec<(u32, u8, u8)>> {
     data::CLASSES
         .iter()
         .map(|c| looks_for(c, creatures))
@@ -139,11 +136,17 @@ fn find(looks: &[(u32, u8, u8)], race: Option<u8>, sex: Option<u8>) -> Option<us
         .position(|&(_, r, s)| race.is_none_or(|x| x == r) && sex.is_none_or(|x| x == s))
 }
 
-fn set(sel: &mut Selection, all: &[Vec<(u32, u8, u8)>], class: usize, look: usize) {
+pub(super) fn set(sel: &mut Selection, all: &[Vec<(u32, u8, u8)>], class: usize, look: usize) {
+    if !sel.race_unlocked(all[class][look].1) { return; }
     sel.class = Some(class);
     sel.looks = all[class].clone();
     sel.look = Some(look);
     sel.version += 1;
+    if !sel.can_visit(sel.map) {
+        let race = all[class][look].1;
+        let start = if super::races::RACES.iter().any(|r| r.id == race && r.faction == 1) { "Durotar" } else { "Elwynn Forest" };
+        if let Some(map) = data::MAPS.iter().position(|map| map.name == start) { sel.select_map(map); }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -181,12 +184,6 @@ pub(super) fn menu_clicks(
         .map(|&(_, r, s)| (r, s));
     let (race, sex) = (cur.map(|c| c.0), cur.map_or(0, |c| c.1));
     match action {
-        MenuAction::Map(i) => {
-            if selection.map != i && data::MAPS.get(i).is_some_and(super::dungeon::available) {
-                selection.map = i;
-                selection.version += 1;
-            }
-        }
         MenuAction::Talents => {}
         MenuAction::Feature(dial, forward) => {
             if let Some((key, mut f, ranges)) =
@@ -231,6 +228,7 @@ pub(super) fn menu_clicks(
                 .iter()
                 .enumerate()
                 .flat_map(|(c, looks)| (0..looks.len()).map(move |l| (c, l)))
+                .filter(|&(class, look)| selection.race_unlocked(all[class][look].1))
                 .collect();
             if !picks.is_empty() {
                 let (c, l) = picks[rng.index(picks.len())];
@@ -248,6 +246,7 @@ pub(super) fn menu_clicks(
         }
         // The race keeps the class where it can, else takes the first class it has.
         MenuAction::Race(r) => {
+            if !selection.race_unlocked(r) { return; }
             let classes = selection.class.into_iter().chain(0..all.len());
             for c in classes {
                 let l = find(&all[c], Some(r), Some(sex)).or_else(|| find(&all[c], Some(r), None));
@@ -321,7 +320,6 @@ pub(super) fn refresh_menu_ui(
             MenuAction::Race(r) => cur.is_some_and(|c| c.0 == r),
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == s),
             MenuAction::Class(i) => selection.class == Some(i),
-            MenuAction::Map(i) => selection.map == i,
             MenuAction::Randomize
             | MenuAction::Feature(..)
             | MenuAction::RandomFeatures
@@ -336,8 +334,8 @@ pub(super) fn refresh_menu_ui(
         }
         if let Some(mut disabled) = disabled {
             let off = match *action {
-                MenuAction::Enter => cur.is_none() || !super::dungeon::available(&data::MAPS[selection.map]),
-                MenuAction::Map(i) => !super::dungeon::available(&data::MAPS[i]),
+                MenuAction::Enter => cur.is_none() || !selection.can_visit(selection.map) || !super::dungeon::available(&data::MAPS[selection.map]),
+                MenuAction::Race(r) => !selection.race_unlocked(r),
                 _ => false,
             };
             if disabled.0 != off {
@@ -391,14 +389,13 @@ pub(super) fn refresh_menu_ui(
         }
         let selected = match action {
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == *s),
-            MenuAction::Map(i) => selection.map == *i,
             _ => false,
         };
         let enabled = match action {
             MenuAction::Enter => {
-                cur.is_some() && super::dungeon::available(&data::MAPS[selection.map])
+                cur.is_some() && selection.can_visit(selection.map) && super::dungeon::available(&data::MAPS[selection.map])
             }
-            MenuAction::Map(i) => super::dungeon::available(&data::MAPS[*i]),
+            MenuAction::Race(race) => selection.race_unlocked(*race),
             _ => true,
         };
         if style.selected != selected || style.enabled != enabled {

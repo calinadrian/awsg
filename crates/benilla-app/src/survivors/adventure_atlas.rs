@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 #[derive(Component, Clone, Copy)]
 pub(super) enum Action {
-    Open,
+    Open(u8),
     Close,
     Tab(u8),
     Pick(usize),
@@ -147,6 +147,14 @@ static PLACES: &[Place] = &[
         ..place("Ruins of Ahn'Qiraj", Both, Screen(509), "The scarab wall falls",
             "The qiraji swarm through the ruins beyond the Scarab Wall.")
     },
+    place("Teldrassil", Alliance, Screen(1), "The tree of life",
+        "Nightsabers and gnarlpine furbolgs prowl beneath the boughs of the great tree."),
+    place("Mulgore", Horde, Screen(1), "The wide red land",
+        "Plainstriders, prairie wolves and the quilboar roam the Tauren homeland."),
+    place("Tirisfal Glades", Horde, Screen(0), "The shadowed beginning",
+        "Forsaken and Scarlet patrols stalk the misted fields beyond Deathknell."),
+    place("Dun Morogh", Alliance, Screen(0), "The snowy homeland",
+        "Defeat Dun Morogh's final boss to unlock Dwarves and Gnomes."),
 ];
 
 /// A map of cards on a seven-column grid, and the path drawn between them.
@@ -161,18 +169,22 @@ struct Road {
 /// The original story map: the two faction roads meet in Stranglethorn, climb to Un'Goro and
 /// Arathi, and run back west along the bottom to Naxxramas.
 const STORY: Road = Road {
-    rows: 4,
+    rows: 5,
     cards: &[
         (4, 0, 0), (5, 1, 0), (6, 2, 0), (7, 3, 0),
         (8, 4, 1), (9, 5, 1), (10, 6, 1),
         (0, 0, 2), (1, 1, 2), (2, 2, 2), (3, 3, 2), (11, 6, 2),
         (18, 0, 3), (17, 1, 3), (16, 2, 3), (15, 3, 3), (14, 4, 3), (13, 5, 3), (12, 6, 3),
+        (25, 0, 4), (26, 1, 4), (27, 2, 4),
+        (28, 3, 4),
     ],
     path: &[
         (0, 1), (1, 2), (2, 3), (3, 4),
         (7, 8), (8, 9), (9, 10), (10, 4),
         (4, 5), (5, 6), (6, 11), (11, 18),
         (18, 17), (17, 16), (16, 15), (15, 14), (14, 13), (13, 12),
+        (19, 7), (20, 0), (21, 0),
+        (22, 7),
     ],
 };
 
@@ -245,7 +257,10 @@ fn playable(p: &Place) -> Option<usize> {
         .filter(|&i| super::dungeon::available(&data::MAPS[i]))
 }
 
-fn status(p: &Place) -> (String, Color) {
+fn status(p: &Place, selection: &Selection) -> (String, Color) {
+    if playable(p).is_some_and(|map| !selection.can_visit(map)) {
+        return ("Other faction territory".into(), Color::srgb(0.95, 0.42, 0.36));
+    }
     let side = match p.side {
         Both => None,
         Alliance => Some(("Alliance", Color::srgb(0.42, 0.62, 1.0))),
@@ -296,9 +311,9 @@ fn input(
         return;
     };
     match action {
-        Action::Open => {
+        Action::Open(tab) => {
             atlas.open = true;
-            atlas.tab = 0;
+            atlas.tab = tab.min(TABS.len() as u8 - 1);
             atlas.hover = None;
         }
         Action::Close => atlas.open = false,
@@ -307,9 +322,8 @@ fn input(
             atlas.hover = None;
         }
         Action::Pick(i) => {
-            if selection.map != i && data::MAPS.get(i).is_some_and(super::dungeon::available) {
-                selection.map = i;
-                selection.version += 1;
+            if selection.map != i && selection.can_visit(i) && data::MAPS.get(i).is_some_and(super::dungeon::available) {
+                selection.select_map(i);
             }
         }
     }
@@ -331,10 +345,10 @@ fn hover(cards: Query<(&Card, &Interaction)>, mut atlas: ResMut<Atlas>) {
     }
 }
 
-fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, index: usize, at: (f32, f32), height: f32, selected: bool) {
+fn card(p: &mut ChildSpawnerCommands, f: &Handle<Font>, index: usize, at: (f32, f32), height: f32, selected: bool, selection: &Selection) {
     let place = &PLACES[index];
-    let open = playable(place);
-    let (state, color) = status(place);
+    let open = playable(place).filter(|&map| selection.can_visit(map));
+    let (state, color) = status(place, selection);
     let mut card = p.spawn((
         Button,
         Card(index),
@@ -453,9 +467,9 @@ fn chip(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: String, last: bool
     });
 }
 
-fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place) {
-    let open = playable(place);
-    let (state, color) = status(place);
+fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, selection: &Selection) {
+    let open = playable(place).filter(|&map| selection.can_visit(map));
+    let (state, color) = status(place, selection);
     p.spawn((
         Node {
             width: Val::Percent(100.),
@@ -476,6 +490,9 @@ fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place) {
                 skin::label(p, f, place.name, 26., skin::GOLD);
                 skin::label(p, f, place.line, 16., Color::srgb(0.96, 0.66, 0.45));
                 skin::label(p, f, state, 14., color);
+                if let Some(map) = data::all_maps().iter().find(|m| m.name == place.map) {
+                    skin::label(p, f, map.zone, 12., skin::MUTED);
+                }
             });
         skin::label(p, f, place.blurb, 15., skin::TEXT);
         p.spawn(Node {
@@ -605,10 +622,10 @@ fn draw(
                         path(map, place_at(road.cards[a]), place_at(road.cards[b]), card_h);
                     }
                     for &c in road.cards {
-                        card(map, f, c.0, place_at(c), card_h, current == Some(PLACES[c.0].map));
+                        card(map, f, c.0, place_at(c), card_h, current == Some(PLACES[c.0].map), &selection);
                     }
                 });
-                details(p, f, &PLACES[shown]);
+                details(p, f, &PLACES[shown], &selection);
             });
         });
 }

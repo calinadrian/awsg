@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#10130f">
+<title>Azeroth Survivors — Zone Loot Atlas</title>
+<style>
+  :root { color-scheme:dark; --bg:#10130f; --panel:#181d17; --panel2:#20271e; --line:#343d31; --muted:#a1a895; --text:#eeeede; --gold:#f2c66d; --green:#a5d18b; --red:#db8f78; --blue:#91b7c9; }
+  * { box-sizing:border-box }
+  body { margin:0; background:radial-gradient(ellipse at 18% -14%,#343c25 0,transparent 40%),var(--bg); color:var(--text); font:14px/1.5 system-ui,"Segoe UI",sans-serif }
+  header,main { width:min(1320px,calc(100% - 36px)); margin:auto }
+  header { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; padding:27px 0 21px; border-bottom:1px solid var(--line) }
+  .eyebrow { color:var(--gold); font:600 10px ui-monospace,monospace; letter-spacing:.16em; text-transform:uppercase }
+  h1 { margin:5px 0 4px; font-size:clamp(26px,4vw,38px); line-height:1.1; letter-spacing:-.04em }
+  header p { margin:0; max-width:720px; color:var(--muted) }
+  nav { display:flex; gap:8px; flex-shrink:0 }
+  a,.button,select,input { color:inherit; font:inherit }
+  a,.button { display:inline-flex; align-items:center; justify-content:center; border:1px solid #46513e; border-radius:8px; background:#22291e; padding:8px 11px; text-decoration:none; cursor:pointer }
+  a:hover,.button:hover { border-color:var(--gold); color:var(--gold) }
+  main { display:grid; grid-template-columns:270px minmax(0,1fr); gap:18px; padding:20px 0 46px; align-items:start }
+  .panel { background:linear-gradient(145deg,#1c221a,#161b15); border:1px solid var(--line); border-radius:14px; box-shadow:0 14px 42px #0003 }
+  .zones { padding:15px; position:sticky; top:12px; max-height:calc(100vh - 24px); overflow:auto }
+  .zones h2,.detail h2 { margin:0; font-size:16px }
+  .section-note { margin:3px 0 13px; color:var(--muted); font-size:11px }
+  #zone-list { display:grid; gap:7px }
+  .zone-pick { width:100%; display:flex; justify-content:space-between; align-items:center; gap:8px; text-align:left; border:1px solid #30392c; border-radius:9px; background:#131811; color:var(--text); padding:10px; cursor:pointer }
+  .zone-pick:hover { border-color:#6d7957 }
+  .zone-pick[aria-current="true"] { border-color:var(--gold); background:#332b18; box-shadow:inset 3px 0 var(--gold) }
+  .zone-name { font-weight:700 }
+  .zone-meta,.count { color:var(--muted); font:10px ui-monospace,monospace }
+  .count { white-space:nowrap; border:1px solid #414a3a; border-radius:99px; padding:2px 6px }
+  .content { min-width:0; display:grid; gap:14px }
+  .detail { padding:18px }
+  .topline { display:flex; justify-content:space-between; align-items:flex-start; gap:12px }
+  .chapter { color:var(--gold); font:11px ui-monospace,monospace }
+  .sub { margin:3px 0 15px; color:var(--muted); font-size:12px }
+  .metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px }
+  .metric { min-width:0; border:1px solid var(--line); background:#121710; border-radius:9px; padding:10px }
+  .metric small { display:block; color:var(--muted); font:10px ui-monospace,monospace; text-transform:uppercase; letter-spacing:.04em }
+  .metric strong { display:block; margin-top:2px; color:var(--gold); font:600 18px ui-monospace,monospace }
+  .loot { padding:17px }
+  .loot-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px }
+  .loot-head h2 { margin:0; font-size:16px }
+  .loot-head p { margin:3px 0 0; color:var(--muted); font-size:11px }
+  .filters { display:grid; grid-template-columns:minmax(160px,1fr) 140px 130px 130px auto auto; gap:8px; align-items:end; margin-bottom:12px }
+  label { display:block; margin-bottom:4px; color:var(--muted); font:10px ui-monospace,monospace; text-transform:uppercase; letter-spacing:.06em }
+  select,input[type=search] { width:100%; min-width:0; border:1px solid #394334; border-radius:7px; background:#11160f; padding:8px 9px; outline:none }
+  select:focus,input:focus { border-color:var(--gold); box-shadow:0 0 0 2px #f2c66d22 }
+  .check { display:flex; align-items:center; gap:6px; min-height:36px; white-space:nowrap; color:#d4d7c9; font-size:11px }
+  .check input { accent-color:var(--gold) }
+  .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:9px }
+  table { width:100%; min-width:870px; border-collapse:collapse; font-size:12px }
+  th { position:sticky; top:0; background:#20271e; color:var(--muted); text-align:left; font:10px ui-monospace,monospace; text-transform:uppercase; letter-spacing:.06em; padding:9px 10px }
+  td { padding:9px 10px; border-top:1px solid #293126; vertical-align:top }
+  tbody tr:hover { background:#20271d }
+  .item-name { font-weight:700; color:#f0ead5 }
+  .item-id { display:block; color:#818978; font:10px ui-monospace,monospace }
+  .item-stats { max-width:230px; color:#d2d9c9; font-size:11px; line-height:1.45 }
+  .spell-affix { display:block; margin-top:3px; color:#9bc5ff; font-weight:700 }
+  .quality { display:inline-block; border:1px solid currentColor; border-radius:99px; padding:1px 6px; font:10px ui-monospace,monospace; text-transform:capitalize }
+  .quality-uncommon { color:#7dce79 }.quality-rare { color:#78a9ff }.quality-epic { color:#c184e8 }.quality-legendary { color:#ff9a48 }.quality-common { color:#c3c7b9 }
+  .chance { color:var(--gold); font:12px ui-monospace,monospace; white-space:nowrap }
+  .track { width:16px; height:16px; accent-color:var(--green); cursor:pointer }
+  .sources summary { color:var(--blue); font-size:11px; cursor:pointer }
+  .sources ul { margin:6px 0 0; padding-left:16px; color:var(--muted); font-size:11px }
+  .materials { display:flex; flex-wrap:wrap; gap:7px; margin-top:13px }
+  .material { border:1px solid #3b4634; border-radius:99px; background:#151b13; padding:5px 9px; font-size:11px }
+  .material b { color:var(--green) }
+  .empty { padding:25px; text-align:center; color:var(--muted) }
+  .foot { margin:12px 0 0; color:var(--muted); font-size:11px }
+  @media(max-width:900px) { main { grid-template-columns:1fr }.zones { position:static; max-height:none }.filters { grid-template-columns:repeat(3,minmax(0,1fr)) }.filters .check { grid-column:auto } #zone-list { grid-template-columns:repeat(auto-fit,minmax(170px,1fr)) } }
+  @media(max-width:600px) { header,main { width:calc(100% - 22px) } header { align-items:flex-start; flex-direction:column } nav { width:100% } nav a { flex:1 }.metrics { grid-template-columns:1fr 1fr }.filters { grid-template-columns:1fr 1fr }.filters>div:first-child { grid-column:1 / -1 }.loot,.detail { padding:13px } }
+</style>
+<body>
+<header>
+  <div><div class="eyebrow">Azeroth Survivors · collection tools</div><h1>Zone Loot Atlas</h1><p>Browse each zone’s equipment pool, material drops, and elite or boss equipment chances. Mark items as collected to keep a local checklist.</p></div>
+  <nav><a href="./balance.html">Balance Lab</a><button class="button" id="export">Export checklist</button></nav>
+</header>
+<main>
+  <aside class="panel zones">
+    <h2>Zones &amp; instances</h2><p class="section-note" id="zone-count"></p>
+    <div id="zone-list"></div>
+  </aside>
+  <section class="content">
+    <section class="panel detail">
+      <div class="topline"><div><div class="chapter" id="chapter"></div><h2 id="zone-title"></h2><p class="sub" id="zone-sub"></p></div><button class="button" id="clear-zone">Clear zone checklist</button></div>
+      <div class="metrics" id="metrics"></div>
+      <div class="materials" id="materials"></div>
+      <section class="boss-drops"><h3>Boss drops</h3><div id="boss-drops" class="materials"></div></section>
+    </section>
+    <section class="panel loot">
+      <div class="loot-head"><div><h2>Equipment pool</h2><p id="pool-note"></p></div><strong class="count" id="result-count"></strong></div>
+      <div class="filters">
+        <div><label for="search">Search item</label><input id="search" type="search" placeholder="Name or item ID"></div>
+        <div><label for="class-filter">Class</label><select id="class-filter"></select></div>
+        <div><label for="slot-filter">Slot</label><select id="slot-filter"><option value="">All slots</option></select></div>
+        <div><label for="quality-filter">Quality</label><select id="quality-filter"><option value="">All qualities</option></select></div>
+        <label class="check"><input type="checkbox" id="missing-only"> Missing only</label>
+        <label class="check"><input type="checkbox" id="show-sources"> Show source mobs</label>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Collected</th><th>Equipment &amp; tooltip</th><th>Slot</th><th>Stats</th><th>Usable by</th><th>Pool share</th><th>Reference creature drops</th></tr></thead><tbody id="items"></tbody></table></div>
+      <p class="foot">Select a class to see its actual weighted pool share within a successful equipment roll. Equipment can drop from elites and bosses; normal enemies award materials only. “Reference creature drops” records provenance for the item, while this game’s equipment roll is zone-wide. Hover an item name for its full stat and upgrade tooltip.</p>
+    </section>
+  </section>
+</main>
+<script src="./zones-data.js"></script><script src="./zones.js"></script>
+</body>
+</html>

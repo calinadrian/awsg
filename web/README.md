@@ -33,12 +33,16 @@ cargo run --release -p wenilla-host -- --www web/dist --data /path/to/WoW/Data -
 # then open http://127.0.0.1:8090/
 ```
 
-To open just the simulator without building the WebAssembly client or pointing a server at WoW
-data, run `node scripts/serve-balance.mjs` and visit `http://127.0.0.1:8091/balance.html`.
-The normal local web build also includes it at `http://127.0.0.1:8090/balance.html`. It uses the
-checked-in spell definitions and upgrade axes; the spell data bundle is generated from
-`survivors/spell_data.rs`, `data.rs`, and `reward_axes.rs`. After changing those tables, refresh
-the page data with `node scripts/export_balance_data.mjs`.
+To open the tools without building the WebAssembly client or pointing a server at WoW data, run
+`node scripts/serve-balance.mjs`. The Class Balance Lab is at
+`http://127.0.0.1:8091/balance.html`; the Zone Loot Atlas is at
+`http://127.0.0.1:8091/zones.html`. The normal local web build includes both pages at port 8090.
+The balance page data is generated from `survivors/spell_data.rs`, `data.rs`, and
+`reward_axes.rs` by `node scripts/export_balance_data.mjs`. The loot page data is generated from
+`crates/asr-coop/assets/economy_catalog.json` and the playable maps in `survivors/data.rs` by
+`node scripts/export_zone_loot.mjs`. The zone quality rules, class items, compact early-zone
+pools and named boss drops are maintained by `node scripts/configure_zone_quality_progression.mjs`.
+Run that configurator and then the loot exporter after changing the source tables.
 
 `wenilla-host` (`crates/wenilla-host`) is the whole server side: static files
 (precompressed), `GET /data/{name}` (`HEAD` too; `GET /data/__index` lists the chain), and

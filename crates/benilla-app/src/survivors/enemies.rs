@@ -166,11 +166,12 @@ pub(super) struct Spawner {
 }
 
 /// An enemy died here, worth this much.
-#[derive(Message, Clone, Copy)]
+#[derive(Message, Clone)]
 pub(super) struct Loot {
     pub pos: Vec3,
     pub xp: u32,
     pub boss: bool,
+    pub boss_name: Option<String>,
     pub spawn_cost: f32,
     pub roaming_elite: bool,
     pub elite: bool,
@@ -1000,6 +1001,9 @@ pub(super) fn drop_loot(
     for d in drops.read() {
         let kind = if d.boss { 2 } else if d.elite { 1 } else { 0 };
         run.equipment_kills[kind] = run.equipment_kills[kind].saturating_add(1);
+        if let Some(name) = &d.boss_name {
+            run.boss_loot.push(name.clone());
+        }
         spawner.source.killed(d.spawn_cost);
         // Regular mobs pay 1.65x, stochastically rounded; bosses pay their table XP
         // unchanged (RVA 0x5c03cd9..0x5c03dc3). No global 2x multiplier.
@@ -1044,10 +1048,6 @@ pub(super) fn drop_loot(
                 d.pos + Vec3::Z * 0.8,
                 GemKind::Magnet,
             );
-        }
-        if d.boss || rng.f32() < 0.015 {
-            let heal = GemKind::Heal(if d.boss { 1000.0 } else { 30.0 });
-            spawn_gem(&mut commands, run.guid(), d.pos + Vec3::X * 0.8, heal);
         }
     }
     if xp_changed {

@@ -1,0 +1,1122 @@
+{
+  "elwynn": [
+    {
+      "item": "elwynn:6542",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:14365",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:14113",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3374",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6147",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6558",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:15492",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1730",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3036",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2777",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:9748",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:9749",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3000",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:9757",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2398",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3471",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1917",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:4302",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6148",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3307",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6201",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2975",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3302",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1731",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2778",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:4577",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6202",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3308",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2976",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3314",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2980",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:15491",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:15933",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:15970",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:9747",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:14097",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:7280",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:9756",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2978",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:9763",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:778",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2073",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2055",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1389",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:5744",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:4766",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6203",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3651",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1515",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:4566",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1512",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3189",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1195",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:4570",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1513",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:8177",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:5071",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:5069",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6543",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:3375",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6556",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:1504",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:2396",
+      "weight": 1
+    },
+    {
+      "item": "elwynn:6550",
+      "weight": 1
+    }
+  ],
+  "durotar": [
+    {
+      "item": "durotar:6378",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14123",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14025",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6539",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6517",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6379",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14725",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6548",
+      "weight": 1
+    },
+    {
+      "item": "durotar:3036",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2777",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2969",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6528",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6268",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2973",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2977",
+      "weight": 1
+    },
+    {
+      "item": "durotar:15487",
+      "weight": 1
+    },
+    {
+      "item": "durotar:4571",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2763",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2983",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14114",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6518",
+      "weight": 1
+    },
+    {
+      "item": "durotar:3311",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6551",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14722",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2778",
+      "weight": 1
+    },
+    {
+      "item": "durotar:8182",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6541",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14117",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6521",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6554",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6547",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2980",
+      "weight": 1
+    },
+    {
+      "item": "durotar:15926",
+      "weight": 1
+    },
+    {
+      "item": "durotar:15933",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14119",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2970",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6269",
+      "weight": 1
+    },
+    {
+      "item": "durotar:3315",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6546",
+      "weight": 1
+    },
+    {
+      "item": "durotar:3305",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2073",
+      "weight": 1
+    },
+    {
+      "item": "durotar:1516",
+      "weight": 1
+    },
+    {
+      "item": "durotar:2079",
+      "weight": 1
+    },
+    {
+      "item": "durotar:1510",
+      "weight": 1
+    },
+    {
+      "item": "durotar:15210",
+      "weight": 1
+    },
+    {
+      "item": "durotar:1511",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6560",
+      "weight": 1
+    },
+    {
+      "item": "durotar:15014",
+      "weight": 1
+    },
+    {
+      "item": "durotar:1515",
+      "weight": 1
+    },
+    {
+      "item": "durotar:4566",
+      "weight": 1
+    },
+    {
+      "item": "durotar:15268",
+      "weight": 1
+    },
+    {
+      "item": "durotar:1512",
+      "weight": 1
+    },
+    {
+      "item": "durotar:4570",
+      "weight": 1
+    },
+    {
+      "item": "durotar:1514",
+      "weight": 1
+    },
+    {
+      "item": "durotar:4567",
+      "weight": 1
+    },
+    {
+      "item": "durotar:1513",
+      "weight": 1
+    },
+    {
+      "item": "durotar:5212",
+      "weight": 1
+    },
+    {
+      "item": "durotar:5071",
+      "weight": 1
+    },
+    {
+      "item": "durotar:3645",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14366",
+      "weight": 1
+    },
+    {
+      "item": "durotar:6519",
+      "weight": 1
+    },
+    {
+      "item": "durotar:3205",
+      "weight": 1
+    },
+    {
+      "item": "durotar:9785",
+      "weight": 1
+    },
+    {
+      "item": "durotar:14723",
+      "weight": 1
+    }
+  ],
+  "westfall": [
+    {
+      "item": "westfall:1429",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2644",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3370",
+      "weight": 1
+    },
+    {
+      "item": "westfall:5967",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1418",
+      "weight": 1
+    },
+    {
+      "item": "westfall:15003",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2635",
+      "weight": 1
+    },
+    {
+      "item": "westfall:4659",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2773",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3021",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1433",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3019",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1425",
+      "weight": 1
+    },
+    {
+      "item": "westfall:821",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2648",
+      "weight": 1
+    },
+    {
+      "item": "westfall:6180",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2138",
+      "weight": 1
+    },
+    {
+      "item": "westfall:816",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1427",
+      "weight": 1
+    },
+    {
+      "item": "westfall:4660",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1419",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1121",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2642",
+      "weight": 1
+    },
+    {
+      "item": "westfall:14742",
+      "weight": 1
+    },
+    {
+      "item": "westfall:4998",
+      "weight": 1
+    },
+    {
+      "item": "westfall:12054",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2774",
+      "weight": 1
+    },
+    {
+      "item": "westfall:8181",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1430",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3066",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1422",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1314",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2645",
+      "weight": 1
+    },
+    {
+      "item": "westfall:12994",
+      "weight": 1
+    },
+    {
+      "item": "westfall:7997",
+      "weight": 1
+    },
+    {
+      "item": "westfall:15972",
+      "weight": 1
+    },
+    {
+      "item": "westfall:7558",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1431",
+      "weight": 1
+    },
+    {
+      "item": "westfall:4434",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1423",
+      "weight": 1
+    },
+    {
+      "item": "westfall:6587",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2646",
+      "weight": 1
+    },
+    {
+      "item": "westfall:15511",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1416",
+      "weight": 1
+    },
+    {
+      "item": "westfall:826",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1415",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1394",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1413",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3740",
+      "weight": 1
+    },
+    {
+      "item": "westfall:12989",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2212",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2213",
+      "weight": 1
+    },
+    {
+      "item": "westfall:12998",
+      "weight": 1
+    },
+    {
+      "item": "westfall:14126",
+      "weight": 1
+    },
+    {
+      "item": "westfall:4709",
+      "weight": 1
+    },
+    {
+      "item": "westfall:14566",
+      "weight": 1
+    },
+    {
+      "item": "westfall:15513",
+      "weight": 1
+    },
+    {
+      "item": "westfall:15505",
+      "weight": 1
+    },
+    {
+      "item": "westfall:767",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1411",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1417",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3189",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3190",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1414",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1412",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3188",
+      "weight": 1
+    },
+    {
+      "item": "westfall:12984",
+      "weight": 1
+    },
+    {
+      "item": "westfall:5069",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3641",
+      "weight": 1
+    },
+    {
+      "item": "westfall:14087",
+      "weight": 1
+    },
+    {
+      "item": "westfall:3200",
+      "weight": 1
+    },
+    {
+      "item": "westfall:1420",
+      "weight": 1
+    },
+    {
+      "item": "westfall:15474",
+      "weight": 1
+    },
+    {
+      "item": "westfall:2643",
+      "weight": 1
+    }
+  ],
+  "barrens": [
+    {
+      "item": "barrens:1355",
+      "weight": 1
+    },
+    {
+      "item": "barrens:4771",
+      "weight": 1
+    },
+    {
+      "item": "barrens:4785",
+      "weight": 1
+    },
+    {
+      "item": "barrens:3370",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1418",
+      "weight": 1
+    },
+    {
+      "item": "barrens:15003",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5425",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2635",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2773",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2785",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1433",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1786",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1425",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1810",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2648",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1761",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5112",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5516",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1427",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1780",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1419",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1804",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2642",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1755",
+      "weight": 1
+    },
+    {
+      "item": "barrens:11969",
+      "weight": 1
+    },
+    {
+      "item": "barrens:11984",
+      "weight": 1
+    },
+    {
+      "item": "barrens:8182",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2774",
+      "weight": 1
+    },
+    {
+      "item": "barrens:4768",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1430",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1422",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1807",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2645",
+      "weight": 1
+    },
+    {
+      "item": "barrens:14754",
+      "weight": 1
+    },
+    {
+      "item": "barrens:8748",
+      "weight": 1
+    },
+    {
+      "item": "barrens:7559",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5183",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1431",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1784",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5422",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1423",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2646",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1759",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5426",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1416",
+      "weight": 1
+    },
+    {
+      "item": "barrens:766",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1415",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2035",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1413",
+      "weight": 1
+    },
+    {
+      "item": "barrens:13057",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1485",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5094",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2212",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5107",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1785",
+      "weight": 1
+    },
+    {
+      "item": "barrens:6395",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1809",
+      "weight": 1
+    },
+    {
+      "item": "barrens:7415",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1760",
+      "weight": 1
+    },
+    {
+      "item": "barrens:6597",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1539",
+      "weight": 1
+    },
+    {
+      "item": "barrens:767",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5423",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1417",
+      "weight": 1
+    },
+    {
+      "item": "barrens:3190",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1414",
+      "weight": 1
+    },
+    {
+      "item": "barrens:8177",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5182",
+      "weight": 1
+    },
+    {
+      "item": "barrens:5092",
+      "weight": 1
+    },
+    {
+      "item": "barrens:8184",
+      "weight": 1
+    },
+    {
+      "item": "barrens:3641",
+      "weight": 1
+    },
+    {
+      "item": "barrens:14087",
+      "weight": 1
+    },
+    {
+      "item": "barrens:3200",
+      "weight": 1
+    },
+    {
+      "item": "barrens:1420",
+      "weight": 1
+    },
+    {
+      "item": "barrens:15474",
+      "weight": 1
+    },
+    {
+      "item": "barrens:2643",
+      "weight": 1
+    }
+  ]
+}
