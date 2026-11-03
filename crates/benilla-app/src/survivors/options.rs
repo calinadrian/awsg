@@ -532,11 +532,11 @@ pub(super) fn plugin(app: &mut App) {
 
 /// The window's own tones on top of the HUD's palette.
 const SIDEBAR: Color = Color::srgba(0.035, 0.05, 0.06, 0.97);
-const ROW: Color = Color::srgb(0.063, 0.086, 0.11);
+pub(super) const ROW: Color = Color::srgb(0.063, 0.086, 0.11);
 const WELL: Color = Color::srgb(0.027, 0.035, 0.047);
-const EDGE_DIM: Color = Color::srgb(0.173, 0.196, 0.239);
+pub(super) const EDGE_DIM: Color = Color::srgb(0.173, 0.196, 0.239);
 const HOVER: Color = Color::srgb(0.114, 0.145, 0.188);
-const PICKED: Color = Color::srgb(0.165, 0.051, 0.086);
+pub(super) const PICKED: Color = Color::srgb(0.165, 0.051, 0.086);
 
 /// A word or line of the window's text, over the panel.
 fn text(font: &Handle<Font>, value: &str, size: f32, color: Color) -> impl Bundle {
@@ -646,7 +646,9 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                 ..default()
             },
             BackgroundColor(Color::srgba(0., 0., 0., 0.7)),
-            GlobalZIndex(450),
+            // Modal: what it covers can't be clicked through it.
+            bevy::ui::FocusPolicy::Block,
+            GlobalZIndex(super::hud_layout::MENU_Z),
         ))
         .with_children(|root| {
             root.spawn((

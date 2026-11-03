@@ -2,7 +2,8 @@
 //! moves, and lock it again from the same menu. Whatever is clicked comes to the front and stays
 //! there. Moved panels keep their place in a local file; the unit frames keep their own richer
 //! menu ([`super::frame_settings`]) and share only the stacking. Windows over the HUD (the Test
-//! Grounds, the settings) move the same way but keep their own place in the stacking.
+//! Grounds) move the same way but keep their own place in the stacking. The menus (pause and
+//! settings) draw over everything and need no unlocking: drag them by anything but a button.
 use super::{hud::HudFont, right_column as col, Phase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -11,10 +12,13 @@ use std::collections::BTreeMap;
 /// The snap step, and the grid's drawn lines every so many steps.
 const GRID: f32 = 8.;
 const LINE_EVERY: f32 = 32.;
-/// The HUD root draws at 400 and the reward cards from 410: raised panels stack between. The
-/// arranging overlay and its menu draw over everything, the Test Grounds (900) included.
+/// The HUD root draws at 400 and the reward cards from 410: raised panels stack between.
 const FRONT_BASE: i32 = 401;
 const FRONT_MAX: i32 = 409;
+/// The pause and settings menus, over every window: Test Grounds (900), talents (1000), co-op
+/// (1200). Only the arranging overlay, its menu and the tooltips draw over them.
+pub(super) const MENU_Z: i32 = 1500;
+pub(super) const TOOLTIP_Z: i32 = MENU_Z + 30;
 const MENU_W: f32 = 180.;
 const MENU_ROW: f32 = 24.;
 const MENU_ROWS: usize = 4;
@@ -28,13 +32,21 @@ pub(super) struct Movable {
     layer: Layer,
 }
 
-/// Where a movable sits: in the HUD, stacked by clicks; a window over the HUD; or the settings
-/// window, the one thing that moves while the settings are open.
+/// Where a movable sits: in the HUD, stacked by clicks; a window over the HUD; or one of the two
+/// menus, each the one thing that moves while it is open.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Layer {
     Hud,
     Window,
     Settings,
+    Pause,
+}
+
+impl Layer {
+    /// The menus are never locked.
+    fn is_menu(self) -> bool {
+        matches!(self, Self::Settings | Self::Pause)
+    }
 }
 
 impl Movable {
@@ -59,6 +71,14 @@ impl Movable {
             id,
             name,
             layer: Layer::Settings,
+        }
+    }
+
+    pub(super) const fn pause(id: &'static str, name: &'static str) -> Self {
+        Self {
+            id,
+            name,
+            layer: Layer::Pause,
         }
     }
 }
@@ -86,7 +106,8 @@ pub(super) struct HudLayout {
     unlocked: Vec<&'static str>,
     /// Panels by when they were last clicked, the front one last.
     front: Vec<&'static str>,
-    menu: Option<(&'static str, Vec2)>,
+    /// The panel whose menu is open, the menu's top-left and whether the panel is always free.
+    menu: Option<(&'static str, Vec2, bool)>,
     /// The dragged panel and the cursor's offset from its top-left.
     drag: Option<(&'static str, Vec2)>,
     captured: bool,
@@ -109,6 +130,11 @@ impl HudLayout {
 
     fn unlocked(&self, id: &str) -> bool {
         self.unlocked.contains(&id)
+    }
+
+    /// Whether a panel moves right now.
+    fn free(&self, m: &Movable) -> bool {
+        m.layer.is_menu() || self.unlocked(m.id)
     }
 
     fn decode(text: &str) -> Self {
@@ -151,6 +177,12 @@ fn snap(v: f32, size: f32, span: f32) -> f32 {
         (v / GRID).round() * GRID
     };
     at.clamp(0., (span - size).max(0.))
+}
+
+/// The right-click menu's size: an always-free panel has only its name and the reset.
+fn menu_room(free: bool) -> Vec2 {
+    let rows = if free { 2 } else { MENU_ROWS };
+    Vec2::new(MENU_W, MENU_ROW * rows as f32 + 8.)
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -206,7 +238,10 @@ pub(super) fn input(
         &UiGlobalTransform,
         &InheritedVisibility,
         Option<&UiTransform>,
+        Entity,
     )>,
+    kids: Query<&Children>,
+    buttons: Query<&Interaction, With<Button>>,
     mut hover: ResMut<crate::ui_script::PlayerUiHover>,
     mut pointer: ResMut<crate::ui_script::PointerOverUi>,
     mut panel: ResMut<crate::ui_script::PointerOverUiPanel>,
@@ -218,15 +253,14 @@ pub(super) fn input(
         pointer.0 = false;
         panel.0 = false;
     }
-    // With the settings open only their window moves, on the front end too; otherwise the HUD
-    // and its windows in a run, but not under the reward cards or the pause menu, nor while a
-    // unit frame has the pointer.
+    // An open menu is the only thing that moves, on the front end too; otherwise the HUD and its
+    // windows in a run, but not under the reward cards, nor while a unit frame has the pointer.
     let settings = options.open && options.settings;
-    let off = match phase.get() {
-        Phase::LevelUp | Phase::GameOver => true,
-        Phase::Menu => !settings,
-        _ => options.open && !settings,
-    };
+    let paused =
+        !settings && *phase.get() != Phase::Menu && (options.open || *phase.get() == Phase::Paused);
+    let off = !settings
+        && !paused
+        && matches!(phase.get(), Phase::Menu | Phase::LevelUp | Phase::GameOver);
     if off || frames.busy() {
         if layout.drag.take().is_some() {
             layout.save();
@@ -252,19 +286,23 @@ pub(super) fn input(
             .position(|f| *f == id)
             .map_or(-1, |i| i as i32)
     };
-    let live = |m: &Movable| (m.layer == Layer::Settings) == settings;
+    let live = |m: &Movable| match m.layer {
+        Layer::Settings => settings,
+        Layer::Pause => paused,
+        Layer::Hud | Layer::Window => !settings && !paused,
+    };
     let hit = panels
         .iter()
-        .filter(|(m, node, _, shown, _)| live(m) && shown.get() && node.size().x > 0.)
-        .map(|(m, node, at, _, shift)| (*m, boxes(node, at, shift)))
-        .filter(|(_, b)| b.drawn.contains(cursor))
-        .max_by_key(|(m, _)| rank(&layout, m.id));
-    let menu_rect = layout.menu.map(|(_, p)| {
-        Rect::from_corners(p, p + Vec2::new(MENU_W, MENU_ROW * MENU_ROWS as f32 + 8.))
-    });
+        .filter(|(m, node, _, shown, ..)| live(m) && shown.get() && node.size().x > 0.)
+        .map(|(m, node, at, _, shift, entity)| (*m, boxes(node, at, shift), entity))
+        .filter(|(_, b, _)| b.drawn.contains(cursor))
+        .max_by_key(|(m, ..)| rank(&layout, m.id));
+    let menu_rect = layout
+        .menu
+        .map(|(_, p, free)| Rect::from_corners(p, p + menu_room(free)));
     let menu_hit = menu_rect.is_some_and(|r| r.contains(cursor));
     // A locked panel lets clicks through to the world, except to raise it or open its menu.
-    let over_free = hit.as_ref().is_some_and(|(m, _)| layout.unlocked(m.id));
+    let over_free = hit.as_ref().is_some_and(|(m, ..)| layout.free(m));
     if over_free || menu_hit || layout.drag.is_some() || layout.captured {
         hover.0 = Some(TOKEN);
         pointer.0 = true;
@@ -273,11 +311,12 @@ pub(super) fn input(
     }
 
     if mouse.just_pressed(MouseButton::Right) {
-        if let Some((m, _)) = &hit {
+        if let Some((m, ..)) = &hit {
             let id = m.id;
             layout.raise(id);
-            let room = Vec2::new(MENU_W, MENU_ROW * MENU_ROWS as f32 + 8.);
-            layout.menu = Some((id, cursor.min((canvas - room).max(Vec2::ZERO))));
+            let free = m.layer.is_menu();
+            let room = menu_room(free);
+            layout.menu = Some((id, cursor.min((canvas - room).max(Vec2::ZERO)), free));
             layout.captured = true;
             consumed.0 = true;
         } else if !menu_hit {
@@ -285,8 +324,10 @@ pub(super) fn input(
         }
     }
     if mouse.just_pressed(MouseButton::Left) {
-        if let Some((id, pos)) = layout.menu.filter(|_| menu_hit) {
+        if let Some((id, pos, free)) = layout.menu.filter(|_| menu_hit) {
             let row = ((cursor.y - pos.y - 4.) / MENU_ROW).floor() as i32;
+            // An always-free panel's one row is the reset.
+            let row = if free && row == 1 { 2 } else { row };
             match row {
                 1 => {
                     if layout.unlocked(id) {
@@ -318,9 +359,14 @@ pub(super) fn input(
             layout.captured = true;
         } else {
             layout.menu = None;
-            if let Some((m, b)) = &hit {
+            if let Some((m, b, entity)) = &hit {
                 layout.raise(m.id);
-                if layout.unlocked(m.id) {
+                // A menu's buttons stay buttons; the rest of it is the handle.
+                let on_button = m.layer.is_menu()
+                    && kids
+                        .iter_descendants(*entity)
+                        .any(|e| buttons.get(e).is_ok_and(|i| *i != Interaction::None));
+                if layout.free(m) && !on_button {
                     layout.drag = Some((m.id, cursor - b.laid.min));
                     layout.captured = true;
                 }
@@ -332,7 +378,7 @@ pub(super) fn input(
             let size = panels
                 .iter()
                 .find(|(m, ..)| m.id == id)
-                .map_or(Vec2::ZERO, |(_, node, at, _, shift)| {
+                .map_or(Vec2::ZERO, |(_, node, at, _, shift, _)| {
                     boxes(node, at, shift).laid.size()
                 });
             let want = cursor - offset;
@@ -467,7 +513,7 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, spawned: Query<(), 
             ..default()
         },
         Pickable::IGNORE,
-        GlobalZIndex(940),
+        GlobalZIndex(MENU_Z + 10),
     ))
     .with_children(|o| {
         // The grid: a line every 32px and the centre lines in crimson, shown while dragging.
@@ -550,7 +596,8 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, spawned: Query<(), 
             display: Display::None,
             ..default()
         }),
-        GlobalZIndex(950),
+        bevy::ui::FocusPolicy::Block,
+        GlobalZIndex(MENU_Z + 20),
     ))
     .with_children(|menu| {
         for line in 0..MENU_ROWS {
@@ -605,9 +652,26 @@ fn paint(
     overlays: Query<Entity, With<Overlay>>,
     mut nodes: Query<
         (&mut Node, Has<GridLines>, Has<Hint>),
-        Or<(With<GridLines>, With<Hint>, With<Menu>)>,
+        (
+            Or<(With<GridLines>, With<Hint>, With<Menu>)>,
+            Without<MenuLine>,
+        ),
     >,
-    mut lines: Query<(&MenuLine, &Children, &mut BackgroundColor, &mut BorderColor), Without<Edge>>,
+    mut lines: Query<
+        (
+            &MenuLine,
+            &Children,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut Node,
+        ),
+        (
+            Without<Edge>,
+            Without<GridLines>,
+            Without<Hint>,
+            Without<Menu>,
+        ),
+    >,
     mut texts: Query<&mut Text>,
     mut edges: Query<
         (Entity, &Edge, &mut Node, &mut BorderColor, &Children),
@@ -625,7 +689,7 @@ fn paint(
         } else if hint {
             any
         } else {
-            if let Some((_, at)) = layout.menu {
+            if let Some((_, at, _)) = layout.menu {
                 node.left = Val::Px(at.x);
                 node.top = Val::Px(at.y);
             }
@@ -638,27 +702,39 @@ fn paint(
     }
 
     // The menu's words, and the row under the cursor in crimson.
-    if let Some((id, at)) = layout.menu {
+    if let Some((id, at, free)) = layout.menu {
         let name = panels
             .iter()
             .find(|(m, ..)| m.id == id)
             .map_or("", |(m, ..)| m.name);
-        let words = [
-            name,
-            if layout.unlocked(id) {
-                "Lock"
-            } else {
-                "Unlock — drag to move"
-            },
-            "Reset position",
-            if any { "Lock all" } else { "Unlock all" },
-        ];
+        let words = if free {
+            [name, "Reset position", "", ""]
+        } else {
+            [
+                name,
+                if layout.unlocked(id) {
+                    "Lock"
+                } else {
+                    "Unlock — drag to move"
+                },
+                "Reset position",
+                if any { "Lock all" } else { "Unlock all" },
+            ]
+        };
         let cursor = windows
             .single()
             .ok()
             .and_then(Window::cursor_position)
             .map(|p| p / ui_scale.0.max(0.01));
-        for (line, children, mut bg, mut edge) in &mut lines {
+        for (line, children, mut bg, mut edge, mut node) in &mut lines {
+            let want = if free && line.0 > 1 {
+                Display::None
+            } else {
+                Display::Flex
+            };
+            if node.display != want {
+                node.display = want;
+            }
             let top = at.y + 4. + MENU_ROW * line.0 as f32;
             let hot = line.0 > 0
                 && cursor.is_some_and(|c| {
@@ -785,6 +861,116 @@ mod tests {
         assert_eq!(layout.front, ["meter", "minimap"]);
     }
 
+    /// One left press through [`input`] on a screen with this panel under the cursor, and what
+    /// it starts dragging. `open` is the menu state: `Some(true)` for the settings.
+    fn press_on(
+        phase: Phase,
+        open: Option<bool>,
+        panel: Movable,
+        button: Option<Interaction>,
+    ) -> Option<&'static str> {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        let mut options = super::super::options::Options::default();
+        if let Some(settings) = open {
+            options.open = true;
+            options.settings = settings;
+        }
+        world.insert_resource(options);
+        world.insert_resource(HudLayout::default());
+        world.insert_resource(super::super::frame_settings::FrameSettings::default());
+        world.insert_resource(State::new(phase));
+        world.insert_resource(UiScale(1.));
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        world.insert_resource(mouse);
+        world.insert_resource(crate::ui_script::PlayerUiHover::default());
+        world.insert_resource(crate::ui_script::PointerOverUi::default());
+        world.insert_resource(crate::ui_script::PointerOverUiPanel::default());
+        world.insert_resource(crate::ui_script::PlayerUiClickConsumed::default());
+        let mut window = Window::default();
+        window.resolution.set(1200., 768.);
+        window.set_cursor_position(Some(Vec2::new(100., 100.)));
+        world.spawn((window, PrimaryWindow));
+        let entity = world
+            .spawn((
+                panel,
+                ComputedNode {
+                    size: Vec2::new(200., 200.),
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(100., 100.)),
+                InheritedVisibility::VISIBLE,
+            ))
+            .id();
+        if let Some(interaction) = button {
+            world.spawn((Button, interaction, ChildOf(entity)));
+        }
+        world.run_system_once(input).unwrap();
+        world.resource::<HudLayout>().drag.map(|(id, _)| id)
+    }
+
+    #[test]
+    fn the_menus_drag_without_unlocking_and_their_buttons_stay_buttons() {
+        let settings = Movable::settings("settings", "Settings");
+        let pause = Movable::pause("pause", "Pause menu");
+        assert_eq!(
+            press_on(Phase::Menu, Some(true), settings, None),
+            Some("settings"),
+            "the front end's settings"
+        );
+        assert_eq!(
+            press_on(Phase::Paused, None, pause, None),
+            Some("pause"),
+            "the pause menu"
+        );
+        assert_eq!(
+            press_on(Phase::LevelUp, Some(false), pause, None),
+            Some("pause"),
+            "the pause menu over the reward cards"
+        );
+        assert_eq!(
+            press_on(
+                Phase::Paused,
+                Some(true),
+                settings,
+                Some(Interaction::Pressed)
+            ),
+            None,
+            "a press on one of its buttons is the button's"
+        );
+    }
+
+    #[test]
+    fn locked_panels_stay_put_and_only_the_open_menu_moves() {
+        let hud = Movable::new("minimap", "Minimap");
+        let window = Movable::window("test_grounds", "Test Grounds");
+        let settings = Movable::settings("settings", "Settings");
+        let pause = Movable::pause("pause", "Pause menu");
+        assert_eq!(press_on(Phase::Playing, None, hud, None), None, "locked");
+        assert_eq!(press_on(Phase::Playing, None, window, None), None, "locked");
+        assert_eq!(
+            press_on(Phase::Paused, None, hud, None),
+            None,
+            "under the pause menu"
+        );
+        assert_eq!(
+            press_on(Phase::Paused, None, settings, None),
+            None,
+            "the settings are closed"
+        );
+        assert_eq!(
+            press_on(Phase::Paused, Some(true), pause, None),
+            None,
+            "behind the settings"
+        );
+        assert_eq!(
+            press_on(Phase::Playing, None, pause, None),
+            None,
+            "not paused"
+        );
+    }
+
     #[test]
     fn the_overlay_and_menu_spawn() {
         // A bundle with a component twice panics when it is applied.
@@ -797,6 +983,22 @@ mod tests {
             world.query::<&MenuLine>().iter(&world).count(),
             MENU_ROWS,
             "spawned once"
+        );
+        // Its queries share `Node`: overlapping access panics when the system first runs.
+        let mut layout = HudLayout::default();
+        layout.menu = Some(("settings", Vec2::ZERO, true));
+        world.insert_resource(layout);
+        world.insert_resource(UiScale(1.));
+        world.run_system_once(paint).unwrap();
+        world.flush();
+        let shown = world
+            .query::<(&MenuLine, &Node)>()
+            .iter(&world)
+            .filter(|(_, n)| n.display != Display::None)
+            .count();
+        assert_eq!(
+            shown, 2,
+            "an always-free panel's menu: its name and the reset"
         );
     }
 }

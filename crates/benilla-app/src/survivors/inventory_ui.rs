@@ -2403,7 +2403,7 @@ fn item_tooltip(
                     row_gap: Val::Px(2.),
                     ..default()
                 },
-                GlobalZIndex(1100),
+                GlobalZIndex(super::hud_layout::TOOLTIP_Z),
                 Visibility::Hidden,
                 bevy::ui::FocusPolicy::Pass,
             ))

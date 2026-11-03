@@ -202,6 +202,15 @@ pub(super) struct TopStack;
 #[derive(Component)]
 pub(super) struct BaseColor(Color);
 
+/// A steel-framed button's hover fill and its edge at rest and under the pointer; without this a
+/// button takes the brown [`BUTTON_HOT`] and keeps its edge.
+#[derive(Component, Clone, Copy)]
+pub(super) struct SteelHover {
+    hot: Color,
+    edge: Color,
+    hot_edge: Color,
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum Choice {
     NewAbility(&'static AbilityDef, Rarity),
@@ -734,39 +743,107 @@ pub(super) fn setup_hud(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-            GlobalZIndex(430),
+            GlobalZIndex(super::hud_layout::MENU_Z),
             Visibility::Hidden,
             bevy::ui::FocusPolicy::Pass,
         ))
         .with_children(|root| {
+            use super::options::{EDGE_DIM, PICKED, ROW};
+            use super::right_column as col;
             root.spawn((
-                centered(f, "Paused", size::DISPLAY, skin::GOLD),
-                Node {
-                    margin: UiRect::bottom(Val::Px(gap::S)),
+                super::hud_layout::Movable::pause("pause", "Pause menu"),
+                col::plate(Node {
+                    width: Val::Px(280.0),
+                    flex_direction: FlexDirection::Column,
                     ..default()
-                },
-            ));
-            for (label, action) in [
-                ("Resume", UiAction::Resume),
-                ("Settings", UiAction::Settings),
-                ("Abandon run", UiAction::MainMenu),
-                ("Quit game", UiAction::Quit),
-            ] {
-                root.spawn((
-                    button(action, BUTTON),
-                    Node {
-                        width: Val::Px(240.0),
-                        justify_content: JustifyContent::Center,
-                        padding: UiRect::axes(Val::Px(20.0), Val::Px(8.0)),
-                        border: UiRect::all(Val::Px(2.0)),
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                }),
+                bevy::ui::FocusPolicy::Block,
+            ))
+            .with_children(|window| {
+                window
+                    .spawn((
+                        Node {
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(10.0),
+                            padding: UiRect::new(
+                                Val::Px(16.0),
+                                Val::Px(16.0),
+                                Val::Px(14.0),
+                                Val::Px(12.0),
+                            ),
+                            border: UiRect::bottom(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BorderColor::all(EDGE_DIM),
+                    ))
+                    .with_children(|brand| {
+                        brand.spawn(col::diamond(Node::default(), 11.0, col::STEEL));
+                        brand.spawn(text(f, "Paused", 16.0, col::STEEL_HI));
+                    });
+                window
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(6.0),
+                        padding: UiRect::all(Val::Px(12.0)),
                         ..default()
-                    },
-                ))
-                .with_children(|b| {
-                    b.spawn(text(f, label, size::LEAD + 2.0, skin::TEXT));
-                });
-            }
+                    })
+                    .with_children(|list| {
+                        for (label, action) in [
+                            ("Resume", UiAction::Resume),
+                            ("Settings", UiAction::Settings),
+                            ("Abandon run", UiAction::MainMenu),
+                            ("Quit game", UiAction::Quit),
+                        ] {
+                            // The ones that end the run stand apart from the ones that don't.
+                            if action == UiAction::MainMenu {
+                                list.spawn((
+                                    Node {
+                                        height: Val::Px(1.0),
+                                        margin: UiRect::vertical(Val::Px(3.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(EDGE_DIM),
+                                ));
+                            }
+                            // Resume is the primary, in crimson.
+                            let (base, hover) = if action == UiAction::Resume {
+                                (
+                                    col::WINE,
+                                    SteelHover {
+                                        hot: col::WINE_HI,
+                                        edge: col::WINE_HI,
+                                        hot_edge: col::WINE_HI,
+                                    },
+                                )
+                            } else {
+                                (
+                                    ROW,
+                                    SteelHover {
+                                        hot: PICKED,
+                                        edge: EDGE_DIM,
+                                        hot_edge: col::WINE_HI,
+                                    },
+                                )
+                            };
+                            list.spawn((
+                                edged_button(action, base, hover.edge),
+                                hover,
+                                Node {
+                                    height: Val::Px(34.0),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    ..default()
+                                },
+                                Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
+                            ))
+                            .with_children(|b| {
+                                b.spawn(text(f, label, 13.0, col::TEXT_HI));
+                            });
+                        }
+                    });
+            });
         });
 
     // --- Results. ---
@@ -1150,9 +1227,17 @@ pub(super) fn looks_for(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub(super) fn buttons(
     mut presses: Query<
-        (&Interaction, &UiAction, &BaseColor, &mut BackgroundColor),
+        (
+            &Interaction,
+            &UiAction,
+            &BaseColor,
+            &mut BackgroundColor,
+            Option<&SteelHover>,
+            &mut BorderColor,
+        ),
         Changed<Interaction>,
     >,
     mut next: ResMut<NextState<Phase>>,
@@ -1161,12 +1246,20 @@ pub(super) fn buttons(
     mut options: ResMut<super::options::Options>,
     mut replay: ResMut<Replay>,
 ) {
-    for (interaction, action, base, mut bg) in &mut presses {
+    for (interaction, action, base, mut bg, steel, mut edge) in &mut presses {
+        let hot = steel.map_or(BUTTON_HOT, |s| s.hot);
+        if let Some(s) = steel {
+            *edge = BorderColor::all(if *interaction == Interaction::None {
+                s.edge
+            } else {
+                s.hot_edge
+            });
+        }
         match interaction {
-            Interaction::Hovered => bg.0 = BUTTON_HOT,
+            Interaction::Hovered => bg.0 = hot,
             Interaction::None => bg.0 = base.0,
             Interaction::Pressed => {
-                bg.0 = BUTTON_HOT;
+                bg.0 = hot;
                 match (*action, *phase.get()) {
                     (UiAction::Resume, _) if options.open || *phase.get() == Phase::Paused => {
                         options.resume(*phase.get(), &mut next)
@@ -2116,7 +2209,7 @@ fn spawn_tooltip(
             max_width: Val::Px(300.0),
             ..default()
         },
-        GlobalZIndex(1000),
+        GlobalZIndex(super::hud_layout::TOOLTIP_Z),
         Visibility::Hidden,
         bevy::ui::FocusPolicy::Pass,
     ));
@@ -2416,5 +2509,50 @@ pub(super) fn show_panels(
     }
     for root in &mut roots.p4() {
         set(root, p == Phase::GameOver && !options.open);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn a_steel_button_hovers_in_steel_and_the_rest_keep_their_brown() {
+        let mut world = World::new();
+        world.insert_resource(super::super::options::Options::default());
+        world.insert_resource(State::new(Phase::Paused));
+        world.insert_resource(NextState::<Phase>::default());
+        world.insert_resource(Replay::default());
+        world.insert_resource(Messages::<AppExit>::default());
+        let hover = SteelHover {
+            hot: Color::WHITE,
+            edge: Color::BLACK,
+            hot_edge: Color::srgb(1., 0., 0.),
+        };
+        let steel = world
+            .spawn((
+                edged_button(UiAction::Resume, Color::BLACK, hover.edge),
+                hover,
+                Interaction::Hovered,
+            ))
+            .id();
+        let plain = world
+            .spawn((
+                edged_button(UiAction::Quit, BUTTON, EDGE),
+                Interaction::Hovered,
+            ))
+            .id();
+        world.run_system_once(buttons).unwrap();
+        let edge = |world: &World, e: Entity| world.get::<BorderColor>(e).unwrap().top;
+        assert_eq!(world.get::<BackgroundColor>(steel).unwrap().0, hover.hot);
+        assert_eq!(edge(&world, steel), hover.hot_edge);
+        assert_eq!(world.get::<BackgroundColor>(plain).unwrap().0, BUTTON_HOT);
+        assert_eq!(edge(&world, plain), EDGE);
+
+        *world.get_mut::<Interaction>(steel).unwrap() = Interaction::None;
+        world.run_system_once(buttons).unwrap();
+        assert_eq!(world.get::<BackgroundColor>(steel).unwrap().0, Color::BLACK);
+        assert_eq!(edge(&world, steel), hover.edge);
     }
 }
