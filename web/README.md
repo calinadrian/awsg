@@ -36,13 +36,45 @@ cargo run --release -p wenilla-host -- --www web/dist --data /path/to/WoW/Data -
 To open the tools without building the WebAssembly client or pointing a server at WoW data, run
 `node scripts/serve-balance.mjs`. The Class Balance Lab is at
 `http://127.0.0.1:8091/balance.html`; the Zone Loot Atlas is at
-`http://127.0.0.1:8091/zones.html`. The normal local web build includes both pages at port 8090.
+`http://127.0.0.1:8091/zones.html`; the Storyboard is at
+`http://127.0.0.1:8091/storyboard.html`. The normal local web build includes these pages at port 8090.
 The balance page data is generated from `survivors/spell_data.rs`, `data.rs`, and
 `reward_axes.rs` by `node scripts/export_balance_data.mjs`. The loot page data is generated from
 `crates/asr-coop/assets/economy_catalog.json` and the playable maps in `survivors/data.rs` by
 `node scripts/export_zone_loot.mjs`. The zone quality rules, class items, compact early-zone
 pools and named boss drops are maintained by `node scripts/configure_zone_quality_progression.mjs`.
 Run that configurator and then the loot exporter after changing the source tables.
+
+### Storyboard
+
+Double-click `Open Storyboard.cmd` at the repository root, or open `web/storyboard.html`
+directly in a browser. It works offline without a server or a build. Add zone, quest,
+boss, reward, sticky-note and chapter cards from the library. Drag cards, resize their
+corners, or drag a blue connection handle from the top, bottom, left or right onto another
+card or its handle to connect them. The selected attachment sides persist when cards move,
+when the board reloads, and in JSON and SVG exports. Redraw a connection between the same
+cards to change its attachment sides while keeping its label. Click a connection to label
+it or mark it as an optional path. A chapter frame moves the cards
+fully inside it when dragged.
+
+Select a zone to write its story, faction, chapter, encounters, armor choices and unlock
+rule. These are planning notes; the board does not import armor or modify game data.
+Shift-click selects multiple cards; dragging empty canvas selects a group. Hold Space
+and drag to pan, scroll to zoom, and press F to fit the story. The help button lists the
+remaining shortcuts. Touch supports dragging and pinching to zoom.
+
+Snap to the 24-unit grid is enabled by default. Use the grid button in the bottom toolbar
+or press G to toggle it; hold Alt while dragging or resizing for temporary free placement.
+New cards and duplicates also snap. Moving several cards or a chapter preserves their
+relative positions. The toggle is saved per board and included in JSON exports; existing
+cards keep their positions until moved or resized.
+
+Boards autosave in this browser's local storage. Export **Board file** (JSON) for a
+portable backup or to share the plan in chat; importing creates a new board and preserves
+the existing ones. **Image** exports a standalone SVG of the canvas; **Story plan** exports
+Markdown including the full notes and armor choices. Browser storage belongs to the
+browser profile and origin, so the file-opened and localhost versions have separate saves.
+Use JSON export/import when moving between them or changing browsers.
 
 `wenilla-host` (`crates/wenilla-host`) is the whole server side: static files
 (precompressed), `GET /data/{name}` (`HEAD` too; `GET /data/__index` lists the chain), and

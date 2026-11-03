@@ -41,6 +41,7 @@ mod guardians;
 mod hero;
 mod horde_spawning;
 mod hud;
+mod hud_layout;
 mod jewelry;
 mod journal_ui;
 mod inventory;
@@ -57,6 +58,7 @@ mod options;
 mod plates;
 mod progress;
 mod quests;
+mod right_column;
 mod races;
 mod reward_axes;
 mod rewards;
@@ -68,6 +70,7 @@ mod text_edit;
 mod talents;
 mod talents_data;
 mod telegraphs;
+mod test_grounds;
 mod ui_audit;
 mod unit_frames;
 mod units;
@@ -97,9 +100,15 @@ impl Plugin for SurvivorsPlugin {
             .add_plugins(grade::plugin)
             .add_plugins(options::plugin)
             .add_plugins((coop::plugin, coop_ui::plugin, progress::plugin, party_frames::plugin))
-            .add_plugins((damage_meter::plugin, text_edit::plugin, quests::plugin))
+            .add_plugins((
+                damage_meter::plugin,
+                text_edit::plugin,
+                quests::plugin,
+                right_column::plugin,
+            ))
             .init_state::<Phase>()
             .init_resource::<Rng>()
+            .init_resource::<caches::Spawner>()
             .init_resource::<Selection>()
             .init_resource::<Run>()
             .init_resource::<hero::CamRig>()
@@ -135,7 +144,9 @@ impl Plugin for SurvivorsPlugin {
                     .chain(),
             )
             .add_plugins(unit_frames::plugin)
+            .add_plugins(hud_layout::plugin)
             .add_plugins(magnets::plugin)
+            .add_plugins(test_grounds::plugin)
             .add_plugins(appearance::plugin)
             .add_plugins((inventory::plugin, inventory_ui::plugin, inventory_outfit::plugin))
             .add_plugins(adventure_atlas::plugin)
@@ -178,8 +189,13 @@ impl Plugin for SurvivorsPlugin {
                     enemies::move_enemies.run_if(coop::authority),
                     enemies::run_scripts.run_if(coop::authority),
                     mechanics::run_mechanics.run_if(coop::authority),
+                    enemies::cap_heights,
                     abilities::cast_abilities.run_if(in_state(Phase::Playing)),
-                    (auto_attack::start_on_right_click, auto_attack::swing)
+                    (
+                        auto_attack::start_on_right_click,
+                        auto_attack::swing,
+                        auto_attack::follow_focus.after(crate::target::TargetUpdate),
+                    )
                         .chain()
                         .run_if(in_state(Phase::Playing)),
                     abilities::tick_areas.run_if(in_state(Phase::Playing)),
@@ -188,6 +204,7 @@ impl Plugin for SurvivorsPlugin {
                     enemies::tick_marks,
                     enemies::drop_loot.run_if(coop::authority),
                     enemies::collect_gems.run_if(coop::authority),
+                    caches::replenish.run_if(in_state(Phase::Playing)),
                     caches::collect.run_if(in_state(Phase::Playing)),
                     hero::hero_vitals,
                     coop::revive_teammates,
@@ -227,7 +244,7 @@ impl Plugin for SurvivorsPlugin {
                     (cards::hand_controls, cards::deal_cards).chain(),
                     cards::choose_card,
                     cards::animate_cards,
-                    hud::refresh_hud,
+                    (hud::refresh_hud, hud::size_action_bar),
                     hud::refresh_results,
                     hud::fill_icons,
                     hud::update_cooldown_sweeps,
@@ -243,9 +260,16 @@ impl Plugin for SurvivorsPlugin {
                     hud::fill_art,
                     hud::icon_tooltip,
                     hud::hero_plate,
+                    plates::sync_plate_auras,
                     plates::enemy_plates,
+                    plates::compact_plates,
                     plates::boss_bar,
+                    plates::boss_auras,
+                    plates::target_edge,
+                    plates::fill_glyphs,
                     minimap::map_buttons,
+                    minimap::show_cluster,
+                    minimap::clock,
                     minimap::zone_text,
                     minimap::compose,
                 )
@@ -321,6 +345,10 @@ pub(super) struct Selection {
     pub features: std::collections::HashMap<(usize, u8, u8), appearance::Features>,
     /// The zones whose final boss this player has beaten, kept by [`progress`].
     pub cleared: std::collections::BTreeSet<String>,
+    /// Current class/realm's raid eligibility, refreshed from talents and the quest ledger.
+    pub story_class: Option<u8>,
+    pub class_level: u32,
+    pub story_quests: std::collections::BTreeSet<String>,
 }
 
 impl Selection {
@@ -335,7 +363,30 @@ impl Selection {
     pub fn unlocked(&self, map: usize) -> bool {
         data::MAPS
             .get(map)
-            .is_some_and(|map| difficulty::unlocked(map.name, &self.cleared))
+            .is_some_and(|map| difficulty::unlocked(map.name, &self.cleared) && self.raid_ready(map.name))
+    }
+
+    pub fn raid_ready(&self, zone: &str) -> bool {
+        difficulty::attunement(zone).is_none() || (
+            self.class_def().is_some_and(|class| self.story_class == Some(class.id))
+                && difficulty::raid_ready(zone, self.class_level, &self.story_quests)
+        )
+    }
+
+    pub fn unlock_hint(&self, zone: &str) -> String {
+        let mut needs = Vec::new();
+        if !difficulty::unlocked(zone, &self.cleared) {
+            needs.push(difficulty::unlock_hint(zone));
+        }
+        if let Some((id, title)) = difficulty::attunement(zone) {
+            if self.class_level < difficulty::RAID_LEVEL {
+                needs.push(format!("Class level {} (current {})", difficulty::RAID_LEVEL, self.class_level));
+            }
+            if !self.story_quests.contains(id) {
+                needs.push(format!("Complete {title}"));
+            }
+        }
+        needs.join(" · ")
     }
     /// Keep the world preview on the same battleground the menu and next run select.
     pub fn select_map(&mut self, map: usize) {
@@ -504,6 +555,12 @@ pub(super) struct Run {
     pub heal_t: f32,
     pub pending_levels: u32,
     pub pending_chests: u32,
+    /// A Test Grounds run: nothing spawns by itself and nothing it earns is saved.
+    pub test: bool,
+    /// Test Grounds: the hero takes no damage.
+    pub test_god: bool,
+    /// Test Grounds: enemies hold at 1 health instead of dying.
+    pub test_immortal: bool,
     pub jewelry: Vec<jewelry::Jewel>,
     pub gold: u32,
     pub chest_cost: u32,
@@ -578,6 +635,9 @@ impl Default for Run {
             heal_t: 0.0,
             pending_levels: 0,
             pending_chests: 0,
+            test: false,
+            test_god: false,
+            test_immortal: false,
             jewelry: Vec::new(),
             gold: 0,
             chest_cost: 20,

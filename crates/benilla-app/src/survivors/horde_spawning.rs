@@ -18,7 +18,8 @@ pub(super) struct Spawner {
     started: bool,
     budget: f32,
     kill_heat: f32,
-    elite_at: f32,
+    /// The run second the next silver comes.
+    silver_at: f32,
     turn: usize,
     motion: HashMap<u32, (Vec3, Vec3)>,
 }
@@ -46,7 +47,8 @@ pub(super) fn population_floor(elapsed: f32, pressure: f32, party: f32) -> usize
     (((4.0 + 1.6 * elapsed.max(0.0) / 60.0) * pressure).min(36.0) * party) as usize
 }
 
-/// Seconds until the next roaming elite: 55 at the start, 25 from the twelfth minute.
+/// Seconds until the next roaming elite: 55 at the start, 25 from the twelfth minute. Elites here
+/// wait in their lairs; this native cadence now sends the silvers.
 pub(super) fn elite_interval(elapsed: f32) -> f32 {
     (55.0 - 2.5 * elapsed / 60.0).max(25.0)
 }
@@ -243,6 +245,7 @@ pub(super) fn spawn(
     // 0x5bf8293–0x5bf82e7 starts with four copies of regular definition zero.
     if !state.started {
         state.started = true;
+        state.silver_at = elapsed + elite_interval(elapsed) * tier.elite_every;
         for _ in 0..4 {
             if emit(
                 commands,
@@ -292,19 +295,21 @@ pub(super) fn spawn(
             break;
         }
     }
-    // Native elite selection is uniform among unlocked elite table rows.
-    if elapsed >= state.elite_at {
-        let elites: Vec<_> = roster
-            .guardians
-            .iter()
-            .filter(|e| e.roaming_elite && e.from <= elapsed)
-            .collect();
-        if !elites.is_empty() {
-            let def = elites[rng.index(elites.len())];
-            emit(
-                commands, run, rng, state, &centers, ground, &mut alive, cap, def,
-            );
+    // No elite joins the horde: every elite keeps to its lair at the edge
+    // ([`super::guardians`]) until a player pulls it. A silver comes instead: a melee horde row,
+    // bigger and tougher.
+    if elapsed >= state.silver_at {
+        let def = (0..6)
+            .map(|_| choose(roster, &pool, elapsed, rng))
+            .find(|d| d.ranged.is_none());
+        if let Some(def) = def.filter(|_| alive < cap) {
+            let center = centers[state.turn % centers.len()];
+            state.turn = state.turn.wrapping_add(1);
+            let at = point(center, rng, ground, 0.5);
+            if enemies::spawn_silver(commands, run, def, at, center.pos) != Entity::PLACEHOLDER {
+                run.banner = Some((format!("A silver {} approaches!", def.name), 3.0));
+            }
         }
-        state.elite_at = elapsed + elite_interval(elapsed) * tier.elite_every;
+        state.silver_at = elapsed + elite_interval(elapsed) * tier.elite_every;
     }
 }

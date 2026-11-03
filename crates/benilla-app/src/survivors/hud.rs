@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 
-use benilla_ui::script::nameplate;
 use benilla_world::view::WorldCamera;
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
@@ -15,20 +14,24 @@ use super::data::{self, AbilityDef, Effect, Kind};
 use super::front_end::{self as skin, gap, size};
 use super::hero::{self, Hero};
 use super::jewelry::{self, JEWELS};
-use super::minimap::{self, MiniMap};
+use super::minimap::MiniMap;
 use super::rewards::{Rarity, Upgrade};
 use super::{Owned, Phase, Rng, Run, Selection};
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.0);
-/// `ActionButtonTemplate`: 36 units, 6 apart, the first 8 in from the bar's left and 4 up.
-const SLOT: f32 = 36.0;
-const BUTTON_GAP: f32 = 6.0;
-const BUTTON_LEFT: f32 = 8.0;
-const BUTTON_BOTTOM: f32 = 4.0;
-/// The bar art's height (`MainMenuBarTexture0`..`3`, 256×43).
-const BAR_ART_HEIGHT: f32 = 43.0;
-/// The cut-down bar: six buttons on the first strip, two recesses, the right edge.
-const BAR_WIDTH: f32 = 352.0;
+/// The action bar: a button's size and the gap between buttons, the plate's padding, the XP
+/// well's height and the bar's lift off the screen's bottom edge.
+const SLOT: f32 = 32.0;
+const BUTTON_GAP: f32 = 3.0;
+const BAR_PAD: f32 = 3.0;
+const XP_H: f32 = 12.0;
+const BAR_LIFT: f32 = 8.0;
+/// The plate's height, which its size setting scales from the bottom edge.
+const BAR_H: f32 = 2.0 * BAR_PAD + XP_H + BUTTON_GAP + SLOT;
+/// The XP well's purple: the fill, its lit top line and the empty well.
+const XP_FILL: Color = Color::srgb(0.416, 0.176, 0.561);
+const XP_HI: Color = Color::srgb(0.604, 0.361, 0.753);
+const XP_WELL: Color = Color::srgb(0.071, 0.039, 0.102);
 /// The talents button's face.
 const TALENTS_ICON: &str = "Interface\\Icons\\INV_Misc_Book_09";
 /// `UI-CharacterCreate-Races`, the character button's portrait sheet.
@@ -166,6 +169,8 @@ pub(super) enum TipFor {
     Jewelry(usize),
     Character,
     Talents,
+    /// A boss bar's buff or debuff; its [`super::plates::AuraTip`] holds what it says.
+    Aura,
 }
 
 /// The one `GameTooltip`, and the column its lines go in.
@@ -291,24 +296,45 @@ fn icon(spell: u32, size: f32) -> impl Bundle {
     )
 }
 
-/// `UI-Quickslot2`, an action button's 64×64 normal texture, 66 units over the 36-unit button.
-fn slot_frame() -> impl Bundle {
-    let pad = (66.0 - SLOT) / 2.0;
+/// A button's frame: the HUD's grey edge, black outside.
+fn slot_edge() -> impl Bundle {
+    (
+        BorderColor::all(super::right_column::STEEL_LO),
+        Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
+    )
+}
+
+/// An unfilled button: a dark well in a dimmer edge, so the bar never shifts.
+fn empty_slot() -> impl Bundle {
     (
         Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(-pad),
-            top: Val::Px(-pad),
-            width: Val::Px(66.0),
-            height: Val::Px(66.0),
+            width: Val::Px(SLOT),
+            height: Val::Px(SLOT),
+            border: UiRect::all(Val::Px(1.0)),
             ..default()
         },
-        ImageNode {
-            color: Color::NONE,
-            ..default()
-        },
-        UiArt::crop("Interface\\Buttons\\UI-Quickslot2", [0.0, 1.0, 0.0, 1.0]),
+        BackgroundColor(Color::srgb(0.027, 0.035, 0.047)),
+        BorderColor::all(Color::srgb(0.173, 0.196, 0.239)),
+        Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
     )
+}
+
+/// Scale the action bar by its Interface setting, from its bottom edge.
+pub(super) fn size_action_bar(
+    sizes: Res<super::right_column::HudSizes>,
+    mut bars: Query<&mut UiTransform, With<ActionBar>>,
+    added: Query<(), Added<ActionBar>>,
+) {
+    if !sizes.is_changed() && added.is_empty() {
+        return;
+    }
+    for mut t in &mut bars {
+        *t = UiTransform {
+            scale: Vec2::splat(sizes.bar),
+            translation: Val2::px(0.0, -(sizes.bar - 1.0) * BAR_H / 2.0),
+            ..default()
+        };
+    }
 }
 
 pub(super) fn spell_name(spells: Option<&crate::ui_action::Spells>, spell: u32, fallback: &str) -> String {
@@ -326,7 +352,6 @@ pub(super) fn setup_hud(
     card_art: Res<super::card_view::CardArt>,
 ) {
     let font = crate::char_select::wow_font(&asset_server);
-    let number_font: Handle<Font> = asset_server.load("mpq://Fonts/ARIALN.ttf");
     commands.insert_resource(HudFont(font.clone()));
     let f = &font;
     let map = MiniMap::new(&mut images);
@@ -346,200 +371,149 @@ pub(super) fn setup_hud(
             Visibility::Hidden,
         ))
         .with_children(|root| {
-            // `MainMenuBar` cut down to what the mode uses: the six spell buttons on the bar art's
-            // first strip, the character and talents buttons in the next two recesses, the right
-            // edge, and the gryphon end caps over both ends. The XP bar runs along its top.
-            root.spawn((
-                ActionBar,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Percent(50.0),
-                    bottom: Val::Px(0.0),
-                    margin: UiRect::left(Val::Px(-BAR_WIDTH / 2.0)),
-                    width: Val::Px(BAR_WIDTH),
-                    height: Val::Px(BAR_ART_HEIGHT),
-                    ..default()
-                },
-            ))
-            .with_children(|bar| {
-                // (left, width, u0, u1, the strip's top v) in `UI-MainMenuBar-Dwarf`.
-                const STRIP: f32 = 0.167_968_75;
-                for (left, width, u0, u1, top) in [
-                    (0.0, 256.0, 0.0, 1.0, 0.832_031_25),
-                    (256.0, 84.0, 0.0, 84.0 / 256.0, 0.582_031_25),
-                    (340.0, 12.0, 244.0 / 256.0, 1.0, 0.082_031_25),
-                ] {
-                    bar.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(left),
-                            bottom: Val::Px(0.0),
-                            width: Val::Px(width),
-                            height: Val::Px(BAR_ART_HEIGHT),
-                            ..default()
-                        },
-                        ImageNode {
-                            color: Color::NONE,
-                            ..default()
-                        },
-                        UiArt::crop(
-                            "Interface\\MainMenuBar\\UI-MainMenuBar-Dwarf",
-                            [u0, u1, top, top + STRIP],
-                        ),
-                    ));
-                }
-                bar.spawn((
-                    AbilityRow,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(BUTTON_LEFT),
-                        bottom: Val::Px(BUTTON_BOTTOM),
-                        column_gap: Val::Px(BUTTON_GAP),
+            // The action bar, in the HUD's frame: the XP well across its top with the level and
+            // the numbers in it, the six spell buttons under it, then the character and talents.
+            root.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                bottom: Val::Px(BAR_LIFT),
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|seat| {
+                seat.spawn((
+                    ActionBar,
+                    super::hud_layout::Movable::new("action_bar", "Action bar"),
+                    super::right_column::plate(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(BUTTON_GAP),
+                        padding: UiRect::all(Val::Px(BAR_PAD)),
                         ..default()
-                    },
-                ));
-                // The character and talents buttons; the portrait follows the run's race.
-                for (i, tip) in [TipFor::Character, TipFor::Talents].into_iter().enumerate() {
+                    }),
+                    UiTransform::default(),
+                ))
+                .with_children(|bar| {
                     bar.spawn((
+                        XpBar,
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(260.0 + i as f32 * (SLOT + BUTTON_GAP)),
-                            bottom: Val::Px(BUTTON_BOTTOM),
-                            width: Val::Px(SLOT),
-                            height: Val::Px(SLOT),
+                            height: Val::Px(XP_H),
+                            overflow: Overflow::clip(),
                             ..default()
                         },
-                        Interaction::default(),
-                        tip,
+                        BackgroundColor(XP_WELL),
+                        Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
                     ))
-                    .with_children(|slot| {
-                        slot.spawn(slot_frame());
-                        let face = (
+                    .with_children(|well| {
+                        well.spawn((
+                            XpFill,
                             Node {
-                                width: Val::Percent(100.0),
+                                position_type: PositionType::Absolute,
+                                width: Val::Percent(0.0),
                                 height: Val::Percent(100.0),
                                 ..default()
                             },
-                            ImageNode {
-                                color: Color::NONE,
+                            BackgroundColor(XP_FILL),
+                        ))
+                        .with_children(|f| {
+                            f.spawn((
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(1.0),
+                                    ..default()
+                                },
+                                BackgroundColor(XP_HI),
+                            ));
+                        });
+                        let words = |s: &str, color: Color| {
+                            (
+                                Text::new(s),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 10.0,
+                                    ..default()
+                                },
+                                TextColor(color),
+                                TextShadow {
+                                    offset: Vec2::new(1.0, 1.0),
+                                    color: Color::BLACK,
+                                },
+                                TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                            )
+                        };
+                        well.spawn(Node {
+                            position_type: PositionType::Absolute,
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(5.0),
+                            ..default()
+                        })
+                        .with_children(|n| {
+                            n.spawn((LevelText, words("", super::right_column::STEEL_HI)));
+                            n.spawn((XpText, words("", Color::WHITE)));
+                        });
+                    });
+                    bar.spawn(Node {
+                        column_gap: Val::Px(BUTTON_GAP),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        row.spawn((
+                            AbilityRow,
+                            Node {
+                                column_gap: Val::Px(BUTTON_GAP),
                                 ..default()
                             },
-                        );
-                        if tip == TipFor::Character {
-                            slot.spawn((face, CharacterIcon));
-                        } else {
-                            slot.spawn((face, UiArt::crop(TALENTS_ICON, [0.0, 1.0, 0.0, 1.0])));
+                        ));
+                        // A rule between the spells and the two menu buttons.
+                        row.spawn((
+                            Node {
+                                width: Val::Px(1.0),
+                                height: Val::Px(SLOT - 6.0),
+                                margin: UiRect::horizontal(Val::Px(3.0)),
+                                ..default()
+                            },
+                            BackgroundColor(super::right_column::STEEL_LO),
+                        ));
+                        // The character and talents buttons; the portrait follows the run's race.
+                        for tip in [TipFor::Character, TipFor::Talents] {
+                            row.spawn((
+                                Node {
+                                    width: Val::Px(SLOT),
+                                    height: Val::Px(SLOT),
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::BLACK),
+                                slot_edge(),
+                                Interaction::default(),
+                                tip,
+                            ))
+                            .with_children(|slot| {
+                                let face = (
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Percent(100.0),
+                                        ..default()
+                                    },
+                                    ImageNode {
+                                        color: Color::NONE,
+                                        ..default()
+                                    },
+                                );
+                                if tip == TipFor::Character {
+                                    slot.spawn((face, CharacterIcon));
+                                } else {
+                                    slot.spawn((face, UiArt::crop(TALENTS_ICON, [0.0, 1.0, 0.0, 1.0])));
+                                }
+                            });
                         }
                     });
-                }
-                // `MainMenuBarLeftEndCap` / `RightEndCap`: 128×128, 32 units over the bar's ends,
-                // the right one the left mirrored.
-                for (left, flip_x) in [(-96.0, false), (BAR_WIDTH - 32.0, true)] {
-                    bar.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(left),
-                            bottom: Val::Px(0.0),
-                            width: Val::Px(128.0),
-                            height: Val::Px(128.0),
-                            ..default()
-                        },
-                        ImageNode {
-                            color: Color::NONE,
-                            flip_x,
-                            ..default()
-                        },
-                        UiArt::crop(
-                            "Interface\\MainMenuBar\\UI-MainMenuBar-EndCap-Human",
-                            [0.0, 1.0, 0.0, 1.0],
-                        ),
-                    ));
-                }
-            });
-            // `MainMenuExpBar` along the action bar's top edge, its numbers always shown.
-            root.spawn((
-                XpBar,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Percent(50.0),
-                    bottom: Val::Px(BAR_ART_HEIGHT - 3.0),
-                    margin: UiRect::left(Val::Px(-BAR_WIDTH / 2.0)),
-                    width: Val::Px(BAR_WIDTH),
-                    height: Val::Px(13.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
-            ))
-            .with_children(|bar| {
-                bar.spawn((
-                    XpFill,
-                    Node {
-                        width: Val::Percent(0.0),
-                        height: Val::Percent(100.0),
-                        ..default()
-                    },
-                    ImageNode {
-                        color: Color::NONE,
-                        ..default()
-                    },
-                    UiArt::tinted(
-                        "Interface\\TargetingFrame\\UI-StatusBar",
-                        Color::srgb(0.58, 0.0, 0.55),
-                    ),
-                ));
-                // `MainMenuXPBarTexture0`..`3`: the segment rules, a quarter of the bar each.
-                for (i, top) in [0.792_968_75, 0.542_968_75, 0.292_968_75, 0.042_968_75]
-                    .into_iter()
-                    .enumerate()
-                {
-                    bar.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Percent(25.0 * i as f32),
-                            top: Val::Px(0.0),
-                            width: Val::Percent(25.0),
-                            height: Val::Px(10.0),
-                            ..default()
-                        },
-                        ImageNode {
-                            color: Color::NONE,
-                            ..default()
-                        },
-                        UiArt::crop(
-                            "Interface\\MainMenuBar\\UI-MainMenuBar-Dwarf",
-                            [0.0, 1.0, top, top + 0.039_062_5],
-                        ),
-                    ));
-                }
-                // `MainMenuBarExpText`, centred one unit up.
-                bar.spawn(Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    top: Val::Px(-1.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|n| {
-                    n.spawn((
-                        XpText,
-                        Text::new(""),
-                        TextFont {
-                            font: number_font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        TextShadow {
-                            offset: Vec2::new(1.0, 1.0),
-                            color: Color::BLACK,
-                        },
-                        TextLayout::new(Justify::Center, LineBreak::NoWrap),
-                    ));
                 });
             });
-            minimap::spawn_cluster(root, f, &map);
             root.spawn(Node {
                 width: Val::Percent(100.0),
                 padding: UiRect::all(Val::Px(10.0)),
@@ -563,30 +537,19 @@ pub(super) fn setup_hud(
                         },
                     ));
                 });
-                // The clock, with the level and the run's counts on one line under it, and the
-                // boss bars under that, all one column so none can run into the next.
+                // The boss bars, centred along the top; the run's clock and counts are in the
+                // right column's tracker ([`super::right_column`]).
                 row.spawn((
                     TopStack,
+                    super::hud_layout::Movable::new("boss_bars", "Boss bars"),
                     Node {
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
                         row_gap: Val::Px(2.0),
                         ..default()
                     },
-                ))
-                .with_children(|col| {
-                    col.spawn((TimerText, centered(f, "00:00", 34.0, Color::WHITE)));
-                    col.spawn(Node {
-                        column_gap: Val::Px(8.0),
-                        margin: UiRect::bottom(Val::Px(6.0)),
-                        ..default()
-                    })
-                    .with_children(|line| {
-                        line.spawn((LevelText, text(f, "Level 1", 14.0, GOLD)));
-                        line.spawn((KillText, text(f, "", 14.0, Color::WHITE)));
-                    });
-                });
-                // The minimap cluster's column.
+                ));
+                // The right column's room.
                 row.spawn(Node {
                     width: Val::Px(300.0),
                     ..default()
@@ -602,53 +565,58 @@ pub(super) fn setup_hud(
             .with_children(|n| {
                 n.spawn((BannerText, centered(f, "", 30.0, GOLD)));
             });
-            // The hero's health as a nameplate (`CGNamePlateFrame`): the bar under the border that
-            // caps it, the level in the border's seat; [`hero_plate`] sizes and seats it.
+            // The hero's health under their feet, in the boss bars' frame: a black line, the grey
+            // edge, a green fill with the shield over it, and the level just past the end.
             let absolute = || Node {
                 position_type: PositionType::Absolute,
-                ..default()
-            };
-            let unpainted = || ImageNode {
-                color: Color::NONE,
                 ..default()
             };
             let [r, g, b, _] = crate::vplates::PLATE_FRIENDLY;
             root.spawn((HpFrame, absolute(), Visibility::Hidden))
                 .with_children(|plate| {
-                    plate.spawn((HpBar, absolute())).with_children(|bar| {
-                        bar.spawn((
-                            HpFill,
+                    plate
+                        .spawn((
+                            HpBar,
                             Node {
                                 width: Val::Percent(100.0),
                                 height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            unpainted(),
-                            UiArt::tinted(nameplate::BAR_FILL_TEXTURE, Color::srgb(r, g, b)),
-                        ));
-                        bar.spawn((
-                            ShieldFill,
-                            Node {
-                                width: Val::Percent(0.0),
-                                height: Val::Percent(100.0),
+                                border: UiRect::all(Val::Px(1.0)),
                                 ..absolute()
                             },
-                            unpainted(),
-                            UiArt::tinted(
-                                nameplate::BAR_FILL_TEXTURE,
-                                Color::srgba(0.85, 0.9, 1.0, 0.75),
-                            ),
-                        ));
-                    });
-                    plate.spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..absolute()
-                        },
-                        unpainted(),
-                        UiArt::crop(nameplate::BORDER_TEXTURE, [0.0, 1.0, 0.0, 1.0]),
-                    ));
+                            BackgroundColor(Color::srgba(0.02, 0.035, 0.03, 0.85)),
+                            BorderColor::all(super::right_column::STEEL_LO),
+                            Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
+                        ))
+                        .with_children(|bar| {
+                            bar.spawn((
+                                HpFill,
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgb(r * 0.8, g * 0.8, b * 0.8)),
+                            ))
+                            .with_children(|fill| {
+                                fill.spawn((
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Px(1.0),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)),
+                                ));
+                            });
+                            bar.spawn((
+                                ShieldFill,
+                                Node {
+                                    width: Val::Percent(0.0),
+                                    height: Val::Percent(100.0),
+                                    ..absolute()
+                                },
+                                BackgroundColor(Color::srgba(0.72, 0.8, 0.95, 0.6)),
+                            ));
+                        });
                     let [r, g, b, _] = crate::vplates::CON_YELLOW;
                     plate
                         .spawn((
@@ -1002,7 +970,8 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     ) else {
         return false;
     };
-    if !selection.race_unlocked(race) || !selection.can_visit(selection.map) {
+    if !selection.race_unlocked(race) || !selection.can_visit(selection.map)
+        || !selection.raid_ready(selection.map_def().name) {
         return false;
     }
     // The world goes to the battleground picked; until now it stood in the last one.
@@ -1486,7 +1455,10 @@ pub(super) fn refresh_hud(
         }
     }
     if let Ok(mut t) = texts.p0().single_mut() {
-        **t = format!("Level {}", run.level);
+        let level = format!("Level {}", run.level);
+        if **t != level {
+            **t = level;
+        }
     }
     let secs = run.elapsed as u32;
     if let Ok(mut t) = texts.p1().single_mut() {
@@ -1595,8 +1567,8 @@ pub(super) fn refresh_hud(
                     TipFor::Ability(i) => Some(*i),
                     _ => None,
                 };
-                let edge = if ability.is_some() { 0.0 } else { 1.0 };
-                row.spawn((
+                let edge = 1.0;
+                let mut slot = row.spawn((
                     Node {
                         width: Val::Px(size),
                         height: Val::Px(size),
@@ -1606,11 +1578,11 @@ pub(super) fn refresh_hud(
                     BorderColor::all(EDGE),
                     Interaction::default(),
                     tip,
-                ))
-                .with_children(|slot| {
-                    if ability.is_some() {
-                        slot.spawn(slot_frame());
-                    }
+                ));
+                if ability.is_some() {
+                    slot.insert((BackgroundColor(Color::BLACK), slot_edge()));
+                }
+                slot.with_children(|slot| {
                     if let TipFor::Jewelry(i) = tip {
                         slot.spawn((
                             Node {
@@ -1660,17 +1632,13 @@ pub(super) fn refresh_hud(
                         ..default()
                     })
                     .with_children(|n| {
-                        n.spawn(text(f, level.to_string(), 12.0, Color::WHITE));
+                        n.spawn(text(f, level.to_string(), 11.0, Color::WHITE));
                     });
                 });
             }
-            // Every button shows, the empty ones as the bar's bare slots, so it never shifts.
+            // Every button shows, the empty ones as dark wells, so the bar never shifts.
             for _ in 0..empties {
-                row.spawn(Node {
-                    width: Val::Px(SLOT),
-                    height: Val::Px(SLOT),
-                    ..default()
-                });
+                row.spawn(empty_slot());
             }
         });
     }
@@ -1766,67 +1734,49 @@ pub(super) fn apply_ui_scale(
     }
 }
 
-/// Between the hero's feet and the top of its plate's bar, in gx units.
-const PLATE_FEET_GAP: f32 = 0.004;
-/// A couple of screen pixels lower than the gap alone sets it.
-const PLATE_NUDGE: f32 = 2.0;
+/// The hero's plate in UI units, the compact enemy plates' style a size up, and its gap under
+/// the feet.
+pub(super) const HERO_PLATE_W: f32 = 84.0;
+pub(super) const HERO_PLATE_H: f32 = 8.0;
+const HERO_PLATE_GAP: f32 = 4.0;
 
-/// The hero's nameplate under its feet, sized from the screen diagonal as [`crate::vplates`]
-/// sizes a plate, outside the UI scale. The border's top half seats a name the hero has none of,
-/// so the plate rises until its bar sits just under the feet.
-#[allow(clippy::type_complexity)]
+/// The hero's health plate under their feet, in the boss bars' frame, with the level past its end.
 pub(super) fn hero_plate(
     run: Res<Run>,
     phase: Res<State<Phase>>,
+    settings: Res<super::plates::NameplateSettings>,
     ui_scale: Res<UiScale>,
     hero: Query<&Transform, With<Hero>>,
     cams: Query<(&Camera, &Transform), With<WorldCamera>>,
     mut nodes: ParamSet<(
         Query<(&mut Node, &mut Visibility), With<HpFrame>>,
-        Query<&mut Node, With<HpBar>>,
         Query<&mut Node, With<HpFill>>,
         Query<&mut Node, With<ShieldFill>>,
         Query<&mut Node, With<HpLevelSeat>>,
     )>,
     mut level: Query<(&mut Text, &mut TextFont), With<HpLevel>>,
 ) {
-    use crate::vplates::{
-        gx_px, plate_basis, text_px, BAR_H, BAR_OFF_X, BAR_OFF_Y, BAR_W, LEVEL_H, LEVEL_OFF_X,
-        LEVEL_OFF_Y, PLATE_H, PLATE_W,
-    };
     let seat = hero.single().ok().and_then(|h| {
         let (cam, tf) = cams.single().ok()?;
-        let viewport = cam.logical_viewport_size()?;
-        let feet = cam
-            .world_to_viewport(&GlobalTransform::from(*tf), h.translation)
-            .ok()?;
-        Some((feet, viewport))
+        cam.world_to_viewport(&GlobalTransform::from(*tf), h.translation)
+            .ok()
     });
     let mut frames = nodes.p0();
     let Ok((mut frame, mut vis)) = frames.single_mut() else {
         return;
     };
     // Under the cards and the pause menu the plate would sit among their buttons.
-    let Some((feet, viewport)) = seat.filter(|_| *phase.get() == Phase::Playing) else {
+    let Some(feet) = seat.filter(|_| settings.hero && *phase.get() == Phase::Playing) else {
         *vis = Visibility::Hidden;
         return;
     };
     *vis = Visibility::Inherited;
     let s = ui_scale.0;
-    let basis = plate_basis(viewport);
-    let gx = |v: f32| gx_px(v, basis) / s;
-    let (pw, ph) = (gx(PLATE_W), gx(PLATE_H));
-    let bar_top = ph - gx(BAR_OFF_Y) - gx(BAR_H);
+    let (pw, ph) = (HERO_PLATE_W, HERO_PLATE_H);
     frame.width = Val::Px(pw);
     frame.height = Val::Px(ph);
     frame.left = Val::Px(feet.x / s - pw / 2.0);
-    frame.top = Val::Px(feet.y / s + gx(PLATE_FEET_GAP) - bar_top + PLATE_NUDGE / s);
-    if let Ok(mut bar) = nodes.p1().single_mut() {
-        bar.left = Val::Px(gx(BAR_OFF_X));
-        bar.top = Val::Px(bar_top);
-        bar.width = Val::Px(gx(BAR_W));
-        bar.height = Val::Px(gx(BAR_H));
-    }
+    frame.top = Val::Px(feet.y / s + HERO_PLATE_GAP);
     let stats = run.stats();
     let hp = (run.hp / stats.max_hp).clamp(0.0, 1.0);
     let shield = if run.shield_t > 0.0 {
@@ -1834,24 +1784,23 @@ pub(super) fn hero_plate(
     } else {
         0.0
     };
-    if let Ok(mut n) = nodes.p2().single_mut() {
+    if let Ok(mut n) = nodes.p1().single_mut() {
         n.width = Val::Percent(hp * 100.0);
     }
-    if let Ok(mut n) = nodes.p3().single_mut() {
+    if let Ok(mut n) = nodes.p2().single_mut() {
         n.width = Val::Percent(shield * 100.0);
     }
-    if let Ok(mut seat) = nodes.p4().single_mut() {
-        seat.left = Val::Px(pw - gx(LEVEL_OFF_X));
-        seat.top = Val::Px(ph - gx(LEVEL_OFF_Y));
+    if let Ok(mut seat) = nodes.p3().single_mut() {
+        seat.left = Val::Px(pw + 8.0);
+        seat.top = Val::Px(ph / 2.0);
     }
     if let Ok((mut text, mut font)) = level.single_mut() {
         let n = run.level.to_string();
         if text.0 != n {
             text.0 = n;
         }
-        let size = text_px(LEVEL_H, basis) / s;
-        if font.font_size != size {
-            font.font_size = size;
+        if font.font_size != 9.0 {
+            font.font_size = 9.0;
         }
     }
 }
@@ -2225,10 +2174,11 @@ pub(super) fn icon_tooltip(
         &TipFor,
         &ComputedNode,
         &bevy::ui::UiGlobalTransform,
+        Option<&super::plates::AuraTip>,
     )>,
     mut frames: Query<(&mut Node, &mut Visibility, &ComputedNode), With<GameTooltip>>,
     mut built: Local<Option<(Entity, Entity)>>,
-    mut shown: Local<Option<(TipFor, u32, u32, bool)>>,
+    mut shown: Local<Option<(TipFor, u32, u32, bool, usize)>>,
 ) {
     let Some((frame, body)) = *built else {
         if let Some(assets) = assets.as_deref_mut() {
@@ -2250,7 +2200,7 @@ pub(super) fn icon_tooltip(
             **i != Interaction::None
                 && (matches!(tip, TipFor::Pool(_)) == (*phase.get() == Phase::Menu))
         });
-    let Some((_, &tip, computed, at)) = hovered else {
+    let Some((_, &tip, computed, at, aura)) = hovered else {
         if *vis != Visibility::Hidden {
             *vis = Visibility::Hidden;
         }
@@ -2275,7 +2225,11 @@ pub(super) fn icon_tooltip(
         node.left = left;
         node.top = top;
     }
-    let content_key = (tip, run.version, selection.version, spells.is_some());
+    // An aura's slot and its revision stand in for the run's version.
+    let content_key = match aura {
+        Some(a) => (tip, a.rev, 0, false, std::ptr::from_ref(a) as usize),
+        None => (tip, run.version, selection.version, spells.is_some(), 0),
+    };
     if *shown == Some(content_key) {
         if *vis != Visibility::Inherited {
             *vis = Visibility::Inherited;
@@ -2341,6 +2295,29 @@ pub(super) fn icon_tooltip(
             TipLine::new("Talents", Color::WHITE).header(),
             TipLine::new("Spend class points from Talents on the main menu.", DIM),
         ]),
+        TipFor::Aura => aura.and_then(|a| a.aura.as_ref()).map(|a| {
+            let (kind, color) = if a.buff {
+                ("Buff", skin::GREEN)
+            } else {
+                ("Debuff", skin::RED)
+            };
+            let mut lines = vec![
+                TipLine::new(a.name.clone(), Color::WHITE).header().right(kind, color),
+                TipLine::new(a.text.clone(), GOLD),
+            ];
+            if let Some(left) = a.left {
+                let secs = left as u32;
+                lines.push(TipLine::new(
+                    if secs >= 60 {
+                        format!("{}:{:02} remaining", secs / 60, secs % 60)
+                    } else {
+                        format!("{secs} sec remaining")
+                    },
+                    DIM,
+                ));
+            }
+            lines
+        }),
     };
     let Some(lines) = lines else {
         *vis = Visibility::Hidden;

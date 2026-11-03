@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 use super::enemies::{self, Enemy};
 use super::hero::{self, Hero};
-use super::{data, Run, Selection};
+use super::{Run, Selection, data};
 
 /// How far out from the centre the lairs lie, as a share of the leash.
 const OUT: f32 = 0.7;
@@ -55,6 +55,7 @@ pub(super) fn keep_lairs(
 ) {
     let roster = data::roster(selection.map);
     if roster.guardians.is_empty()
+        || run.test
         || super::dungeon::is_dungeon(selection.stage_def())
         || (run.dead_t.is_some() && !coop.living_guests())
     {
@@ -72,15 +73,22 @@ pub(super) fn keep_lairs(
             .zip(SIDES)
             .map(|(def, side)| Lair {
                 def,
-                pos: center + side * map.leash * OUT,
+                // Native 0x5bf9543/0x5bf960f: the arena heading plus a diagonal,
+                // then quarter turns. Elwynn and Durotar both use heading 1.6.
+                pos: center
+                    + if matches!(map.name, "Elwynn Forest" | "Durotar") {
+                        let slot = SIDES.iter().position(|s| *s == side).unwrap_or(0);
+                        let angle = 1.6
+                            + std::f32::consts::FRAC_PI_4
+                            + slot as f32 * std::f32::consts::FRAC_PI_2;
+                        super::units::wow_to_bevy([angle.cos(), angle.sin(), 0.0]) * map.leash * OUT
+                    } else {
+                        side * map.leash * OUT
+                    },
                 held: None,
                 spawned: false,
                 // A lair lord (Elwynn's Fedfennel) keeps its boss row's entrance minute.
-                refill_at: if def.lord {
-                    def.from
-                } else {
-                    FIRST
-                },
+                refill_at: if def.lord { def.from } else { FIRST },
             })
             .collect();
     }

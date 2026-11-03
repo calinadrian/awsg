@@ -778,6 +778,22 @@ fn action_bar(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
                 true,
             );
         });
+        bar.spawn(Node {
+            width: Val::Px(200.),
+            ..default()
+        })
+        .with_children(|p| {
+            skin::button(
+                p,
+                f,
+                "Test Grounds",
+                "Spawn anything; nothing is saved",
+                MenuAction::TestGrounds,
+                false,
+                false,
+                true,
+            );
+        });
     });
 }
 

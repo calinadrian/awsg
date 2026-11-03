@@ -212,7 +212,11 @@ fn of(map: &MapDef) -> Option<&'static Dungeon> {
 
 /// Whether a battleground is fought underground, with no terrain and no sky to ring with fire.
 pub(super) fn is_dungeon(map: &MapDef) -> bool {
-    map.map == 3065 || of(map).is_some()
+    map.map == 3065 || story_instance(map) || of(map).is_some()
+}
+
+fn story_instance(map: &MapDef) -> bool {
+    matches!(map.map, 189 | 209 | 249 | 409)
 }
 
 /// The ground of the battleground being stood in: a dungeon's floor grid, else the terrain.
@@ -220,11 +224,15 @@ pub(super) fn is_dungeon(map: &MapDef) -> bool {
 pub(super) struct Ground<'w, 's> {
     world: WorldPoint<'w, 's>,
     selection: Res<'w, Selection>,
+    collision: avian3d::prelude::SpatialQuery<'w, 's>,
 }
 
 impl Ground<'_, '_> {
     /// The ground height under a Bevy point.
     pub fn height(&self, p: Vec3) -> Option<f32> {
+        if story_instance(self.selection.stage_def()) {
+            return self.story_floor(p).map(|spot| spot.y);
+        }
         match of(self.selection.stage_def()) {
             Some(d) => {
                 let w = bevy_to_wow(p);
@@ -236,6 +244,9 @@ impl Ground<'_, '_> {
 
     /// `p` on the ground, or at `fallback` where there is none.
     pub fn at(&self, mut p: Vec3, fallback: f32) -> Vec3 {
+        if story_instance(self.selection.stage_def()) {
+            return self.spawn_spot(p, fallback);
+        }
         p.y = self.height(p).unwrap_or(fallback);
         p
     }
@@ -244,6 +255,23 @@ impl Ground<'_, '_> {
     /// leash; on the open ground anywhere.
     pub fn spawn_spot(&self, p: Vec3, fallback: f32) -> Vec3 {
         let map = self.selection.stage_def();
+        if story_instance(map) {
+            let center = wow_to_bevy(map.center);
+            for k in 0..=12 {
+                let wish = p.lerp(center, k as f32 / 12.0);
+                let Some(spot) = self.story_floor(wish) else { continue };
+                if spot.distance_squared(center) > map.leash * map.leash { continue; }
+                let from = center + Vec3::Y * 1.5;
+                let to = spot + Vec3::Y * 1.5;
+                let delta = to - from;
+                if let Ok(dir) = Dir3::new(delta) {
+                    if self.collision.cast_ray(from, dir, delta.length(), true,
+                        &benilla_world::collision::WorldCollision::body_filter()).is_some() { continue; }
+                }
+                return spot;
+            }
+            return center;
+        }
         let Some(d) = of(map) else {
             return self.at(p, fallback);
         };
@@ -268,5 +296,14 @@ impl Ground<'_, '_> {
             }
         }
         wow_to_bevy(map.center)
+    }
+
+    /// Nearby instance floor, traced below roof height. Reject steep walls and missing floors.
+    fn story_floor(&self, p: Vec3) -> Option<Vec3> {
+        let mut from = p;
+        from.y = self.selection.stage_def().center[2] + 8.0;
+        let hit = self.collision.cast_ray(from, Dir3::NEG_Y, 24.0, true,
+            &benilla_world::collision::WorldCollision::body_filter())?;
+        (hit.normal.y >= 0.64).then(|| from - Vec3::Y * hit.distance)
     }
 }

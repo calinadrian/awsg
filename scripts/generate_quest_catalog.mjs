@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const economy = JSON.parse(readFileSync(join(root, 'crates/asr-coop/assets/economy_catalog.json'), 'utf8'));
-const REVISION = 2;
+const REVISION = 3;
 
 // Story order within each faction's road; tier per difficulty.rs.
 const ZONES = [
@@ -60,10 +60,37 @@ const ZONES = [
     ['King of the Jungle', 'King Bangalash rules the panthers of Stranglethorn. Only the greatest hunters come back with his pelt.']],
 ];
 const ROADS = [
-  ['road.alliance', 'The Alliance Road', 'Clear every zone on the road from Elwynn to Stranglethorn.', ['elwynn', 'westfall', 'deadmines', 'duskwood', 'stranglethorn']],
-  ['road.horde', 'The Horde Road', 'Clear every zone on the road from Durotar to Stranglethorn.', ['durotar', 'barrens', 'wailing', 'stonetalon', 'stranglethorn']],
+  ['road.alliance', 'The Alliance Road', 'Clear the story road from Elwynn through Deadmines to Stranglethorn.', ['elwynn', 'westfall', 'deadmines', 'stranglethorn']],
+  ['road.horde', 'The Horde Road', 'Clear the story road from Durotar through Wailing Caverns to Stranglethorn.', ['durotar', 'barrens', 'wailing', 'stranglethorn']],
+  ['road.classic', 'A Classic Story', 'Clear the shared story road from Stranglethorn to Burning Steppes.', ['stranglethorn', 'scarlet-monastery', 'tanaris', 'ungoro', 'burning-steppes']],
   ['road.cradles', 'Cradles of Azeroth', 'Clear all six starting lands.', ['elwynn', 'dun-morogh', 'teldrassil', 'durotar', 'mulgore', 'tirisfal']],
 ];
+ZONES.push(
+  ['scarlet-monastery', 6, 'Crusade Scout', 'the cathedral', 'Scarlet Soldier', 30,
+    ['Into the Cathedral', 'Break the Scarlet garrison guarding the road ahead.'],
+    ['The High Inquisitor', 'Defeat High Inquisitor Whitemane and open the roads to Tanaris and the Swamp of Sorrows.']],
+  ['tanaris', 7, 'Desert Scout', 'the desert road', 'Dune Basilisk', 35,
+    ['Across the Sands', 'Drive back the desert raiders.'],
+    ['The Desert Colossus', "Defeat the Desert Colossus to open Un'Goro and the dungeon branch to Zul'Farrak."]],
+  ['ungoro', 8, 'Crater Scout', "Un'Goro", 'Ravasaur', 40,
+    ['Into the Crater', 'Face the creatures guarding Fire Plume Ridge.'],
+    ['King of the Crater', 'Defeat King Mosh and continue to Burning Steppes.']],
+  ['burning-steppes', 9, 'Blackrock Scout', 'the Blackrock road', 'Blackrock Grunt', 45,
+    ['The Blackrock Road', 'Break the Blackrock warband.'],
+    ['The Firelord at the Gate', 'Defeat the Blackrock Firelord and prepare for the Core.']],
+  ['swamp-of-sorrows', 7, 'Brood Tracker', 'the swamp trail', 'Swamp Crocolisk', 35,
+    ["The Brood Mother's Shadow", 'Follow the trail through the swamp.'],
+    ['The Trail Guardian', 'Defeat the Brood Trail Guardian and prepare to face Onyxia.']],
+  ['zulfarrak', 8, 'Desert Scout', "Zul'Farrak", 'Sandfury Headhunter', 40,
+    ['The Sandfury Stronghold', 'Fight through the Sandfury defenders.'],
+    ['Chief of the Sandfury', 'Defeat Chief Ukorz Sandscalp.']],
+  ['onyxia', 10, 'Brood Tracker', "Onyxia's Lair", 'Onyxian Whelp', 50,
+    ["The Brood Mother's Lair", 'Hold against the brood until Onyxia answers.'],
+    ['The Brood Mother', 'Defeat Onyxia.']],
+  ['molten-core', 10, 'Blackrock Scout', 'the Core', 'Flame Imp', 50,
+    ['Into the Core', 'Break the firelord guards.'],
+    ['The Firelord', 'Banish Ragnaros.']],
+);
 const CLASSES = [[1, 'Warrior'], [2, 'Paladin'], [3, 'Hunter'], [4, 'Rogue'], [5, 'Priest'], [7, 'Shaman'], [8, 'Mage'], [9, 'Warlock'], [11, 'Druid']];
 
 const plural = (name) => name.endsWith('man') ? `${name.slice(0, -3)}men` : name.endsWith('s') ? name : `${name}s`;
@@ -74,12 +101,12 @@ const achievements = [];
 for (const [id, tier, giver, place, slayer, level, [storyTitle, storyText], [finaleTitle, finaleText]] of ZONES) {
   const zone = economy.zones[id];
   if (!zone) throw new Error(`no economy zone ${id}`);
-  const bosses = zone.boss_drops.map((b) => b.boss);
+  const bosses = zone.bosses ?? zone.boss_drops.map((b) => b.boss);
   const [first, last] = [bosses[0], bosses[bosses.length - 1]];
   const q = (suffix, title, text, objectives, reward, more = {}) => quests.push({
     id: `${id}.${suffix}`, zone: id, title, giver, text, requires: [], repeatable: false,
     objectives: objectives.map((o) => ({ ...o, zone: id })),
-    reward: { gold: 0, materials: 0, points: 0, item: false, ...reward }, ...more,
+    reward: { gold: 0, materials: 0, points: 0, ...reward, item: !!reward.item && zone.equipment.length > 0 }, ...more,
   });
   q('story', storyTitle, storyText,
     [objective('boss', 1, `Defeat ${first}`, { target: first }), objective('kill', 150, 'Slay 150 enemies')],
@@ -114,6 +141,14 @@ for (const [id, tier, giver, place, slayer, level, [storyTitle, storyText], [fin
     text: `Defeat every boss in ${zone.name}.`, points: 10,
     criteria: bosses.map((boss) => objective('boss', 1, boss, { target: boss, zone: id })), requires: [],
   });
+}
+for (const [id, zone, title, giver, text] of [
+  ['story.onyxia_attunement', 'swamp-of-sorrows', "The Brood Mother's Trail", 'Brood Tracker', "Clear Swamp of Sorrows, then return to the quest log and turn this quest in. Onyxia's Lair requires this attunement and permanent class level 50."],
+  ['story.molten_attunement', 'burning-steppes', 'Attunement to the Core', 'Blackrock Scout', 'Clear Burning Steppes, then return to the quest log and turn this quest in. Molten Core requires this attunement and permanent class level 50.'],
+]) {
+  quests.push({ id, zone, title, giver, text, requires: [], repeatable: false,
+    objectives: [objective('clear', 1, `Clear ${economy.zones[zone].name}`, { zone })],
+    reward: { gold: 100, materials: 0, points: 10, item: false } });
 }
 for (const [id, title, text, zones] of ROADS) {
   achievements.push({ id, category: 'Zones', title, text, points: 25, criteria: [], requires: zones.map((z) => `conquer.${z}`) });

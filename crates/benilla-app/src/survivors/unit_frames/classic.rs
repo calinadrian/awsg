@@ -1,205 +1,222 @@
-//! Stock PlayerFrame.xml geometry. The player's frame mirrors the target artwork.
+//! The unit frame's one design: the boss bars' frame (the grey edge, a dark inset, black-lined
+//! wells) round a health well with the level, name and health in it, and a slim power well under
+//! it in the power's colour. The buffs and the debuffs each sit in a row on the edge their setting
+//! names, from the outer end, their edges on the frame's.
+use super::super::right_column as col;
 use super::*;
 
-#[derive(Component)]
-pub(super) struct RacePortrait(Handle<PortraitMaterial>);
+/// The frame's width; the target's mirrors the player's from the right.
+pub(super) const WIDTH: f32 = 170.;
+/// The frame's height with its power well, which a unit with no power keeps empty.
+pub(super) const HEIGHT: f32 = 25.;
+/// The health well's height when its setting is unset.
+pub(super) const HEALTH_H: f32 = 13.;
+const POWER_H: f32 = 4.;
+/// The most icons a row, the gap between them, the gap to the frame and between two rows.
+const AURAS: usize = 8;
+const AURA_GAP: f32 = 2.;
+const ROW_GAP: f32 = 4.;
+const ROWS_GAP: f32 = 2.;
 
 pub(super) fn spawn(
     frame: &mut ChildSpawnerCommands,
     font: &Handle<Font>,
     target: bool,
     design: u8,
-    materials: &mut Assets<PortraitMaterial>,
+    scale: f32,
+    health_h: f32,
+    auras: AuraLayout,
 ) {
-    let x = |left: f32, width: f32| if target { 240. - left - width } else { left };
-    frame.spawn((
-        seat(x(82., 119.), 14., 119., 43.),
-        BackgroundColor(Color::srgba(0., 0., 0., 0.7)),
-    ));
-    frame.spawn((
-        seat(x(-24., 232.), -8., 232., 100.),
-        ImageNode {
-            color: Color::NONE,
-            flip_x: !target,
-            ..default()
-        },
-        UiArt::crop(
-            "Interface\\TargetingFrame\\UI-TargetingFrame",
-            [0.09375, 1., 0., 0.78125],
-        ),
-        ZIndex(3),
-    ));
-    let face = seat(x(18., 64.), 4., 64., 64.);
-    if target {
-        let material = materials.add(PortraitMaterial {
-            image: Handle::default(),
-        });
-        frame.spawn((
-            FramePortrait(true, material.clone()),
-            face,
-            MaterialNode(material),
-            ZIndex(2),
-        ));
+    // Laid out at its size rather than scaled, so text is measured as it is drawn; whole pixels
+    // keep the edges flush.
+    let px = |v: f32| (v * scale).round();
+    let (fill, fill_hi, well) = if target {
+        (col::WINE, col::WINE_HI, col::WELL)
     } else {
-        // The race atlas gives a complete Classic portrait without depending on
-        // a live model camera, which can crop the head out of this small frame.
-        let material = materials.add(PortraitMaterial {
-            image: Handle::default(),
-        });
-        frame.spawn((
-            RacePortrait(material.clone()),
-            face,
-            MaterialNode(material),
-            ZIndex(2),
-        ));
-    }
-    let gold = Color::srgb(1., 0.82, 0.);
-    frame
-        .spawn(Node {
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..seat(x(82., 119.), 14., 119., 17.)
-        })
-        .with_children(|n| {
-            n.spawn((
-                FrameName(target),
-                label(font, 11., if design == 1 { Color::WHITE } else { gold }),
-            ));
-        });
-    frame
-        .spawn((
-            Node {
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..seat(x(18., 22.), 50., 22., 16.)
-            },
-            ZIndex(5),
-        ))
-        .with_children(|n| {
-            n.spawn((FrameLevel(target), label(font, 11., gold)));
-        });
-    frame
-        .spawn((
-            seat(x(82., 119.), 33., 119., 12.),
-            BackgroundColor(Color::srgb(0.03, 0.08, 0.03)),
-        ))
-        .with_children(|bar| {
-            bar.spawn((
-                FrameFill(target),
-                Node {
-                    width: Val::Percent(100.),
-                    height: Val::Percent(100.),
-                    ..default()
-                },
-                ImageNode {
-                    color: Color::NONE,
-                    ..default()
-                },
-                UiArt::tinted(
-                    "Interface\\TargetingFrame\\UI-StatusBar",
-                    Color::srgb(0.1, 0.8, 0.12),
-                ),
-            ));
-            bar.spawn(Node {
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..seat(0., 0., 119., 12.)
-            })
-            .with_children(|n| {
-                n.spawn((FrameHealth(target), label(font, 10., Color::WHITE)));
-            });
-        });
-    frame
-        .spawn((
-            PowerNode(target, 1, false),
-            seat(x(82., 119.), 45., 119., 12.),
-            BackgroundColor(Color::srgb(0.01, 0.02, 0.06)),
-        ))
-        .with_children(|bar| {
-            bar.spawn((
-                PowerNode(target, 2, false),
-                Node {
-                    width: Val::Percent(100.),
-                    height: Val::Percent(100.),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.02, 0.3, 0.95)),
-            ));
-            bar.spawn(Node {
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..seat(0., 0., 119., 12.)
-            })
-            .with_children(|n| {
-                n.spawn((FramePowerText(target), label(font, 9., Color::WHITE)));
-            });
-        });
-}
+        (
+            Color::srgb(0.18, 0.55, 0.2),
+            Color::srgb(0.36, 0.74, 0.36),
+            Color::srgb(0.027, 0.07, 0.04),
+        )
+    };
+    let span = || Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.),
+        top: Val::Px(0.),
+        width: Val::Percent(100.),
+        height: Val::Percent(100.),
+        ..default()
+    };
+    let lined = || Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK);
 
-pub(super) fn refresh_portraits(
-    run: Res<Run>,
-    selection: Res<super::super::Selection>,
-    portraits: Query<&RacePortrait>,
-    mut assets: Option<ResMut<benilla_assets::WorldAssets>>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<PortraitMaterial>>,
-    mut cached: Local<Option<((u8, u8), Handle<Image>)>>,
-) {
-    let sex = selection
-        .look
-        .and_then(|i| selection.looks.get(i))
-        .map_or(0, |l| l.2);
-    let identity = (run.race, sex);
-    if portraits.is_empty() {
-        return;
-    }
-    if cached.as_ref().is_none_or(|(key, _)| *key != identity) {
-        let Some(coords) = super::super::races::race_tc(run.race, sex) else {
-            return;
+    // The aura rows ride the plate. Their insets are from the plate's padding box, one pixel in
+    // from its edge: -1 puts an icon's edge on the frame's, and the extra pixel on the gap puts the
+    // rows `ROW_GAP` off its edge. On a shared edge the debuffs sit nearest, the buffs beyond.
+    let mut commands = frame.commands();
+    let mut rows = Vec::new();
+    let mut row = |buff: bool| {
+        let (at, size) = if buff {
+            (auras.buffs, px(auras.buff_size))
+        } else {
+            (auras.debuffs, px(auras.debuff_size))
         };
-        let Some(assets) = assets.as_deref_mut() else {
-            return;
+        let above = match at {
+            AuraPos::Above => true,
+            AuraPos::Below => false,
+            AuraPos::Hidden => return Vec::new(),
         };
-        let Some((width, height, rgba)) =
-            assets.decode_rgba("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Races")
-        else {
-            return;
+        let beyond = if buff && auras.debuffs == at {
+            px(auras.debuff_size) + px(ROWS_GAP)
+        } else {
+            0.
         };
-        let [left, right, top, bottom] = coords;
-        let x = (left * width as f32).round() as usize;
-        let y = (top * height as f32).round() as usize;
-        let w = ((right - left) * width as f32).round() as usize;
-        let h = ((bottom - top) * height as f32).round() as usize;
-        if w == 0 || h == 0 || x + w > width as usize || y + h > height as usize {
-            return;
+        // As many as fit along the frame, up to a row's worth.
+        let gap = px(AURA_GAP);
+        let fit = ((px(WIDTH) + gap) / (size + gap)).floor() as usize;
+        let slots: Vec<AuraSlot> = (0..fit.clamp(1, AURAS))
+            .map(|_| spawn_aura_slot(&mut commands, font, size))
+            .collect();
+        for slot in &slots {
+            // The bar's own edge: grey inside (crimson for a debuff), black outside.
+            commands.entity(slot.frame).insert((
+                BorderColor::all(if buff { col::STEEL_LO } else { col::WINE_HI }),
+                Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
+            ));
         }
-        let mut pixels = Vec::with_capacity(w * h * 4);
-        for row in y..y + h {
-            let start = (row * width as usize + x) * 4;
-            pixels.extend_from_slice(&rgba[start..start + w * 4]);
-        }
-        // Give the circular portrait shader a standalone atlas cell, so its UVs
-        // describe the face rather than the entire rectangular race sheet.
-        let image = Image::new(
-            bevy::render::render_resource::Extent3d {
-                width: w as u32,
-                height: h as u32,
-                depth_or_array_layers: 1,
+        let frames: Vec<Entity> = slots.iter().map(|s| s.frame).collect();
+        let off = Val::Px(px(ROW_GAP) + 1. + beyond);
+        let (top, bottom, margin) = if above {
+            (Val::Auto, Val::Percent(100.), UiRect::bottom(off))
+        } else {
+            (Val::Percent(100.), Val::Auto, UiRect::top(off))
+        };
+        let (left, right) = if target {
+            (Val::Auto, Val::Px(-1.))
+        } else {
+            (Val::Px(-1.), Val::Auto)
+        };
+        let row = commands
+            .spawn(Node {
+                position_type: PositionType::Absolute,
+                left,
+                right,
+                top,
+                bottom,
+                margin,
+                // The target's first aura at its outer end, the right.
+                flex_direction: if target {
+                    FlexDirection::RowReverse
+                } else {
+                    FlexDirection::Row
+                },
+                column_gap: Val::Px(px(AURA_GAP)),
+                ..default()
+            })
+            .add_children(&frames)
+            .id();
+        rows.push(row);
+        slots
+    };
+    let buffs = row(true);
+    let debuffs = row(false);
+
+    frame
+        .spawn((
+            col::plate(Node {
+                position_type: PositionType::Absolute,
+                left: if target { Val::Auto } else { Val::Px(0.) },
+                right: if target { Val::Px(0.) } else { Val::Auto },
+                top: Val::Px(0.),
+                width: Val::Px(px(WIDTH)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(px(2.)),
+                padding: UiRect::all(Val::Px(px(2.))),
+                ..default()
+            }),
+            FrameAuras {
+                target,
+                buffs,
+                debuffs,
             },
-            bevy::render::render_resource::TextureDimension::D2,
-            pixels,
-            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-            bevy::asset::RenderAssetUsages::default(),
-        );
-        *cached = Some((identity, images.add(image)));
-    }
-    if let Some((_, image)) = cached.as_ref() {
-        for portrait in &portraits {
-            if let Some(material) = materials.get_mut(&portrait.0) {
-                if material.image != *image {
-                    material.image = image.clone();
-                }
-            }
-        }
-    }
+        ))
+        .add_children(&rows)
+        .with_children(|plate| {
+            plate
+                .spawn((
+                    Node {
+                        height: Val::Px(px(health_h)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BackgroundColor(well),
+                    lined(),
+                ))
+                .with_children(|w| {
+                    w.spawn((FrameFill(target), span(), BackgroundColor(fill)))
+                        .with_children(|f| {
+                            f.spawn((
+                                Node {
+                                    width: Val::Percent(100.),
+                                    height: Val::Px(1.),
+                                    ..default()
+                                },
+                                BackgroundColor(fill_hi),
+                            ));
+                        });
+                    w.spawn(Node {
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::horizontal(Val::Px(px(5.))),
+                        column_gap: Val::Px(px(6.)),
+                        ..span()
+                    })
+                    .with_children(|t| {
+                        t.spawn(Node {
+                            align_items: AlignItems::Center,
+                            // A long name gives way, clipped, so the health text stays whole.
+                            flex_shrink: 1.,
+                            min_width: Val::Px(0.),
+                            overflow: Overflow::clip(),
+                            column_gap: Val::Px(px(4.)),
+                            ..default()
+                        })
+                        .with_children(|who| {
+                            who.spawn((FrameLevel(target), label(font, 8. * scale, col::STEEL)));
+                            who.spawn((
+                                FrameName(target),
+                                label(
+                                    font,
+                                    10. * scale,
+                                    if design == 1 {
+                                        col::STEEL_HI
+                                    } else {
+                                        col::TEXT_HI
+                                    },
+                                ),
+                            ));
+                        });
+                        t.spawn((
+                            FrameHealth(target),
+                            Node {
+                                flex_shrink: 0.,
+                                ..default()
+                            },
+                            label(font, 9. * scale, col::TEXT_HI),
+                        ));
+                    });
+                });
+            plate
+                .spawn((
+                    PowerNode(target, 1),
+                    Node {
+                        height: Val::Px(px(POWER_H)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.02, 0.024, 0.043)),
+                    lined(),
+                ))
+                .with_children(|p| {
+                    p.spawn((PowerNode(target, 2), span(), BackgroundColor(Color::NONE)));
+                });
+        });
 }

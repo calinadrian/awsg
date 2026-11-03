@@ -1,5 +1,5 @@
 {
- "revision": 2,
+ "revision": 3,
  "quests": [
   {
    "id": "elwynn.story",
@@ -2240,6 +2240,1336 @@
     "points": 5,
     "item": false
    }
+  },
+  {
+   "id": "scarlet-monastery.story",
+   "zone": "scarlet-monastery",
+   "title": "Into the Cathedral",
+   "giver": "Crusade Scout",
+   "text": "Break the Scarlet garrison guarding the road ahead.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Scarlet Commander Mograine",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Scarlet Commander Mograine"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 240,
+    "materials": 8,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "scarlet-monastery.bounty",
+   "zone": "scarlet-monastery",
+   "title": "Bounty: Scarlet Soldiers",
+   "giver": "Crusade Scout",
+   "text": "Scarlet Soldiers keep coming at the cathedral. Crusade Scout pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Scarlet Soldier",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Scarlet Soldiers"
+    }
+   ],
+   "reward": {
+    "gold": 150,
+    "materials": 7,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "scarlet-monastery.lairs",
+   "zone": "scarlet-monastery",
+   "title": "Break the Lairs",
+   "giver": "Crusade Scout",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the cathedral sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 180,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "scarlet-monastery.hold",
+   "zone": "scarlet-monastery",
+   "title": "Hold the Line",
+   "giver": "Crusade Scout",
+   "text": "Crusade Scout needs the field held while the cathedral regroups. Survive ten minutes in Scarlet Monastery, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 300,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "scarlet-monastery.finale",
+   "zone": "scarlet-monastery",
+   "title": "The High Inquisitor",
+   "giver": "Crusade Scout",
+   "text": "Defeat High Inquisitor Whitemane and open the roads to Tanaris and the Swamp of Sorrows.",
+   "requires": [
+    "scarlet-monastery.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "High Inquisitor Whitemane",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat High Inquisitor Whitemane"
+    }
+   ],
+   "reward": {
+    "gold": 720,
+    "materials": 9,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "scarlet-monastery.proven",
+   "zone": "scarlet-monastery",
+   "title": "Proven in Scarlet Monastery",
+   "giver": "Crusade Scout",
+   "text": "Crusade Scout trusts only those who have grown strong in the field. Reach level 30 in a single run in Scarlet Monastery.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 30,
+     "text": "Reach level 30"
+    }
+   ],
+   "reward": {
+    "gold": 360,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "tanaris.story",
+   "zone": "tanaris",
+   "title": "Across the Sands",
+   "giver": "Desert Scout",
+   "text": "Drive back the desert raiders.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Dune Stalker",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Dune Stalker"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 280,
+    "materials": 9,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "tanaris.bounty",
+   "zone": "tanaris",
+   "title": "Bounty: Dune Basilisks",
+   "giver": "Desert Scout",
+   "text": "Dune Basilisks keep coming at the desert road. Desert Scout pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Dune Basilisk",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Dune Basilisks"
+    }
+   ],
+   "reward": {
+    "gold": 175,
+    "materials": 8,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "tanaris.lairs",
+   "zone": "tanaris",
+   "title": "Break the Lairs",
+   "giver": "Desert Scout",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the desert road sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 210,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "tanaris.hold",
+   "zone": "tanaris",
+   "title": "Hold the Line",
+   "giver": "Desert Scout",
+   "text": "Desert Scout needs the field held while the desert road regroups. Survive ten minutes in Tanaris, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 350,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "tanaris.finale",
+   "zone": "tanaris",
+   "title": "The Desert Colossus",
+   "giver": "Desert Scout",
+   "text": "Defeat the Desert Colossus to open Un'Goro and the dungeon branch to Zul'Farrak.",
+   "requires": [
+    "tanaris.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Desert Colossus",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Desert Colossus"
+    }
+   ],
+   "reward": {
+    "gold": 840,
+    "materials": 10,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "tanaris.proven",
+   "zone": "tanaris",
+   "title": "Proven in Tanaris",
+   "giver": "Desert Scout",
+   "text": "Desert Scout trusts only those who have grown strong in the field. Reach level 35 in a single run in Tanaris.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 35,
+     "text": "Reach level 35"
+    }
+   ],
+   "reward": {
+    "gold": 420,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "ungoro.story",
+   "zone": "ungoro",
+   "title": "Into the Crater",
+   "giver": "Crater Scout",
+   "text": "Face the creatures guarding Fire Plume Ridge.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Ravasaur Matriarch",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Ravasaur Matriarch"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 320,
+    "materials": 10,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "ungoro.bounty",
+   "zone": "ungoro",
+   "title": "Bounty: Ravasaurs",
+   "giver": "Crater Scout",
+   "text": "Ravasaurs keep coming at Un'Goro. Crater Scout pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Ravasaur",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Ravasaurs"
+    }
+   ],
+   "reward": {
+    "gold": 200,
+    "materials": 9,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "ungoro.lairs",
+   "zone": "ungoro",
+   "title": "Break the Lairs",
+   "giver": "Crater Scout",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Un'Goro sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 240,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "ungoro.hold",
+   "zone": "ungoro",
+   "title": "Hold the Line",
+   "giver": "Crater Scout",
+   "text": "Crater Scout needs the field held while Un'Goro regroups. Survive ten minutes in Un'Goro Crater, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 400,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "ungoro.finale",
+   "zone": "ungoro",
+   "title": "King of the Crater",
+   "giver": "Crater Scout",
+   "text": "Defeat King Mosh and continue to Burning Steppes.",
+   "requires": [
+    "ungoro.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "King Mosh",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat King Mosh"
+    }
+   ],
+   "reward": {
+    "gold": 960,
+    "materials": 11,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "ungoro.proven",
+   "zone": "ungoro",
+   "title": "Proven in Un'Goro Crater",
+   "giver": "Crater Scout",
+   "text": "Crater Scout trusts only those who have grown strong in the field. Reach level 40 in a single run in Un'Goro Crater.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 40,
+     "text": "Reach level 40"
+    }
+   ],
+   "reward": {
+    "gold": 480,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "burning-steppes.story",
+   "zone": "burning-steppes",
+   "title": "The Blackrock Road",
+   "giver": "Blackrock Scout",
+   "text": "Break the Blackrock warband.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Blackrock Warleader",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Blackrock Warleader"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 360,
+    "materials": 11,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "burning-steppes.bounty",
+   "zone": "burning-steppes",
+   "title": "Bounty: Blackrock Grunts",
+   "giver": "Blackrock Scout",
+   "text": "Blackrock Grunts keep coming at the Blackrock road. Blackrock Scout pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Blackrock Grunt",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Blackrock Grunts"
+    }
+   ],
+   "reward": {
+    "gold": 225,
+    "materials": 10,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "burning-steppes.lairs",
+   "zone": "burning-steppes",
+   "title": "Break the Lairs",
+   "giver": "Blackrock Scout",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the Blackrock road sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 270,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "burning-steppes.hold",
+   "zone": "burning-steppes",
+   "title": "Hold the Line",
+   "giver": "Blackrock Scout",
+   "text": "Blackrock Scout needs the field held while the Blackrock road regroups. Survive ten minutes in Burning Steppes, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 450,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "burning-steppes.finale",
+   "zone": "burning-steppes",
+   "title": "The Firelord at the Gate",
+   "giver": "Blackrock Scout",
+   "text": "Defeat the Blackrock Firelord and prepare for the Core.",
+   "requires": [
+    "burning-steppes.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Blackrock Firelord",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Blackrock Firelord"
+    }
+   ],
+   "reward": {
+    "gold": 1080,
+    "materials": 12,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "burning-steppes.proven",
+   "zone": "burning-steppes",
+   "title": "Proven in Burning Steppes",
+   "giver": "Blackrock Scout",
+   "text": "Blackrock Scout trusts only those who have grown strong in the field. Reach level 45 in a single run in Burning Steppes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 45,
+     "text": "Reach level 45"
+    }
+   ],
+   "reward": {
+    "gold": 540,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "swamp-of-sorrows.story",
+   "zone": "swamp-of-sorrows",
+   "title": "The Brood Mother's Shadow",
+   "giver": "Brood Tracker",
+   "text": "Follow the trail through the swamp.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Marshfang",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Marshfang"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 280,
+    "materials": 9,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "swamp-of-sorrows.bounty",
+   "zone": "swamp-of-sorrows",
+   "title": "Bounty: Swamp Crocolisks",
+   "giver": "Brood Tracker",
+   "text": "Swamp Crocolisks keep coming at the swamp trail. Brood Tracker pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Swamp Crocolisk",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Swamp Crocolisks"
+    }
+   ],
+   "reward": {
+    "gold": 175,
+    "materials": 8,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "swamp-of-sorrows.lairs",
+   "zone": "swamp-of-sorrows",
+   "title": "Break the Lairs",
+   "giver": "Brood Tracker",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the swamp trail sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 210,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "swamp-of-sorrows.hold",
+   "zone": "swamp-of-sorrows",
+   "title": "Hold the Line",
+   "giver": "Brood Tracker",
+   "text": "Brood Tracker needs the field held while the swamp trail regroups. Survive ten minutes in Swamp of Sorrows, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 350,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "swamp-of-sorrows.finale",
+   "zone": "swamp-of-sorrows",
+   "title": "The Trail Guardian",
+   "giver": "Brood Tracker",
+   "text": "Defeat the Brood Trail Guardian and prepare to face Onyxia.",
+   "requires": [
+    "swamp-of-sorrows.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Brood Trail Guardian",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Brood Trail Guardian"
+    }
+   ],
+   "reward": {
+    "gold": 840,
+    "materials": 10,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "swamp-of-sorrows.proven",
+   "zone": "swamp-of-sorrows",
+   "title": "Proven in Swamp of Sorrows",
+   "giver": "Brood Tracker",
+   "text": "Brood Tracker trusts only those who have grown strong in the field. Reach level 35 in a single run in Swamp of Sorrows.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 35,
+     "text": "Reach level 35"
+    }
+   ],
+   "reward": {
+    "gold": 420,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "zulfarrak.story",
+   "zone": "zulfarrak",
+   "title": "The Sandfury Stronghold",
+   "giver": "Desert Scout",
+   "text": "Fight through the Sandfury defenders.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Theka the Martyr",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Theka the Martyr"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 320,
+    "materials": 10,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "zulfarrak.bounty",
+   "zone": "zulfarrak",
+   "title": "Bounty: Sandfury Headhunters",
+   "giver": "Desert Scout",
+   "text": "Sandfury Headhunters keep coming at Zul'Farrak. Desert Scout pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Sandfury Headhunter",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Sandfury Headhunters"
+    }
+   ],
+   "reward": {
+    "gold": 200,
+    "materials": 9,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "zulfarrak.lairs",
+   "zone": "zulfarrak",
+   "title": "Break the Lairs",
+   "giver": "Desert Scout",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Zul'Farrak sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 240,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "zulfarrak.hold",
+   "zone": "zulfarrak",
+   "title": "Hold the Line",
+   "giver": "Desert Scout",
+   "text": "Desert Scout needs the field held while Zul'Farrak regroups. Survive ten minutes in Zul'Farrak, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 400,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "zulfarrak.finale",
+   "zone": "zulfarrak",
+   "title": "Chief of the Sandfury",
+   "giver": "Desert Scout",
+   "text": "Defeat Chief Ukorz Sandscalp.",
+   "requires": [
+    "zulfarrak.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Chief Ukorz Sandscalp",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Chief Ukorz Sandscalp"
+    }
+   ],
+   "reward": {
+    "gold": 960,
+    "materials": 11,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "zulfarrak.proven",
+   "zone": "zulfarrak",
+   "title": "Proven in Zul'Farrak",
+   "giver": "Desert Scout",
+   "text": "Desert Scout trusts only those who have grown strong in the field. Reach level 40 in a single run in Zul'Farrak.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 40,
+     "text": "Reach level 40"
+    }
+   ],
+   "reward": {
+    "gold": 480,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "onyxia.story",
+   "zone": "onyxia",
+   "title": "The Brood Mother's Lair",
+   "giver": "Brood Tracker",
+   "text": "Hold against the brood until Onyxia answers.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Onyxia",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Onyxia"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 400,
+    "materials": 12,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "onyxia.bounty",
+   "zone": "onyxia",
+   "title": "Bounty: Onyxian Whelps",
+   "giver": "Brood Tracker",
+   "text": "Onyxian Whelps keep coming at Onyxia's Lair. Brood Tracker pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Onyxian Whelp",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Onyxian Whelps"
+    }
+   ],
+   "reward": {
+    "gold": 250,
+    "materials": 11,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "onyxia.lairs",
+   "zone": "onyxia",
+   "title": "Break the Lairs",
+   "giver": "Brood Tracker",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and Onyxia's Lair sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 300,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "onyxia.hold",
+   "zone": "onyxia",
+   "title": "Hold the Line",
+   "giver": "Brood Tracker",
+   "text": "Brood Tracker needs the field held while Onyxia's Lair regroups. Survive ten minutes in Onyxia's Lair, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 500,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "onyxia.finale",
+   "zone": "onyxia",
+   "title": "The Brood Mother",
+   "giver": "Brood Tracker",
+   "text": "Defeat Onyxia.",
+   "requires": [
+    "onyxia.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Onyxia",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Onyxia"
+    }
+   ],
+   "reward": {
+    "gold": 1200,
+    "materials": 13,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "onyxia.proven",
+   "zone": "onyxia",
+   "title": "Proven in Onyxia's Lair",
+   "giver": "Brood Tracker",
+   "text": "Brood Tracker trusts only those who have grown strong in the field. Reach level 50 in a single run in Onyxia's Lair.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 50,
+     "text": "Reach level 50"
+    }
+   ],
+   "reward": {
+    "gold": 600,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "molten-core.story",
+   "zone": "molten-core",
+   "title": "Into the Core",
+   "giver": "Blackrock Scout",
+   "text": "Break the firelord guards.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Lucifron",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Lucifron"
+    },
+    {
+     "kind": "kill",
+     "target": "",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 150,
+     "text": "Slay 150 enemies"
+    }
+   ],
+   "reward": {
+    "gold": 400,
+    "materials": 12,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "molten-core.bounty",
+   "zone": "molten-core",
+   "title": "Bounty: Flame Imps",
+   "giver": "Blackrock Scout",
+   "text": "Flame Imps keep coming at the Core. Blackrock Scout pays for every thirty you put down, as often as you bring proof.",
+   "requires": [],
+   "repeatable": true,
+   "objectives": [
+    {
+     "kind": "kill",
+     "target": "Flame Imp",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 30,
+     "text": "Slay 30 Flame Imps"
+    }
+   ],
+   "reward": {
+    "gold": 250,
+    "materials": 11,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "molten-core.lairs",
+   "zone": "molten-core",
+   "title": "Break the Lairs",
+   "giver": "Blackrock Scout",
+   "text": "Four lairs ring the battlefield, each held by a champion. Break three of them and the Core sleeps easier.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "elite",
+     "target": "",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 3,
+     "text": "Slay 3 elites"
+    }
+   ],
+   "reward": {
+    "gold": 300,
+    "materials": 2,
+    "points": 0,
+    "item": false
+   }
+  },
+  {
+   "id": "molten-core.hold",
+   "zone": "molten-core",
+   "title": "Hold the Line",
+   "giver": "Blackrock Scout",
+   "text": "Blackrock Scout needs the field held while the Core regroups. Survive ten minutes in Molten Core, whatever comes.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "survive",
+     "target": "",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 600,
+     "text": "Survive 10:00"
+    }
+   ],
+   "reward": {
+    "gold": 500,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "molten-core.finale",
+   "zone": "molten-core",
+   "title": "The Firelord",
+   "giver": "Blackrock Scout",
+   "text": "Banish Ragnaros.",
+   "requires": [
+    "molten-core.story"
+   ],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "boss",
+     "target": "Ragnaros",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 1,
+     "text": "Defeat Ragnaros"
+    }
+   ],
+   "reward": {
+    "gold": 1200,
+    "materials": 13,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "molten-core.proven",
+   "zone": "molten-core",
+   "title": "Proven in Molten Core",
+   "giver": "Blackrock Scout",
+   "text": "Blackrock Scout trusts only those who have grown strong in the field. Reach level 50 in a single run in Molten Core.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "level",
+     "target": "",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 50,
+     "text": "Reach level 50"
+    }
+   ],
+   "reward": {
+    "gold": 600,
+    "materials": 0,
+    "points": 5,
+    "item": false
+   }
+  },
+  {
+   "id": "story.onyxia_attunement",
+   "zone": "swamp-of-sorrows",
+   "title": "The Brood Mother's Trail",
+   "giver": "Brood Tracker",
+   "text": "Clear Swamp of Sorrows, then return to the quest log and turn this quest in. Onyxia's Lair requires this attunement and permanent class level 50.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Swamp of Sorrows"
+    }
+   ],
+   "reward": {
+    "gold": 100,
+    "materials": 0,
+    "points": 10,
+    "item": false
+   }
+  },
+  {
+   "id": "story.molten_attunement",
+   "zone": "burning-steppes",
+   "title": "Attunement to the Core",
+   "giver": "Blackrock Scout",
+   "text": "Clear Burning Steppes, then return to the quest log and turn this quest in. Molten Core requires this attunement and permanent class level 50.",
+   "requires": [],
+   "repeatable": false,
+   "objectives": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Burning Steppes"
+    }
+   ],
+   "reward": {
+    "gold": 100,
+    "materials": 0,
+    "points": 10,
+    "item": false
+   }
   }
  ],
  "achievements": [
@@ -3244,17 +4574,440 @@
    "requires": []
   },
   {
+   "id": "conquer.scarlet-monastery",
+   "category": "Zones",
+   "title": "Conqueror of Scarlet Monastery",
+   "text": "Defeat High Inquisitor Whitemane and clear Scarlet Monastery.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Scarlet Monastery"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.scarlet-monastery",
+   "category": "Bosses",
+   "title": "Most Wanted: Scarlet Monastery",
+   "text": "Defeat every boss in Scarlet Monastery.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Scarlet Commander Mograine",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 1,
+     "text": "Scarlet Commander Mograine"
+    },
+    {
+     "kind": "boss",
+     "target": "High Inquisitor Whitemane",
+     "zone": "scarlet-monastery",
+     "class": 0,
+     "count": 1,
+     "text": "High Inquisitor Whitemane"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.tanaris",
+   "category": "Zones",
+   "title": "Conqueror of Tanaris",
+   "text": "Defeat Desert Colossus and clear Tanaris.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Tanaris"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.tanaris",
+   "category": "Bosses",
+   "title": "Most Wanted: Tanaris",
+   "text": "Defeat every boss in Tanaris.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Dune Stalker",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 1,
+     "text": "Dune Stalker"
+    },
+    {
+     "kind": "boss",
+     "target": "Wastewander Captain",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 1,
+     "text": "Wastewander Captain"
+    },
+    {
+     "kind": "boss",
+     "target": "Desert Colossus",
+     "zone": "tanaris",
+     "class": 0,
+     "count": 1,
+     "text": "Desert Colossus"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.ungoro",
+   "category": "Zones",
+   "title": "Conqueror of Un'Goro Crater",
+   "text": "Defeat King Mosh and clear Un'Goro Crater.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Un'Goro Crater"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.ungoro",
+   "category": "Bosses",
+   "title": "Most Wanted: Un'Goro Crater",
+   "text": "Defeat every boss in Un'Goro Crater.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Ravasaur Matriarch",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "Ravasaur Matriarch"
+    },
+    {
+     "kind": "boss",
+     "target": "Uhk'loc",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "Uhk'loc"
+    },
+    {
+     "kind": "boss",
+     "target": "Blazerunner",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "Blazerunner"
+    },
+    {
+     "kind": "boss",
+     "target": "Baron Charr",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "Baron Charr"
+    },
+    {
+     "kind": "boss",
+     "target": "Tyrant Devilsaur",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "Tyrant Devilsaur"
+    },
+    {
+     "kind": "boss",
+     "target": "King Mosh",
+     "zone": "ungoro",
+     "class": 0,
+     "count": 1,
+     "text": "King Mosh"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.burning-steppes",
+   "category": "Zones",
+   "title": "Conqueror of Burning Steppes",
+   "text": "Defeat Blackrock Firelord and clear Burning Steppes.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Burning Steppes"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.burning-steppes",
+   "category": "Bosses",
+   "title": "Most Wanted: Burning Steppes",
+   "text": "Defeat every boss in Burning Steppes.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Blackrock Warleader",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 1,
+     "text": "Blackrock Warleader"
+    },
+    {
+     "kind": "boss",
+     "target": "Obsidian Sentinel",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 1,
+     "text": "Obsidian Sentinel"
+    },
+    {
+     "kind": "boss",
+     "target": "Blackrock Firelord",
+     "zone": "burning-steppes",
+     "class": 0,
+     "count": 1,
+     "text": "Blackrock Firelord"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.swamp-of-sorrows",
+   "category": "Zones",
+   "title": "Conqueror of Swamp of Sorrows",
+   "text": "Defeat Brood Trail Guardian and clear Swamp of Sorrows.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Swamp of Sorrows"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.swamp-of-sorrows",
+   "category": "Bosses",
+   "title": "Most Wanted: Swamp of Sorrows",
+   "text": "Defeat every boss in Swamp of Sorrows.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Marshfang",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 1,
+     "text": "Marshfang"
+    },
+    {
+     "kind": "boss",
+     "target": "Sorrowfang",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 1,
+     "text": "Sorrowfang"
+    },
+    {
+     "kind": "boss",
+     "target": "Brood Trail Guardian",
+     "zone": "swamp-of-sorrows",
+     "class": 0,
+     "count": 1,
+     "text": "Brood Trail Guardian"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.zulfarrak",
+   "category": "Zones",
+   "title": "Conqueror of Zul'Farrak",
+   "text": "Defeat Chief Ukorz Sandscalp and clear Zul'Farrak.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Zul'Farrak"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.zulfarrak",
+   "category": "Bosses",
+   "title": "Most Wanted: Zul'Farrak",
+   "text": "Defeat every boss in Zul'Farrak.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Theka the Martyr",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 1,
+     "text": "Theka the Martyr"
+    },
+    {
+     "kind": "boss",
+     "target": "Witch Doctor Zum'rah",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 1,
+     "text": "Witch Doctor Zum'rah"
+    },
+    {
+     "kind": "boss",
+     "target": "Chief Ukorz Sandscalp",
+     "zone": "zulfarrak",
+     "class": 0,
+     "count": 1,
+     "text": "Chief Ukorz Sandscalp"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.onyxia",
+   "category": "Zones",
+   "title": "Conqueror of Onyxia's Lair",
+   "text": "Defeat Onyxia and clear Onyxia's Lair.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Onyxia's Lair"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.onyxia",
+   "category": "Bosses",
+   "title": "Most Wanted: Onyxia's Lair",
+   "text": "Defeat every boss in Onyxia's Lair.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Onyxia",
+     "zone": "onyxia",
+     "class": 0,
+     "count": 1,
+     "text": "Onyxia"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "conquer.molten-core",
+   "category": "Zones",
+   "title": "Conqueror of Molten Core",
+   "text": "Defeat Ragnaros and clear Molten Core.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "clear",
+     "target": "",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 1,
+     "text": "Clear Molten Core"
+    }
+   ],
+   "requires": []
+  },
+  {
+   "id": "wanted.molten-core",
+   "category": "Bosses",
+   "title": "Most Wanted: Molten Core",
+   "text": "Defeat every boss in Molten Core.",
+   "points": 10,
+   "criteria": [
+    {
+     "kind": "boss",
+     "target": "Lucifron",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 1,
+     "text": "Lucifron"
+    },
+    {
+     "kind": "boss",
+     "target": "Golemagg the Incinerator",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 1,
+     "text": "Golemagg the Incinerator"
+    },
+    {
+     "kind": "boss",
+     "target": "Majordomo Executus",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 1,
+     "text": "Majordomo Executus"
+    },
+    {
+     "kind": "boss",
+     "target": "Ragnaros",
+     "zone": "molten-core",
+     "class": 0,
+     "count": 1,
+     "text": "Ragnaros"
+    }
+   ],
+   "requires": []
+  },
+  {
    "id": "road.alliance",
    "category": "Zones",
    "title": "The Alliance Road",
-   "text": "Clear every zone on the road from Elwynn to Stranglethorn.",
+   "text": "Clear the story road from Elwynn through Deadmines to Stranglethorn.",
    "points": 25,
    "criteria": [],
    "requires": [
     "conquer.elwynn",
     "conquer.westfall",
     "conquer.deadmines",
-    "conquer.duskwood",
     "conquer.stranglethorn"
    ]
   },
@@ -3262,15 +5015,29 @@
    "id": "road.horde",
    "category": "Zones",
    "title": "The Horde Road",
-   "text": "Clear every zone on the road from Durotar to Stranglethorn.",
+   "text": "Clear the story road from Durotar through Wailing Caverns to Stranglethorn.",
    "points": 25,
    "criteria": [],
    "requires": [
     "conquer.durotar",
     "conquer.barrens",
     "conquer.wailing",
-    "conquer.stonetalon",
     "conquer.stranglethorn"
+   ]
+  },
+  {
+   "id": "road.classic",
+   "category": "Zones",
+   "title": "A Classic Story",
+   "text": "Clear the shared story road from Stranglethorn to Burning Steppes.",
+   "points": 25,
+   "criteria": [],
+   "requires": [
+    "conquer.stranglethorn",
+    "conquer.scarlet-monastery",
+    "conquer.tanaris",
+    "conquer.ungoro",
+    "conquer.burning-steppes"
    ]
   },
   {
@@ -3310,7 +5077,15 @@
     "conquer.duskwood",
     "conquer.stonetalon",
     "conquer.hall-of-thanes",
-    "conquer.stranglethorn"
+    "conquer.stranglethorn",
+    "conquer.scarlet-monastery",
+    "conquer.tanaris",
+    "conquer.ungoro",
+    "conquer.burning-steppes",
+    "conquer.swamp-of-sorrows",
+    "conquer.zulfarrak",
+    "conquer.onyxia",
+    "conquer.molten-core"
    ]
   },
   {

@@ -1,0 +1,123 @@
+// ASR story arenas. Displays come from the local classic patch chain; no new armor is imported.
+&[
+    MapDef {
+        name: "Scarlet Monastery", zone: "Dungeon", map: 189,
+        center: [1100.0, 1395.0, 30.31], leash: 30.0,
+        victory: "The Scarlet Crusade's cathedral falls silent.",
+        foes: &[
+            foe("Scarlet Trainee", 1023, 30, 4.2, 1.0),
+            foe("Scarlet Monk", 1023, 32, 4.8, 1.0),
+            foe("Scarlet Soldier", 1025, 33, 4.2, 1.0),
+            foe("Scarlet Evoker", 1023, 34, 3.8, 1.0),
+            foe("Scarlet Protector", 1025, 36, 4.2, 1.1),
+            foe("Scarlet Champion", 1025, 38, 4.4, 1.2),
+        ],
+        bosses: &[
+            foe("Scarlet Commander Mograine", 2044, 42, 4.4, 1.6),
+            foe("High Inquisitor Whitemane", 2043, 42, 4.2, 1.6),
+        ],
+    },
+    MapDef {
+        name: "Tanaris", zone: "Kalimdor", map: 1,
+        center: [-7300.0, -3700.0, 9.3], leash: 90.0,
+        victory: "The desert road is safe again.",
+        foes: &[
+            foe("Sand Scorpid", 15336, 40, 4.6, 1.0),
+            foe("Dune Basilisk", 7345, 41, 4.4, 1.0),
+            foe("Wastewander Bandit", 2145, 42, 4.2, 1.0),
+            foe("Wastewander Rogue", 2332, 43, 4.8, 1.0),
+            foe("Wastewander Shadow Mage", 2314, 44, 3.8, 1.0),
+            giant("Desert Stone Guardian", 2234, 46, 3.6, 1.0),
+        ],
+        bosses: &[
+            foe("Dune Stalker", 7345, 45, 4.6, 1.8),
+            foe("Wastewander Captain", 2347, 46, 4.4, 1.6),
+            giant("Desert Colossus", 2234, 48, 3.8, 1.5),
+        ],
+    },
+    MapDef {
+        name: "Burning Steppes", zone: "Eastern Kingdoms", map: 0,
+        center: [-8100.0, -2000.0, 134.5], leash: 80.0,
+        victory: "The road into Blackrock Mountain stands open.",
+        foes: &[
+            foe("Blackrock Grunt", 825, 50, 4.2, 1.0),
+            foe("Blackrock Warlock", 2871, 51, 3.8, 1.0),
+            foe("Black Dragon Whelp", 6288, 52, 5.2, 0.8),
+            foe("Fire Elemental", 1070, 53, 4.2, 1.0),
+            giant("Obsidian Golem", 5285, 54, 3.6, 1.0),
+            giant("Molten Giant", 11986, 56, 3.6, 0.7),
+        ],
+        bosses: &[
+            foe("Blackrock Warleader", 8807, 56, 4.4, 1.8),
+            giant("Obsidian Sentinel", 5285, 57, 3.8, 1.5),
+            giant("Blackrock Firelord", 1204, 58, 4.2, 1.8),
+        ],
+    },
+    MapDef {
+        name: "Swamp of Sorrows", zone: "Eastern Kingdoms", map: 0,
+        center: [-10450.0, -3250.0, 20.2], leash: 65.0,
+        victory: "The brood mother's trail leads out of the swamp.",
+        foes: &[
+            foe("Swamp Crocolisk", 15145, 40, 4.6, 1.0),
+            foe("Marsh Ooze", 11140, 41, 3.4, 1.2),
+            foe("Swamp Spider", 963, 42, 4.6, 0.8),
+            foe("Sorrow Whelp", 621, 43, 5.2, 0.8),
+            foe("Lost One Raider", 1098, 44, 4.4, 1.0),
+            foe("Lost One Shadow Weaver", 203, 45, 3.8, 1.0),
+        ],
+        bosses: &[
+            foe("Marshfang", 15145, 46, 4.6, 1.8),
+            foe("Sorrowfang", 621, 47, 5.0, 1.5),
+            giant("Brood Trail Guardian", 8395, 48, 3.8, 1.5),
+        ],
+    },
+    MapDef {
+        name: "Zul'Farrak", zone: "Dungeon", map: 209,
+        center: [1810.0, 1150.0, 10.5], leash: 45.0,
+        victory: "The Sandfury stronghold has fallen.",
+        foes: &[
+            foe("Sandfury Drudge", 6670, 43, 4.2, 1.0),
+            foe("Sandfury Hideskinner", 6670, 44, 4.6, 1.0),
+            foe("Sandfury Shadowcaster", 6670, 45, 3.8, 1.0),
+            foe("Sandfury Headhunter", 6670, 46, 4.8, 1.0),
+            foe("Sandfury Blood Drinker", 6670, 47, 4.4, 1.1),
+            foe("Sandfury Guardian", 6670, 48, 4.4, 1.2),
+        ],
+        bosses: &[
+            foe("Theka the Martyr", 6670, 48, 4.2, 1.6),
+            foe("Witch Doctor Zum'rah", 6670, 48, 3.8, 1.6),
+            foe("Chief Ukorz Sandscalp", 6670, 48, 4.6, 1.8),
+        ],
+    },
+    MapDef {
+        name: "Onyxia's Lair", zone: "Raid", map: 249,
+        center: [-20.0, -215.0, -88.93], leash: 38.0,
+        victory: "Onyxia's reign of deception is over.",
+        foes: &[
+            foe("Onyxian Whelp", 6288, 56, 5.2, 0.8),
+            foe("Onyxian Hatchling", 387, 57, 5.4, 0.9),
+            foe("Onyxian Guardian", 6288, 60, 4.6, 1.3),
+            foe("Onyxian Broodguard", 387, 61, 4.6, 1.5),
+        ],
+        bosses: &[giant("Onyxia", 8570, 63, 4.4, 0.55)],
+    },
+    MapDef {
+        name: "Molten Core", zone: "Raid", map: 409,
+        center: [1200.0, -430.0, -111.54], leash: 38.0,
+        victory: "Ragnaros is banished to the Firelands.",
+        foes: &[
+            foe("Flame Imp", 12190, 60, 4.8, 1.0),
+            foe("Firelord", 1070, 61, 4.2, 1.0),
+            foe("Flamewaker", 13031, 61, 4.4, 1.0),
+            giant("Molten Giant", 11986, 62, 3.6, 0.65),
+            foe("Flamewaker Elite", 13032, 62, 4.4, 1.2),
+            giant("Molten Destroyer", 11986, 63, 3.8, 0.8),
+        ],
+        bosses: &[
+            foe("Lucifron", 13031, 63, 4.2, 1.5),
+            giant("Golemagg the Incinerator", 11986, 63, 3.6, 1.0),
+            foe("Majordomo Executus", 13032, 63, 4.4, 1.7),
+            giant("Ragnaros", 11121, 63, 3.6, 0.65),
+        ],
+    },
+]

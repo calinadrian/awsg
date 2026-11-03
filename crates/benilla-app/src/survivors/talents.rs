@@ -559,7 +559,7 @@ pub(super) fn pay_run(
 
 /// Shared by defeat/victory and returning to the menu; each run pays only once.
 pub(super) fn settle_run(run: &mut Run, book: &mut TalentBook, guardians: u32, map: usize) {
-    if run.talent_paid {
+    if run.talent_paid || run.test {
         return;
     }
     let pay = run_pay(run, guardians, map);

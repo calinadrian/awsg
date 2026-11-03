@@ -235,14 +235,6 @@ fn roll(rng: &mut Rng, stats: &super::Stats, dmg: f32) -> (f32, bool) {
     }
 }
 
-fn nearest(foes: &[Foe], range: f32, n: usize) -> Vec<Foe> {
-    foes.iter()
-        .filter(|f| f.dist <= range + f.radius)
-        .take(n)
-        .copied()
-        .collect()
-}
-
 /// Range is enforced before priority: an unreachable boss cannot suppress a nearby target.
 fn focused(foes: &[Foe], range: f32, n: usize, finisher: bool) -> Vec<Foe> {
     let mut v: Vec<Foe> = foes
@@ -975,6 +967,7 @@ pub(super) fn apply_hits(
                 },
                 roaming_elite: en.home.is_none() && en.def.roaming_elite,
                 elite: en.home.is_some() || en.def.roaming_elite,
+                silver: en.silver,
             });
             run.kills += 1;
             let healing = run.talents.stat(15)
@@ -1114,6 +1107,9 @@ pub(super) fn apply_hits(
             }
             en.hp = en.hp.max(0.001);
         }
+        if run.test_immortal {
+            en.hp = en.hp.max(1.0);
+        }
         if en.hp <= 0.0 {
             super::spell_passives::on_death(
                 &mut run,
@@ -1160,6 +1156,9 @@ pub(super) fn apply_hits(
                     coop.submit(id.0, dealt, Effect::None);
                 }
                 en.hp = en.hp.max(0.001);
+            }
+            if run.test_immortal {
+                en.hp = en.hp.max(1.0);
             }
             if en.hp <= 0.0 {
                 super::spell_passives::on_death(&mut run, &mut rng, e, tf.translation, 0, 0);

@@ -38,6 +38,7 @@ cp web/index.html web/favicon.svg web/wasi_stubs.js web/boot.js web/platform.js 
 # The standalone class balance simulator is a page in the same local build.
 cp web/balance.html web/balance.js web/balance-data.js "${DIST}/"
 cp web/zones.html web/zones.js web/zones-data.js "${DIST}/"
+cp web/storyboard.html web/storyboard.css web/storyboard.js "${DIST}/"
 # The bridge examples (web/README.md § "JavaScript bridge"): a HUD, an idle loop.
 mkdir -p "${DIST}/examples" && cp web/examples/*.js "${DIST}/examples/"
 # The boot prefetch manifest (see web/boot.js) — optional so a tree that hasn't captured one

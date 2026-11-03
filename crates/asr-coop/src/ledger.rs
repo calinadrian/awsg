@@ -515,7 +515,7 @@ impl Ledger {
                     let zone_id = zone.clone();
                     let table = self.catalog.zones.get(&zone_id).ok_or("Unknown zone")?;
                     if boss_names.iter().any(|name| {
-                        !table.boss_drops.iter().any(|entry| entry.boss == *name)
+                        !table.boss_names().any(|entry| entry == name)
                     }) {
                         return Err("Unknown boss loot entry".into());
                     }
@@ -592,7 +592,7 @@ impl Ledger {
                             }
                         }
                     }
-                    let final_slain = table.boss_drops.last().is_some_and(|boss| account.session_bosses.contains(&boss.boss));
+                    let final_slain = table.boss_names().next_back().is_some_and(|boss| account.session_bosses.iter().any(|name| name == boss));
                     let won_now = final_slain && !account.session_won;
                     account.session_won |= final_slain;
                     if final_slain && !account.inventory.cleared_zones.contains(&zone_id) {

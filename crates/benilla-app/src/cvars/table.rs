@@ -302,6 +302,24 @@ pub(crate) const REGISTERED: &[Registered] = &[
         "1",
         "Survivors mode's V-key toggle for co-op ally plates; defaults on to retain the existing party display",
     ),
+    // The Survivors settings page's other rows: an unregistered name refuses every write.
+    ours("SurvivorNameplateCompact", "1", "Survivors mode's flat nameplate style"),
+    ours("SurvivorHeroPlate", "1", "Survivors mode's health plate under the hero"),
+    ours("SurvivorHudMap", "1", "Survivors mode's minimap size"),
+    ours("SurvivorHudTracker", "1", "Survivors mode's run tracker size"),
+    ours("SurvivorHudMeter", "1", "Survivors mode's damage meter size"),
+    ours("SurvivorHudBar", "1", "Survivors mode's action bar size"),
+    ours("SurvivorHudHealthText", "0", "Survivors mode's unit frame health text format"),
+    ours("SurvivorHudHealthHeight", "13", "Survivors mode's unit frame health bar height"),
+    ours("SurvivorHudPlateHealth", "2", "Survivors mode's nameplate health text format"),
+    ours("SurvivorHudFrameBuffs", "0", "Survivors mode's unit frame buff edge: above, below, hidden"),
+    ours("SurvivorHudFrameDebuffs", "1", "Survivors mode's unit frame debuff edge: above, below, hidden"),
+    ours("SurvivorHudFrameBuffSize", "14", "Survivors mode's unit frame buff icon size"),
+    ours("SurvivorHudFrameDebuffSize", "14", "Survivors mode's unit frame debuff icon size"),
+    ours("SurvivorHudPlateBuffs", "0", "Survivors mode's nameplate buff edge: above, below, hidden"),
+    ours("SurvivorHudPlateDebuffs", "0", "Survivors mode's nameplate debuff edge: above, below, hidden"),
+    ours("SurvivorHudPlateBuffSize", "9", "Survivors mode's nameplate buff icon size"),
+    ours("SurvivorHudPlateDebuffSize", "9", "Survivors mode's nameplate debuff icon size"),
     // `UnitNamePlayerGuild` (`0x86c680`, "1", mask bit `0x10`) is not a show gate: `ShouldShowName`
     // (`0x6070a0`) reads bits `0x1/0x2/0x4`, and this gates the `"\n<%s>"` guild line at
     // `0x609085`. `UnitNamePlayerPVPTitle` (bit `0x20`, "1") has no row: nothing here draws the

@@ -82,10 +82,20 @@ pub struct Zone {
     pub equipment: Vec<Drop>,
     #[serde(default)]
     pub boss_drops: Vec<BossDrop>,
+    /// Encounter order, independent of gear assignments. Older tables use `boss_drops` order.
+    #[serde(default)]
+    pub bosses: Vec<String>,
     pub equipment_chance_bp: Amounts,
     pub material_chance_bp: Amounts,
     pub materials: Amounts,
     pub material_pool: Vec<String>,
+}
+impl Zone {
+    pub fn boss_names(&self) -> impl DoubleEndedIterator<Item = &str> {
+        self.bosses.iter().map(String::as_str).chain(
+            self.boss_drops.iter().filter(|_| self.bosses.is_empty()).map(|entry| entry.boss.as_str())
+        )
+    }
 }
 #[derive(Clone, Deserialize)]
 pub struct BossDrop {

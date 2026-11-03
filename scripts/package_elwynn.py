@@ -397,6 +397,7 @@ def build():
 
         gameplay = ROOT / 'crates/benilla-app/src/survivors'
         definitions = (gameplay / 'data.rs').read_text()
+        definitions += '\n' + (gameplay / 'story_maps.rs').read_text()
         ids = {1825, 16587}  # XP pickup units.
         ids.update(int(n) for n in re.findall(r'\(\s*"[^"\n]+",\s*(\d+)', (gameplay / 'elwynn.rs').read_text()))
         for looks in re.findall(r'looks:\s*&\[([^]]*)\]', definitions):
@@ -411,6 +412,9 @@ def build():
         # Every arena's foes and bosses: `foe(..)`/`giant(..)` rows and The Barrens' `en(..)`.
         ids.update(int(n) for n in re.findall(r'\b(?:foe|giant|en)\(\s*"[^"\n]+",\s*(\d+)', definitions))
         equipment = package.creatures(ids)
+        # Owned drops can replace every starter slot, including converted retail gear.
+        catalog = json.loads((ROOT / 'crates/asr-coop/assets/economy_catalog.json').read_text())
+        equipment.update(item['display_id'] for item in catalog['items'] if item['display_id'])
         for weapons in re.findall(r'weapons:\s*&\[(.*?)\]', definitions, re.S):
             equipment.update(int(n) for n in re.findall(r'\(\s*\d+,\s*(\d+)', weapons))
         package.equipment(equipment, listed)

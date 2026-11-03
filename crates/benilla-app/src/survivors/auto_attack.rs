@@ -99,6 +99,47 @@ pub(super) fn swing(
     hits.write(hit);
 }
 
+/// How far the target frame looks for the enemy the hero's spells are focusing.
+const FOCUS_RANGE: f32 = 30.0;
+
+/// The target frame shows what the hero is attacking: the auto-attack target, else the enemy the
+/// auto-cast spells pick first ([`super::abilities`]' `focused` order: hunter's mark, then a
+/// priority enemy, then the nearest). It re-picks every frame, so a nearer enemy takes over the
+/// moment it comes closer.
+pub(super) fn follow_focus(
+    run: Res<Run>,
+    auto: Res<AutoAttack>,
+    mut selection: ResMut<crate::target::Selection>,
+    hero: Query<&Transform, With<Hero>>,
+    enemies: Query<(Entity, &Transform, &Enemy, &crate::net::Guid)>,
+) {
+    let Ok(htf) = hero.single() else { return };
+    let living = |en: &Enemy| !en.dead && en.hp > 0.0;
+    let dist = |tf: &Transform| super::hero::reach(htf.translation, tf.translation);
+    let want = auto
+        .target
+        .filter(|&e| enemies.get(e).is_ok_and(|(_, _, en, _)| living(en)))
+        .or_else(|| {
+            enemies
+                .iter()
+                .filter(|(_, tf, en, _)| {
+                    living(en) && !en.untargetable() && dist(tf) <= FOCUS_RANGE + en.radius
+                })
+                .min_by(|a, b| {
+                    let marked = |e: Entity| run.passives.marks.get(&e).is_some_and(|m| m.hunter);
+                    marked(b.0)
+                        .cmp(&marked(a.0))
+                        .then_with(|| b.2.priority().cmp(&a.2.priority()))
+                        .then_with(|| dist(a.1).total_cmp(&dist(b.1)))
+                })
+                .map(|(e, ..)| e)
+        });
+    if selection.target != want {
+        selection.target = want;
+        selection.guid = want.and_then(|e| enemies.get(e).ok()).map(|(_, _, _, guid)| guid.0);
+    }
+}
+
 /// A new run starts with nothing targeted.
 pub(super) fn reset(mut auto: ResMut<AutoAttack>) {
     *auto = AutoAttack::default();

@@ -30,6 +30,8 @@ pub(super) enum MenuAction {
     Feature(usize, bool),
     /// Rolls every FEATURES dial.
     RandomFeatures,
+    /// Starts a Test Grounds run ([`super::test_grounds`]) on Elwynn's ground.
+    TestGrounds,
 }
 
 /// On [`MenuRoot`] once the glue art is in and the screen is built.
@@ -219,6 +221,16 @@ pub(super) fn menu_clicks(
                 next.set(Phase::Playing);
             }
         }
+        MenuAction::TestGrounds => {
+            if let Some(elwynn) = data::MAPS.iter().position(|m| m.name == "Elwynn Forest") {
+                selection.map = elwynn;
+            }
+            if start_run(&mut run, &mut selection) {
+                run.test = true;
+                run.test_god = true;
+                next.set(Phase::Playing);
+            }
+        }
         MenuAction::Randomize => {
             let picks: Vec<(usize, usize)> = all
                 .iter()
@@ -320,6 +332,7 @@ pub(super) fn refresh_menu_ui(
             | MenuAction::Feature(..)
             | MenuAction::RandomFeatures
             | MenuAction::Enter
+            | MenuAction::TestGrounds
             | MenuAction::Talents
             | MenuAction::Settings => false,
         };

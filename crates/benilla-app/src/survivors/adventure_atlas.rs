@@ -106,11 +106,8 @@ static PLACES: &[Place] = &[
         "Trolls, pirates and the hunters of Nesingwary contest every clearing of the jungle."),
     place("Warsong Gulch", Both, Photo("wsg"), "The battle for the forest",
         "Silverwing sentinels and Warsong outriders fight over every felled tree of Ashenvale."),
-    Place {
-        map: "Fire Plume Ridge",
-        ..place("Un'Goro Crater", Both, Photo("ungoro"), "Un'Goro's heart",
-            "Devilsaurs and fire elementals guard the smoking crater at the heart of Un'Goro.")
-    },
+    place("Un'Goro Crater", Both, Photo("ungoro"), "Un'Goro's heart",
+        "Devilsaurs and fire elementals guard Fire Plume Ridge at the heart of Un'Goro."),
     place("Arathi Basin", Both, Photo("ab"), "Resources of the highlands",
         "The League of Arathor and the Defilers race for the farms, mines and mills of the basin."),
     place("Feralas", Both, Photo("feralas"), "The ruins of Dire Maul",
@@ -163,6 +160,14 @@ static PLACES: &[Place] = &[
         "Forsaken and Scarlet patrols stalk the misted fields beyond Deathknell."),
     place("Dun Morogh", Alliance, Plain, "The snowy homeland",
         "Troggs, Frostmane trolls and wendigo haunt the frozen valleys below Ironforge."),
+    place("Tanaris", Both, Plain, "The desert road",
+        "Beyond the Scarlet cathedral, the desert road splits toward Un'Goro and the Sandfury dungeon of Zul'Farrak."),
+    place("Burning Steppes", Both, Plain, "The road to the Core",
+        "Blackrock's armies guard the volcanic wastes. Complete Attunement to the Core here to open the raid at class level 50."),
+    place("Swamp of Sorrows", Both, Plain, "The brood mother's trail",
+        "Follow the trail through the swamp. Complete The Brood Mother's Trail here to open Onyxia's Lair at class level 50."),
+    place("Zul'Farrak", Both, Screen(209), "The Sandfury stronghold",
+        "A dungeon branch from Tanaris: break the Sandfury's hold on their desert city."),
 ];
 
 /// A map of cards on a seven-column grid, and the path drawn between them.
@@ -174,49 +179,55 @@ struct Road {
     path: &'static [(usize, usize)],
 }
 
-/// The original story map: the two faction roads meet in Stranglethorn, climb to Un'Goro and
-/// Arathi, and run back west along the bottom to Naxxramas.
+/// The user's A Classic Story graph: two starts, a shared road, and three branches.
 const STORY: Road = Road {
-    rows: 5,
+    rows: 4,
     cards: &[
-        (4, 0, 0), (5, 1, 0), (6, 2, 0), (7, 3, 0),
-        (8, 4, 1), (9, 5, 1), (10, 6, 1),
-        (0, 0, 2), (1, 1, 2), (2, 2, 2), (3, 3, 2), (11, 6, 2),
-        (18, 0, 3), (17, 1, 3), (16, 2, 3), (15, 3, 3), (14, 4, 3), (13, 5, 3), (12, 6, 3),
-        (25, 0, 4), (26, 1, 4), (27, 2, 4),
-        (28, 3, 4),
+        (4, 0, 1), (5, 1, 1), (6, 2, 1),
+        (0, 0, 3), (1, 1, 3), (2, 2, 3),
+        (8, 3, 2), (14, 4, 2), (29, 5, 2), (10, 6, 2), (30, 7, 2),
+        (31, 4, 0), (21, 5, 0), (32, 5, 3), (22, 7, 3),
     ],
     path: &[
-        (0, 1), (1, 2), (2, 3), (3, 4),
-        (7, 8), (8, 9), (9, 10), (10, 4),
-        (4, 5), (5, 6), (6, 11), (11, 18),
-        (18, 17), (17, 16), (16, 15), (15, 14), (14, 13), (13, 12),
-        (19, 7), (20, 0), (21, 0),
-        (22, 7),
+        (0, 1), (1, 2), (2, 6),
+        (3, 4), (4, 5), (5, 6),
+        (6, 7), (7, 8), (8, 9), (9, 10),
+        (7, 11), (11, 12), (8, 13), (10, 14),
     ],
 };
 
 const DUNGEONS: Road = Road {
     rows: 1,
-    cards: &[(2, 0, 0), (6, 1, 0), (19, 2, 0), (14, 3, 0), (13, 4, 0), (16, 5, 0)],
-    path: &[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)],
+    cards: &[(2, 0, 0), (6, 1, 0), (14, 2, 0), (32, 3, 0), (19, 4, 0)],
+    path: &[],
 };
 
 const RAIDS: Road = Road {
     rows: 1,
     cards: &[(20, 0, 0), (21, 1, 0), (22, 2, 0), (23, 3, 0), (24, 4, 0), (17, 5, 0), (18, 6, 0)],
-    path: &[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)],
+    path: &[],
 };
 
-const TABS: [(&str, &str, Road); 3] = [
-    ("Story", "The road so far", STORY),
+const EXTRAS: Road = Road {
+    rows: 2,
+    cards: &[
+        (25, 0, 0), (26, 1, 0), (27, 2, 0), (28, 3, 0),
+        (3, 4, 0), (7, 5, 0), (19, 6, 0),
+        (9, 0, 1), (11, 1, 1), (12, 2, 1), (13, 3, 1), (15, 4, 1), (16, 5, 1),
+    ],
+    path: &[],
+};
+
+const TABS: [(&str, &str, Road); 4] = [
+    ("Story", "A Classic Story", STORY),
     ("Dungeons", "Five-player instances", DUNGEONS),
     ("Raids", "Raid instances", RAIDS),
+    ("Other zones", "Side adventures and race unlocks", EXTRAS),
 ];
 
 /// Grid geometry, in percent of the map: a card fills 90% of its column, at the photos' 2:1
 /// widened slightly, and a row is a card's height plus a fifth for the path between rows.
-const COLUMNS: f32 = 7.;
+const COLUMNS: f32 = 8.;
 const CARD_W: f32 = 90. / COLUMNS;
 const CARD_ASPECT: f32 = 1.75;
 const ROW_GAP: f32 = 1.25;
@@ -373,10 +384,10 @@ fn badge(p: &mut ChildSpawnerCommands, f: &Handle<Font>, text: &str, color: Colo
     });
 }
 
-/// Five pips, `tier` of them lit.
+/// Ten compact pips, `tier` of them lit.
 fn pips(p: &mut ChildSpawnerCommands, tier: u8) {
     p.spawn(Node {
-        column_gap: Val::Px(3.),
+        column_gap: Val::Px(2.),
         padding: UiRect::all(Val::Px(3.)),
         border_radius: BorderRadius::all(Val::Px(4.)),
         align_items: AlignItems::Center,
@@ -384,11 +395,11 @@ fn pips(p: &mut ChildSpawnerCommands, tier: u8) {
     })
     .insert(BackgroundColor(Color::srgba(0., 0., 0., 0.55)))
     .with_children(|p| {
-        for i in 0..5 {
+        for i in 0..10 {
             p.spawn((
                 Node {
-                    width: Val::Px(6.),
-                    height: Val::Px(6.),
+                    width: Val::Px(4.),
+                    height: Val::Px(4.),
                     border: UiRect::all(Val::Px(1.)),
                     border_radius: BorderRadius::all(Val::Px(3.)),
                     ..default()
@@ -624,7 +635,7 @@ fn details(p: &mut ChildSpawnerCommands, f: &Handle<Font>, place: &Place, select
             }
             skin::chip(p, f, state, color);
             if playable(place).is_some_and(|map| !selection.unlocked(map)) {
-                skin::chip(p, f, difficulty::unlock_hint(place.map), skin::MUTED);
+                skin::chip(p, f, selection.unlock_hint(place.map), skin::MUTED);
             }
         });
         skin::label(p, f, place.blurb, size::BODY, skin::TEXT);

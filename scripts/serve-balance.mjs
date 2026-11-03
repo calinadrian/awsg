@@ -5,6 +5,10 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
 const files = new Map([
+  ['/storyboard.html', ['storyboard.html', 'text/html; charset=utf-8']],
+  ['/storyboard.js', ['storyboard.js', 'text/javascript; charset=utf-8']],
+  ['/storyboard.css', ['storyboard.css', 'text/css; charset=utf-8']],
+  ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
   ['/balance.html', ['balance.html', 'text/html; charset=utf-8']],
   ['/balance.js', ['balance.js', 'text/javascript; charset=utf-8']],
   ['/balance-data.js', ['balance-data.js', 'text/javascript; charset=utf-8']],
@@ -38,5 +42,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(8091, '127.0.0.1', () => {
-  process.stdout.write('Azeroth Survivors tools: http://127.0.0.1:8091/balance.html and http://127.0.0.1:8091/zones.html\nPress Ctrl+C to stop.\n');
+  process.stdout.write('Azeroth Survivors tools:\nhttp://127.0.0.1:8091/balance.html\nhttp://127.0.0.1:8091/zones.html\nhttp://127.0.0.1:8091/storyboard.html\nPress Ctrl+C to stop.\n');
 });

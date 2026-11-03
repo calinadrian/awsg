@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test Grounds Panel</title>
+<style>
+  :root {
+    --ink: rgba(13,21,23,.94); --surface: #141a22; --edge: #5d6679; --steel: #9aa3b8; --steel-hi: #d4d9e4;
+    --text: #e8eaf0; --muted: #8b93a6; --wine-hi: #b83a50; --wine-lo: #2a0d16;
+    --green: #75c794; --silver: #c7cede; --elite: #e0b33a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0c0b08; color: var(--text); font: 13px Georgia, "Times New Roman", serif; }
+  .page { max-width: 760px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { font-weight: normal; font-size: 18px; margin: 0 0 4px; }
+  .lead { margin: 0 0 14px; font: 12px Arial, sans-serif; color: #8a8572; }
+  .scene { position: relative; height: 420px; border-radius: 4px; box-shadow: inset 0 0 0 1px #2a281c;
+           background: radial-gradient(ellipse at 50% 70%, #4b5a2a, #2a3518 50%, #121a0c); }
+  .plate { background: var(--ink); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000, 0 3px 10px rgba(0,0,0,.55); }
+  .cap { font: 10px Arial, sans-serif; letter-spacing: 1.2px; text-transform: uppercase; color: var(--steel); }
+  .hint { font: 9px Arial, sans-serif; color: var(--muted); }
+  .btn { display: flex; align-items: center; justify-content: center; height: 24px; padding: 0 6px; border-radius: 1px; cursor: pointer;
+         font: 11px Georgia, serif; color: var(--text); background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000; white-space: nowrap; }
+  .btn:hover { background: #1d2530; box-shadow: inset 0 0 0 1px var(--steel-hi), 0 0 0 1px #000; }
+  .btn.on { background: var(--wine-lo); box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .btn.silver { box-shadow: inset 0 0 0 1px var(--silver), 0 0 0 1px #000; }
+  .btn.elite { box-shadow: inset 0 0 0 1px var(--elite), 0 0 0 1px #000; }
+  .btn.boss, .btn.bad { box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .btn.good { box-shadow: inset 0 0 0 1px var(--green), 0 0 0 1px #000; }
+  .tg { position: absolute; left: 12px; top: 14px; width: 292px; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+  .tg .head { display: flex; justify-content: space-between; align-items: center; }
+  .tg .title { font-size: 15px; }
+  .tg .fold { width: 22px; height: 22px; padding: 0; }
+  .tg .tabs { display: flex; border-bottom: 1px solid var(--edge); }
+  .tg .tab { flex: 1; text-align: center; padding: 4px 0 5px; font: 11px Georgia, serif; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tg .tab.on { color: var(--text); border-bottom-color: var(--wine-hi); }
+  .tg .sec { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(93,102,121,.5); }
+  .tg .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px; }
+  .tg .btn b { font: normal 10px Arial, sans-serif; margin-left: 5px; color: var(--muted); }
+  .tg .btn.on b { color: var(--wine-hi); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Test Grounds in the HUD's style</h1>
+  <p class="lead">Actual size, same content and layout. The panel gets the HUD frame, the tabs become underlined, and a toggle that's on turns crimson. Each button's edge still says what it spawns: silver, gold for elites, crimson for bosses. Click the tabs and the toggles.</p>
+  <div class="scene">
+    <div class="tg plate">
+      <div class="head"><div><div class="title">Test Grounds</div><div class="hint">Nothing is saved · F8 hides</div></div><div class="btn fold">–</div></div>
+      <div class="tabs"><div class="tab on" data-p="0">Spawn</div><div class="tab" data-p="1">Hero</div></div>
+      <div class="pg" data-p="0">
+        <div class="sec"><span class="cap">Mobs</span><span class="hint">Shift-click: ×5</span></div>
+        <div class="grid"><div class="btn">Young Wolf</div><div class="btn">Kobold Vermin</div><div class="btn">Defias Thug</div><div class="btn">Kobold Laborer</div><div class="btn silver">Silver (random)</div></div>
+        <div class="sec"><span class="cap">Elites</span><span class="hint">sleep until pulled</span></div>
+        <div class="grid"><div class="btn elite">Mother Fang</div><div class="btn elite">Narg the Taskmaster</div></div>
+        <div class="sec"><span class="cap">Bosses</span><span class="hint"></span></div>
+        <div class="grid"><div class="btn boss">Hogger</div><div class="btn boss">Thuros Lightfingers</div></div>
+      </div>
+      <div class="pg" data-p="1" style="display:none">
+        <div class="sec"><span class="cap">Toggles</span><span class="hint"></span></div>
+        <div class="grid"><div class="btn on tog">God mode<b>On</b></div><div class="btn tog">Immortal enemies<b>Off</b></div></div>
+        <div class="sec"><span class="cap">Hero</span><span class="hint"></span></div>
+        <div class="grid"><div class="btn">+1 level</div><div class="btn">+5 levels</div><div class="btn">Upgrade (chest)</div><div class="btn">+1000 gold</div><div class="btn good">Full heal</div></div>
+        <div class="sec"><span class="cap">Enemies</span><span class="hint"></span></div>
+        <div class="grid"><div class="btn bad">Kill all</div><div class="btn">Clear all</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  document.querySelectorAll('.tg .tab').forEach(t => t.onclick = () => {
+    document.querySelectorAll('.tg .tab').forEach(x => x.classList.toggle('on', x === t));
+    document.querySelectorAll('.tg .pg').forEach(p => p.style.display = p.dataset.p === t.dataset.p ? '' : 'none');
+  });
+  document.querySelectorAll('.tg .tog').forEach(b => b.onclick = () => {
+    const on = b.classList.toggle('on'); b.querySelector('b').textContent = on ? 'On' : 'Off';
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUD Move Mock</title>
+<style>
+  :root {
+    --ink: rgba(13,21,23,.94); --well: #07090c; --edge: #5d6679; --edge-dim: #2c323d;
+    --steel: #9aa3b8; --steel-hi: #d4d9e4; --text: #e8eaf0; --muted: #8b93a6;
+    --wine: #8a1f33; --wine-hi: #b83a50; --wine-lo: #2a0d16;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0c0b08; color: var(--text); font: 13px Georgia, "Times New Roman", serif; }
+  .page { max-width: 1400px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { font-weight: normal; font-size: 18px; margin: 0 0 4px; }
+  .lead { margin: 0 0 10px; font: 12px Arial, sans-serif; color: #8a8572; max-width: 900px; }
+  .bar { display: flex; gap: 6px; margin: 0 0 10px; font: 12px Arial, sans-serif; flex-wrap: wrap; }
+  .bar button { background: #141a22; color: var(--muted); border: 0; padding: 6px 12px; cursor: pointer; font: inherit;
+                box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; }
+  .bar button.on { color: var(--text); background: var(--wine-lo); box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .scroll { overflow: auto; }
+
+  /* The game's canvas at the reference size. */
+  #stage { position: relative; width: 1365px; height: 768px; overflow: hidden; user-select: none;
+           background: radial-gradient(ellipse at 50% 60%, #5a6a26, #3a4818 50%, #1c240d); box-shadow: 0 0 0 1px #000; }
+  /* The grid: 8px snap, a line every 32px, and the centre lines brighter. */
+  #stage .grid { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .12s; z-index: 900;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(90deg, transparent calc(50% - 1px), rgba(184,58,80,.55) calc(50% - 1px) calc(50% + 1px), transparent 0),
+      linear-gradient(transparent calc(50% - 1px), rgba(184,58,80,.55) calc(50% - 1px) calc(50% + 1px), transparent 0); }
+  #stage.showgrid .grid { opacity: 1; }
+
+  .ui { position: absolute; }
+  .plate { background: var(--ink); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.5); }
+  .ui .tag { display: none; position: absolute; left: -1px; bottom: calc(100% + 4px); white-space: nowrap; font: 10px Arial, sans-serif;
+             color: var(--steel-hi); background: var(--well); padding: 1px 6px; box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; }
+  /* Unlocked: a dashed steel edge and its name; it can be dragged. */
+  .ui.unlocked { cursor: grab; }
+  .ui.unlocked::after { content: ""; position: absolute; inset: -4px; border: 1px dashed var(--steel); pointer-events: none; }
+  .ui.unlocked .tag { display: block; }
+  .ui.dragging { cursor: grabbing; }
+  .ui.dragging::after { border-style: solid; border-color: var(--wine-hi); }
+  .ui.dragging .tag { color: #fff; background: var(--wine-lo); box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+
+  /* Stand-ins for the HUD's pieces. */
+  .mm { width: 168px; height: 168px; }
+  .mm::before { content: ""; position: absolute; inset: 6px; border-radius: 2px; background: radial-gradient(circle at 45% 55%, #6c7b3a, #33401a 70%); }
+  .trk { width: 168px; height: 112px; padding: 8px 10px; font-size: 12px; }
+  .trk b { font-weight: normal; font-size: 20px; display: block; margin-bottom: 6px; }
+  .trk div { color: var(--muted); font-size: 11px; line-height: 1.6; }
+  .dm { width: 184px; height: 128px; padding: 6px; }
+  .dm i { display: block; height: 14px; margin-bottom: 3px; background: linear-gradient(90deg, #8a1f33 var(--w), #10161c 0); box-shadow: 0 0 0 1px #000; }
+  .ab { width: 380px; height: 56px; padding: 4px; display: flex; flex-direction: column; gap: 4px; }
+  .ab .xp { height: 10px; background: linear-gradient(90deg, #5a2a8a 62%, #07090c 0); box-shadow: 0 0 0 1px #000; }
+  .ab .btns { display: flex; gap: 4px; }
+  .ab .btns i { width: 32px; height: 32px; background: #1c2430; box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; }
+  .uf { width: 170px; padding: 2px; display: flex; flex-direction: column; gap: 2px; }
+  .uf .hp { height: 13px; position: relative; background: #07120a; box-shadow: 0 0 0 1px #000; font: 10px Georgia, serif; }
+  .uf .hp::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w); background: var(--c); }
+  .uf .hp span { position: absolute; inset: 0; padding: 0 5px; display: flex; align-items: center; justify-content: space-between; text-shadow: 0 1px 0 #000; }
+  .uf .pw { height: 4px; background: #05060b; box-shadow: 0 0 0 1px #000; }
+  .boss { width: 320px; height: 22px; display: flex; align-items: center; padding: 0 8px; font-size: 12px;
+          background: linear-gradient(90deg, #6a1828 70%, #10161c 0); }
+  .clock { padding: 4px 14px; font-size: 26px; }
+
+  /* The right-click menu: a steel plate, crimson on hover. */
+  .menu { position: absolute; z-index: 1000; width: 190px; padding: 4px; display: none; font: 12px Georgia, serif;
+          background: rgba(13,21,23,.98); box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000, 0 6px 18px rgba(0,0,0,.6); }
+  .menu.open { display: block; }
+  .menu h4 { margin: 0; padding: 4px 8px 6px; font-weight: normal; font-size: 12px; color: var(--steel-hi); box-shadow: inset 0 -1px 0 var(--edge-dim); margin-bottom: 4px; }
+  .menu div { padding: 5px 8px; cursor: pointer; color: var(--text); display: flex; justify-content: space-between; }
+  .menu div small { color: var(--muted); font: 10px Arial, sans-serif; }
+  .menu div:hover { background: var(--wine-lo); box-shadow: inset 2px 0 0 var(--wine-hi); }
+  .menu hr { border: 0; height: 1px; background: var(--edge-dim); margin: 4px 2px; }
+  .hint { position: absolute; left: 50%; top: 120px; transform: translateX(-50%); z-index: 950; padding: 4px 12px; font: 11px Arial, sans-serif;
+          color: var(--steel-hi); background: rgba(7,9,12,.9); box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; display: none; }
+  #stage.anyopen .hint { display: block; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Moving the HUD</h1>
+  <p class="lead">Right-click any panel for its menu: unlock it, then drag it; it snaps to an 8px grid and the centre lines. Whatever you click comes to the front and stays there. Lock it again from the same menu. "Unlock all" frees every panel at once, and "Lock all" locks them again. Positions are remembered.</p>
+  <div class="bar" id="variants">
+    <button data-g="drag" class="on">Grid while dragging</button>
+    <button data-g="unlocked">Grid while anything is unlocked</button>
+  </div>
+  <div class="scroll">
+    <div id="stage">
+      <div class="grid"></div>
+      <div class="hint">Drag to move · right-click to lock</div>
+      <div class="ui plate clock" data-name="Run clock" style="left:618px;top:8px">12:40</div>
+      <div class="ui plate boss" data-name="Boss bars" style="left:522px;top:64px">Hogger</div>
+      <div class="ui plate uf" data-name="Player frame" style="left:16px;top:16px"><div class="hp" style="--w:89%;--c:#2e8c33"><span><span>Warrior</span><span>230 / 257</span></span></div><div class="pw"></div></div>
+      <div class="ui plate uf" data-name="Target frame" style="left:264px;top:16px"><div class="hp" style="--w:75%;--c:#8a1f33"><span><span>Kobold Vermin</span><span>132 / 176</span></span></div><div class="pw"></div></div>
+      <div class="ui plate mm" data-name="Minimap" style="left:1181px;top:16px"></div>
+      <div class="ui plate trk" data-name="Run tracker" style="left:1181px;top:192px"><b>12:40</b><div>Hogger · 3:00<br>Mother Fang · 6:00<br>Kills 412</div></div>
+      <div class="ui plate dm" data-name="Damage meter" style="left:1165px;top:312px"><i style="--w:92%"></i><i style="--w:64%"></i><i style="--w:40%"></i><i style="--w:22%"></i></div>
+      <div class="ui plate ab" data-name="Action bar" style="left:492px;top:696px"><div class="xp"></div><div class="btns"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+      <div class="menu" id="menu"></div>
+    </div>
+  </div>
+</div>
+<script>
+  const stage = document.getElementById('stage'), menu = document.getElementById('menu');
+  const SNAP = 8;
+  const items = [...stage.querySelectorAll('.ui')];
+  let gridMode = 'drag', front = 10, dragging = null;
+  items.forEach((el, i) => {
+    el.style.zIndex = i + 1;
+    el.insertAdjacentHTML('afterbegin', `<span class="tag">${el.dataset.name}</span>`);
+    el.dataset.home = el.style.left + ',' + el.style.top;
+  });
+  const anyUnlocked = () => items.some(el => el.classList.contains('unlocked'));
+  const paint = () => {
+    stage.classList.toggle('anyopen', anyUnlocked());
+    stage.classList.toggle('showgrid', !!dragging || (gridMode === 'unlocked' && anyUnlocked()));
+  };
+  // A click brings a panel to the front, locked or not.
+  const raise = el => { el.style.zIndex = ++front; };
+  const snapTo = (v, size, span) => {
+    const s = Math.round(v / SNAP) * SNAP;
+    // The centre line pulls a panel's middle onto it from within a snap step.
+    const mid = span / 2 - size / 2;
+    return Math.abs(v - mid) < SNAP ? Math.round(mid) : Math.max(0, Math.min(span - size, s));
+  };
+  items.forEach(el => {
+    el.addEventListener('pointerdown', ev => {
+      if (ev.button !== 0) return;
+      closeMenu();
+      raise(el);
+      if (!el.classList.contains('unlocked')) return;
+      dragging = el; el.classList.add('dragging'); paint();
+      const r = stage.getBoundingClientRect();
+      const ox = ev.clientX - el.offsetLeft, oy = ev.clientY - el.offsetTop;
+      el.setPointerCapture(ev.pointerId);
+      const move = e => {
+        el.style.left = snapTo(e.clientX - ox, el.offsetWidth, stage.clientWidth) + 'px';
+        el.style.top = snapTo(e.clientY - oy, el.offsetHeight, stage.clientHeight) + 'px';
+      };
+      const up = () => { el.classList.remove('dragging'); dragging = null; paint(); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); };
+      el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
+    });
+    el.addEventListener('contextmenu', ev => {
+      ev.preventDefault(); raise(el);
+      const locked = !el.classList.contains('unlocked');
+      menu.innerHTML = `<h4>${el.dataset.name}</h4>
+        <div data-a="toggle">${locked ? 'Unlock' : 'Lock'}<small>${locked ? 'drag to move' : ''}</small></div>
+        <div data-a="reset">Reset position</div><hr>
+        <div data-a="all">${anyUnlocked() ? 'Lock all' : 'Unlock all'}</div>`;
+      const r = stage.getBoundingClientRect();
+      menu.style.left = Math.min(ev.clientX - r.left, stage.clientWidth - 194) + 'px';
+      menu.style.top = Math.min(ev.clientY - r.top, stage.clientHeight - 120) + 'px';
+      menu.classList.add('open');
+      menu.querySelectorAll('div').forEach(d => d.onclick = () => {
+        if (d.dataset.a === 'toggle') el.classList.toggle('unlocked');
+        if (d.dataset.a === 'reset') { const [l, t] = el.dataset.home.split(','); el.style.left = l; el.style.top = t; }
+        if (d.dataset.a === 'all') { const lock = anyUnlocked(); items.forEach(i => i.classList.toggle('unlocked', !lock)); }
+        closeMenu(); paint();
+      });
+    });
+  });
+  const closeMenu = () => menu.classList.remove('open');
+  stage.addEventListener('pointerdown', ev => { if (!ev.target.closest('.menu') && !ev.target.closest('.ui')) closeMenu(); });
+  stage.addEventListener('contextmenu', ev => { if (!ev.target.closest('.ui')) { ev.preventDefault(); closeMenu(); } });
+  document.querySelectorAll('#variants button').forEach(b => b.onclick = () => {
+    gridMode = b.dataset.g;
+    document.querySelectorAll('#variants button').forEach(x => x.classList.toggle('on', x === b));
+    paint();
+  });
+</script>
+</body>
+</html>

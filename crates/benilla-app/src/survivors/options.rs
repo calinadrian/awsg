@@ -1,22 +1,33 @@
-//! Escape-menu settings, backed by the same saved CVars as the engine controls.
-use super::{front_end as skin, hud::HudFont, Phase};
+//! Escape-menu settings, backed by the same saved CVars as the engine controls: a window in
+//! the HUD's frame with the topics down a sidebar under a search box, and the open topic's tabs
+//! and rows beside them.
+mod preview;
+
+use super::{hud::HudFont, right_column as col, Phase};
+use bevy::input::{keyboard::KeyboardInput, ButtonState};
 use bevy::prelude::*;
 
 #[derive(Resource, Default)]
 pub(super) struct Options {
     pub open: bool,
     pub settings: bool,
-    audio: bool,
-    names: bool,
+    /// The open topic and its tab, indices into [`TOPICS`].
+    topic: u8,
+    tab: u8,
+    /// The search box: its text, whether it takes keys, and its caret.
+    search: String,
+    search_active: bool,
+    cursor: super::text_edit::Cursor,
 }
 
 impl Options {
     pub fn escape(&mut self, phase: Phase, next: &mut NextState<Phase>) {
-        if self.settings {
-            self.settings = false;
-            if phase == Phase::Menu {
-                self.open = false;
-            }
+        // A search in progress clears first.
+        if self.settings && (self.search_active || !self.search.is_empty()) {
+            self.search.clear();
+            self.search_active = false;
+        } else if self.settings {
+            self.close_settings(phase);
         } else if self.open || phase == Phase::Paused {
             self.resume(phase, next);
         } else {
@@ -25,6 +36,16 @@ impl Options {
             if phase == Phase::Playing {
                 next.set(Phase::Paused);
             }
+        }
+    }
+
+    /// Back out of the settings: to the pause menu in a run, all the way out from the hero menu.
+    fn close_settings(&mut self, phase: Phase) {
+        self.settings = false;
+        self.search.clear();
+        self.search_active = false;
+        if phase == Phase::Menu {
+            self.open = false;
         }
     }
 
@@ -42,7 +63,6 @@ struct Setting {
     key: &'static str,
     values: &'static [&'static str],
     labels: &'static [&'static str],
-    audio: bool,
 }
 
 const SETTINGS: &[Setting] = &[
@@ -51,49 +71,42 @@ const SETTINGS: &[Setting] = &[
         key: "gxWindow",
         values: &["1", "0"],
         labels: &["Windowed", "Fullscreen"],
-        audio: false,
     },
     Setting {
         label: "Vertical sync",
         key: "gxVSync",
         values: &["0", "1"],
         labels: &["Off", "On"],
-        audio: false,
     },
     Setting {
         label: "Render scale",
         key: "renderScale",
         values: &["0.5", "0.75", "1", "1.25", "1.5", "2"],
         labels: &["50%", "75%", "100%", "125%", "150%", "200%"],
-        audio: false,
     },
     Setting {
         label: "View distance",
         key: "farclip",
         values: &["177", "300", "500", "777"],
         labels: &["Low", "Medium", "High", "Ultra"],
-        audio: false,
     },
     Setting {
         label: "Grass and flowers",
         key: "WorldDetail",
         values: &["0", "1", "2"],
         labels: &["Low", "Medium", "High"],
-        audio: false,
     },
     Setting {
         label: "Bloom",
         key: "ffxGlow",
         values: &["0", "1"],
         labels: &["Off", "On"],
-        audio: false,
     },
     Setting {
         label: "Sound",
         key: "MasterSoundEffects",
         values: &["0", "1"],
         labels: &["Muted", "On"],
-        audio: true,
     },
     Setting {
         label: "Master volume",
@@ -104,7 +117,6 @@ const SETTINGS: &[Setting] = &[
         labels: &[
             "0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%",
         ],
-        audio: true,
     },
     Setting {
         label: "Effects volume",
@@ -115,7 +127,6 @@ const SETTINGS: &[Setting] = &[
         labels: &[
             "0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%",
         ],
-        audio: true,
     },
     Setting {
         label: "Music volume",
@@ -126,7 +137,6 @@ const SETTINGS: &[Setting] = &[
         labels: &[
             "0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%",
         ],
-        audio: true,
     },
     Setting {
         label: "Ambience volume",
@@ -137,9 +147,135 @@ const SETTINGS: &[Setting] = &[
         labels: &[
             "0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%",
         ],
-        audio: true,
+    },
+    Setting {
+        label: "Minimap size",
+        key: super::right_column::MAP_SIZE,
+        values: HUD_SIZES,
+        labels: HUD_SIZE_LABELS,
+    },
+    Setting {
+        label: "Run tracker size",
+        key: super::right_column::TRACKER_SIZE,
+        values: HUD_SIZES,
+        labels: HUD_SIZE_LABELS,
+    },
+    Setting {
+        label: "Damage meter size",
+        key: super::right_column::METER_SIZE,
+        values: HUD_SIZES,
+        labels: HUD_SIZE_LABELS,
+    },
+    Setting {
+        label: "Action bar size",
+        key: super::right_column::BAR_SIZE,
+        values: HUD_SIZES,
+        labels: HUD_SIZE_LABELS,
+    },
+    Setting {
+        label: "Health text",
+        key: super::unit_frames::HEALTH_TEXT,
+        values: &["0", "1", "2", "3", "4", "5"],
+        labels: &[
+            "Cur / Max · %",
+            "Cur / Max",
+            "Cur · %",
+            "Current",
+            "Percent",
+            "None",
+        ],
+    },
+    Setting {
+        label: "Health bar height",
+        key: super::unit_frames::HEALTH_HEIGHT,
+        values: &["11", "13", "15", "17", "20", "24", "28"],
+        labels: &[
+            "11 px", "13 px", "15 px", "17 px", "20 px", "24 px", "28 px",
+        ],
+    },
+    Setting {
+        label: "Frame buffs",
+        key: super::unit_frames::FRAME_BUFFS,
+        values: AURA_PLACES,
+        labels: AURA_PLACE_LABELS,
+    },
+    Setting {
+        label: "Frame debuffs",
+        key: super::unit_frames::FRAME_DEBUFFS,
+        values: AURA_PLACES,
+        labels: AURA_PLACE_LABELS,
+    },
+    Setting {
+        label: "Frame buff size",
+        key: super::unit_frames::FRAME_BUFF_SIZE,
+        values: FRAME_AURA_SIZES,
+        labels: FRAME_AURA_SIZE_LABELS,
+    },
+    Setting {
+        label: "Frame debuff size",
+        key: super::unit_frames::FRAME_DEBUFF_SIZE,
+        values: FRAME_AURA_SIZES,
+        labels: FRAME_AURA_SIZE_LABELS,
+    },
+    Setting {
+        label: "Plate debuffs",
+        key: super::unit_frames::PLATE_DEBUFFS,
+        values: AURA_PLACES,
+        labels: AURA_PLACE_LABELS,
+    },
+    Setting {
+        label: "Plate buffs",
+        key: super::unit_frames::PLATE_BUFFS,
+        values: AURA_PLACES,
+        labels: AURA_PLACE_LABELS,
+    },
+    Setting {
+        label: "Plate debuff size",
+        key: super::unit_frames::PLATE_DEBUFF_SIZE,
+        values: PLATE_AURA_SIZES,
+        labels: PLATE_AURA_SIZE_LABELS,
+    },
+    Setting {
+        label: "Plate buff size",
+        key: super::unit_frames::PLATE_BUFF_SIZE,
+        values: PLATE_AURA_SIZES,
+        labels: PLATE_AURA_SIZE_LABELS,
+    },
+    // An unset row shows its first value, so the plates' default, Cur · %, leads.
+    Setting {
+        label: "Nameplate health",
+        key: super::plates::PLATE_HEALTH_TEXT,
+        values: &["2", "0", "1", "3", "4", "5"],
+        labels: &[
+            "Cur · %",
+            "Cur / Max · %",
+            "Cur / Max",
+            "Current",
+            "Percent",
+            "None",
+        ],
     },
 ];
+
+/// The Auras tabs' values: an edge (`unit_frames::AuraPos`), and icon sizes in UI pixels.
+const AURA_PLACES: &[&str] = &["0", "1", "2"];
+const AURA_PLACE_LABELS: &[&str] = &["Above", "Below", "Hidden"];
+const FRAME_AURA_SIZES: &[&str] = &["10", "12", "14", "16", "18", "22"];
+const FRAME_AURA_SIZE_LABELS: &[&str] = &["10 px", "12 px", "14 px", "16 px", "18 px", "22 px"];
+const PLATE_AURA_SIZES: &[&str] = &["7", "9", "11", "13", "16"];
+const PLATE_AURA_SIZE_LABELS: &[&str] = &["7 px", "9 px", "11 px", "13 px", "16 px"];
+
+const HUD_SIZES: &[&str] = &["0.8", "0.9", "1", "1.1", "1.2", "1.35", "1.5"];
+const HUD_SIZE_LABELS: &[&str] = &["80%", "90%", "100%", "110%", "120%", "135%", "150%"];
+
+/// What an unset row shows: its first value, but the health bar's default height mid-list.
+fn unset(setting: &Setting) -> &'static str {
+    if setting.key == super::unit_frames::HEALTH_HEIGHT {
+        "13"
+    } else {
+        setting.values[0]
+    }
+}
 
 fn nearest(setting: &Setting, value: &str) -> usize {
     let value = value.parse::<f32>().unwrap_or(0.0);
@@ -154,30 +290,157 @@ fn nearest(setting: &Setting, value: &str) -> usize {
         .map_or(0, |(i, _)| i)
 }
 
+/// The topics down the sidebar: their group, name, line under the title, icon spell and tabs.
+struct Topic {
+    group: &'static str,
+    name: &'static str,
+    about: &'static str,
+    icon: u32,
+    tabs: &'static [&'static str],
+}
+
+const TOPICS: &[Topic] = &[
+    Topic {
+        group: "Game",
+        name: "Graphics",
+        about: "How the world is drawn.",
+        icon: 6197,
+        tabs: &["Display", "World"],
+    },
+    Topic {
+        group: "Game",
+        name: "Audio",
+        about: "Volume and sound.",
+        icon: 6673,
+        tabs: &["Volume"],
+    },
+    Topic {
+        group: "Interface",
+        name: "HUD layout",
+        about: "The sizes of the panels round the screen.",
+        icon: 2580,
+        tabs: &["Sizes"],
+    },
+    Topic {
+        group: "Interface",
+        name: "Unit frames",
+        about: "Your frame and your target's.",
+        icon: 139,
+        tabs: &["Health", "Auras"],
+    },
+    Topic {
+        group: "Interface",
+        name: "Nameplates",
+        about: "The bars and names over units' heads.",
+        icon: 1130,
+        tabs: &["Plates", "Auras", "Names"],
+    },
+];
+
+/// One row of the page: a stepped value from [`SETTINGS`] or an on/off switch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Item {
+    Value(usize),
+    Flag(InterfaceSetting),
+}
+
+impl Item {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Value(i) => SETTINGS[i].label,
+            Self::Flag(f) => f.label(),
+        }
+    }
+
+    /// The topic and tab the row sits on.
+    fn place(self) -> (u8, u8) {
+        match self {
+            Self::Value(i) => match SETTINGS[i].key {
+                "gxWindow" | "gxVSync" | "renderScale" => (0, 0),
+                "farclip" | "WorldDetail" | "ffxGlow" => (0, 1),
+                "MasterSoundEffects" | "MasterVolume" | "SoundVolume" | "MusicVolume"
+                | "AmbienceVolume" => (1, 0),
+                super::unit_frames::HEALTH_TEXT | super::unit_frames::HEALTH_HEIGHT => (3, 0),
+                super::unit_frames::FRAME_BUFFS
+                | super::unit_frames::FRAME_DEBUFFS
+                | super::unit_frames::FRAME_BUFF_SIZE
+                | super::unit_frames::FRAME_DEBUFF_SIZE => (3, 1),
+                super::unit_frames::PLATE_BUFFS
+                | super::unit_frames::PLATE_DEBUFFS
+                | super::unit_frames::PLATE_BUFF_SIZE
+                | super::unit_frames::PLATE_DEBUFF_SIZE => (4, 1),
+                super::plates::PLATE_HEALTH_TEXT => (4, 0),
+                _ => (2, 0),
+            },
+            Self::Flag(
+                InterfaceSetting::EnemyPlates
+                | InterfaceSetting::FriendlyPlates
+                | InterfaceSetting::CompactPlates
+                | InterfaceSetting::HeroPlate,
+            ) => (4, 0),
+            Self::Flag(_) => (4, 2),
+        }
+    }
+
+    /// Shown on the open page, or, while searching, when its name or topic matches.
+    fn shown(self, options: &Options) -> bool {
+        let query = options.search.trim().to_lowercase();
+        if query.is_empty() {
+            return self.place() == (options.topic, options.tab);
+        }
+        let (topic, tab) = self.place();
+        let topic = &TOPICS[usize::from(topic)];
+        [self.label(), topic.name, topic.tabs[usize::from(tab)]]
+            .iter()
+            .any(|s| s.to_lowercase().contains(&query))
+    }
+
+    fn all() -> impl Iterator<Item = Self> {
+        (0..SETTINGS.len())
+            .map(Self::Value)
+            .chain(InterfaceSetting::ALL.into_iter().map(Self::Flag))
+    }
+}
+
 #[derive(Component)]
 struct Root;
 #[derive(Component)]
-struct Row(usize);
+struct Row(Item);
+/// A row's "Topic · Tab" line, shown only in search results.
+#[derive(Component)]
+struct RowWhere;
 #[derive(Component)]
 struct ValueLabel(usize);
-#[derive(Component, Clone, Copy)]
+/// A switch's knob.
+#[derive(Component)]
+struct Switch(InterfaceSetting);
+#[derive(Component)]
+struct TopicIcon(u8);
+#[derive(Component)]
+enum PageText {
+    Title,
+    About,
+}
+#[derive(Component)]
+struct SearchText;
+#[derive(Component)]
+struct SearchBox;
+#[derive(Component)]
+struct InterfaceHint;
+#[derive(Component)]
+struct NoMatch;
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Adjust(usize, i32),
-    Graphics,
-    Audio,
-    Names,
+    Topic(u8),
+    Tab(u8, u8),
     Toggle(InterfaceSetting),
+    Search,
     Back,
 }
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
-struct InterfaceRow(InterfaceSetting);
-#[derive(Component)]
-struct FlagLabel(InterfaceSetting);
-#[derive(Component)]
-struct InterfaceHint;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum InterfaceSetting {
     PlayerNames,
     NpcNames,
@@ -185,16 +448,20 @@ enum InterfaceSetting {
     GuildNames,
     EnemyPlates,
     FriendlyPlates,
+    CompactPlates,
+    HeroPlate,
 }
 
 impl InterfaceSetting {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 8] = [
         Self::PlayerNames,
         Self::NpcNames,
         Self::OwnName,
         Self::GuildNames,
         Self::EnemyPlates,
         Self::FriendlyPlates,
+        Self::CompactPlates,
+        Self::HeroPlate,
     ];
 
     fn label(self) -> &'static str {
@@ -205,6 +472,8 @@ impl InterfaceSetting {
             Self::GuildNames => "Guild names",
             Self::EnemyPlates => "Enemy nameplates",
             Self::FriendlyPlates => "Friendly nameplates",
+            Self::CompactPlates => "Compact nameplates",
+            Self::HeroPlate => "Your health bar",
         }
     }
 
@@ -214,7 +483,9 @@ impl InterfaceSetting {
             Self::NpcNames => Some("UnitNameNPC"),
             Self::OwnName => Some("UnitNameOwn"),
             Self::GuildNames => Some("UnitNamePlayerGuild"),
-            Self::EnemyPlates | Self::FriendlyPlates => None,
+            Self::EnemyPlates | Self::FriendlyPlates | Self::CompactPlates | Self::HeroPlate => {
+                None
+            }
         }
     }
 
@@ -226,6 +497,8 @@ impl InterfaceSetting {
         match self {
             Self::EnemyPlates => plates.enemies,
             Self::FriendlyPlates => plates.friends,
+            Self::CompactPlates => plates.compact,
+            Self::HeroPlate => plates.hero,
             _ => self.cvar().and_then(|key| cvars.flag(key)).unwrap_or(false),
         }
     }
@@ -234,7 +507,14 @@ impl InterfaceSetting {
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Options>().add_systems(
         Update,
-        (spawn, clicks, paint)
+        (
+            spawn,
+            search_input,
+            clicks,
+            paint_nav,
+            paint_page,
+            preview::paint,
+        )
             .chain()
             .after(super::hud::buttons)
             .before(super::hud::keys),
@@ -244,69 +524,106 @@ pub(super) fn plugin(app: &mut App) {
         app.insert_resource(Options {
             open: true,
             settings: preview != "menu",
-            audio: preview == "audio",
-            names: false,
+            topic: if preview == "audio" { 1 } else { 0 },
+            ..default()
         });
     }
 }
 
+/// The window's own tones on top of the HUD's palette.
+const SIDEBAR: Color = Color::srgba(0.035, 0.05, 0.06, 0.97);
+const ROW: Color = Color::srgb(0.063, 0.086, 0.11);
+const WELL: Color = Color::srgb(0.027, 0.035, 0.047);
+const EDGE_DIM: Color = Color::srgb(0.173, 0.196, 0.239);
+const HOVER: Color = Color::srgb(0.114, 0.145, 0.188);
+const PICKED: Color = Color::srgb(0.165, 0.051, 0.086);
+
+/// A word or line of the window's text, over the panel.
 fn text(font: &Handle<Font>, value: &str, size: f32, color: Color) -> impl Bundle {
+    col::label(font, value, size, color)
+}
+
+/// An icon in a small steel frame, filled from `spell`'s icon once the client data is up.
+fn icon(spell: u32, size: f32) -> impl Bundle {
     (
-        Text::new(value),
-        TextFont {
-            font: font.clone(),
-            font_size: size,
+        Node {
+            width: Val::Px(size),
+            height: Val::Px(size),
+            flex_shrink: 0.,
+            border: UiRect::all(Val::Px(1.)),
             ..default()
         },
-        TextColor(color),
+        BackgroundColor(Color::BLACK),
+        BorderColor::all(col::STEEL_LO),
+        Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
+        children![(
+            Node {
+                width: Val::Percent(100.),
+                height: Val::Percent(100.),
+                ..default()
+            },
+            ImageNode {
+                color: Color::NONE,
+                ..default()
+            },
+            super::hud::SpellIcon(spell),
+        )],
     )
 }
 
-fn control(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label: &str, action: Action) {
+/// A ‹ or › arrow of a stepped value.
+fn arrow(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, glyph: &str, action: Action) {
     parent
         .spawn((
             Button,
             action,
             Node {
-                min_width: Val::Px(38.),
-                height: Val::Px(34.),
-                padding: UiRect::horizontal(Val::Px(12.)),
+                width: Val::Px(16.),
+                height: Val::Percent(100.),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(1.)),
-                border_radius: BorderRadius::all(Val::Px(4.)),
                 ..default()
             },
-            BackgroundColor(skin::SURFACE),
-            BorderColor::all(skin::EDGE),
+            BackgroundColor(Color::NONE),
+            BorderColor::all(Color::NONE),
         ))
         .with_children(|b| {
-            b.spawn(text(font, label, 16., skin::GOLD));
+            b.spawn(text(font, glyph, 13., col::STEEL));
         });
 }
 
-fn flag_control(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, setting: InterfaceSetting) {
-    parent
-        .spawn((
-            Button,
-            Action::Toggle(setting),
-            Node {
-                min_width: Val::Px(66.),
-                height: Val::Px(34.),
-                padding: UiRect::horizontal(Val::Px(12.)),
+/// Two crossed bars, centred in their box: the close button's ×.
+fn cross(parent: &mut ChildSpawnerCommands) {
+    for turn in [45., -45.] {
+        parent
+            .spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.),
+                top: Val::Px(0.),
+                width: Val::Percent(100.),
+                height: Val::Percent(100.),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(1.)),
-                border_radius: BorderRadius::all(Val::Px(4.)),
                 ..default()
-            },
-            BackgroundColor(skin::SURFACE),
-            BorderColor::all(skin::EDGE),
-        ))
-        .with_children(|b| {
-            b.spawn((FlagLabel(setting), text(font, "Off", 16., skin::GOLD)));
-        });
+            })
+            .with_children(|c| {
+                c.spawn((
+                    Node {
+                        width: Val::Px(10.),
+                        height: Val::Px(1.5),
+                        flex_shrink: 0.,
+                        ..default()
+                    },
+                    BackgroundColor(col::STEEL_HI),
+                    UiTransform::from_rotation(Rot2::degrees(turn)),
+                ));
+            });
+    }
 }
+
+/// A nav button's text, coloured by whether its topic or tab is open.
+#[derive(Component)]
+struct NavLabel(Action);
 
 fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), With<Root>>) {
     if !roots.is_empty() {
@@ -332,117 +649,433 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
             GlobalZIndex(450),
         ))
         .with_children(|root| {
-            root.spawn(skin::panel(Node {
-                width: Val::Percent(90.),
-                max_width: Val::Px(600.),
-                max_height: Val::Percent(92.),
-                padding: UiRect::all(Val::Px(26.)),
-                row_gap: Val::Px(10.),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            }))
-            .with_children(|panel| {
-                panel.spawn(text(f, "SETTINGS", 28., skin::GOLD));
-                panel
-                    .spawn(Node {
-                        column_gap: Val::Px(10.),
-                        margin: UiRect::bottom(Val::Px(6.)),
-                        ..default()
-                    })
-                    .with_children(|tabs| {
-                        control(tabs, f, "Graphics", Action::Graphics);
-                        control(tabs, f, "Sound", Action::Audio);
-                        control(tabs, f, "Names", Action::Names);
+            root.spawn((
+                super::hud_layout::Movable::settings("settings", "Settings"),
+                col::plate(Node {
+                    width: Val::Px(860.),
+                    height: Val::Px(520.),
+                    max_width: Val::Percent(96.),
+                    max_height: Val::Percent(92.),
+                    overflow: Overflow::clip(),
+                    ..default()
+                }),
+            ))
+            .with_children(|window| {
+                // Close, over the top right.
+                window
+                    .spawn((
+                        Button,
+                        Action::Back,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: Val::Px(8.),
+                            top: Val::Px(8.),
+                            width: Val::Px(20.),
+                            height: Val::Px(20.),
+                            border: UiRect::all(Val::Px(1.)),
+                            ..default()
+                        },
+                        BackgroundColor(col::KNOB),
+                        BorderColor::all(col::STEEL_LO),
+                        Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
+                        ZIndex(2),
+                    ))
+                    .with_children(cross);
+
+                // The sidebar: the name, the search box and the topics in their groups.
+                window
+                    .spawn((
+                        Node {
+                            width: Val::Px(200.),
+                            flex_shrink: 0.,
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::vertical(Val::Px(12.)),
+                            border: UiRect::right(Val::Px(1.)),
+                            ..default()
+                        },
+                        BackgroundColor(SIDEBAR),
+                        BorderColor::all(EDGE_DIM),
+                    ))
+                    .with_children(|side| {
+                        side.spawn(Node {
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(10.),
+                            padding: UiRect::new(
+                                Val::Px(16.),
+                                Val::Px(14.),
+                                Val::ZERO,
+                                Val::Px(10.),
+                            ),
+                            ..default()
+                        })
+                        .with_children(|brand| {
+                            brand.spawn(col::diamond(Node::default(), 11., col::STEEL));
+                            brand.spawn(text(f, "Settings", 16., col::STEEL_HI));
+                        });
+                        side.spawn((
+                            Button,
+                            Action::Search,
+                            SearchBox,
+                            Node {
+                                height: Val::Px(26.),
+                                margin: UiRect::new(
+                                    Val::Px(12.),
+                                    Val::Px(12.),
+                                    Val::ZERO,
+                                    Val::Px(8.),
+                                ),
+                                padding: UiRect::horizontal(Val::Px(8.)),
+                                align_items: AlignItems::Center,
+                                overflow: Overflow::clip(),
+                                border: UiRect::all(Val::Px(1.)),
+                                ..default()
+                            },
+                            BackgroundColor(WELL),
+                            BorderColor::all(EDGE_DIM),
+                            Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
+                        ))
+                        .with_children(|b| {
+                            b.spawn((SearchText, text(f, "", 12., col::TEXT_DIM)));
+                        });
+                        let mut group = "";
+                        for (i, topic) in TOPICS.iter().enumerate() {
+                            if topic.group != group {
+                                group = topic.group;
+                                side.spawn((
+                                    Node {
+                                        padding: UiRect::new(
+                                            Val::Px(14.),
+                                            Val::ZERO,
+                                            Val::Px(10.),
+                                            Val::Px(4.),
+                                        ),
+                                        ..default()
+                                    },
+                                    text(f, &group.to_uppercase(), 10., col::STEEL),
+                                ));
+                            }
+                            let action = Action::Topic(i as u8);
+                            side.spawn((
+                                Button,
+                                action,
+                                Node {
+                                    height: Val::Px(28.),
+                                    padding: UiRect::horizontal(Val::Px(12.)),
+                                    align_items: AlignItems::Center,
+                                    column_gap: Val::Px(9.),
+                                    border: UiRect::left(Val::Px(2.)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::NONE),
+                                BorderColor::all(Color::NONE),
+                            ))
+                            .with_children(|b| {
+                                b.spawn(icon(topic.icon, 18.));
+                                b.spawn((
+                                    NavLabel(action),
+                                    text(f, topic.name, 13., col::TEXT_DIM),
+                                ));
+                            });
+                        }
                     });
-                skin::rule(panel);
-                for (i, setting) in SETTINGS.iter().enumerate() {
-                    panel
-                        .spawn((
-                            Row(i),
-                            Node {
-                                width: Val::Percent(100.),
-                                align_items: AlignItems::Center,
-                                column_gap: Val::Px(8.),
-                                ..default()
-                            },
-                        ))
-                        .with_children(|row| {
-                            row.spawn((
-                                Node {
-                                    flex_grow: 1.,
-                                    ..default()
-                                },
-                                text(f, setting.label, 16., skin::TEXT),
-                            ));
-                            control(row, f, "−", Action::Adjust(i, -1));
-                            row.spawn((
-                                ValueLabel(i),
-                                Node {
-                                    width: Val::Px(108.),
-                                    justify_content: JustifyContent::Center,
-                                    ..default()
-                                },
-                                text(f, "", 16., skin::GOLD),
-                                TextLayout::new(Justify::Center, LineBreak::NoWrap),
-                            ));
-                            control(row, f, "+", Action::Adjust(i, 1));
-                        });
-                }
-                for setting in InterfaceSetting::ALL {
-                    panel
-                        .spawn((
-                            InterfaceRow(setting),
-                            Node {
-                                width: Val::Percent(100.),
-                                align_items: AlignItems::Center,
-                                column_gap: Val::Px(8.),
-                                display: Display::None,
-                                ..default()
-                            },
-                        ))
-                        .with_children(|row| {
-                            row.spawn((
-                                Node {
-                                    flex_grow: 1.,
-                                    ..default()
-                                },
-                                text(f, setting.label(), 16., skin::TEXT),
-                            ));
-                            flag_control(row, f, setting);
-                        });
-                }
-                panel.spawn((
-                    InterfaceHint,
-                    Node {
-                        display: Display::None,
-                        ..default()
-                    },
-                    text(
-                        f,
-                        "V: nearby enemies · Shift+V: friends · Ctrl+V: both · boss plates stay visible",
-                        12.,
-                        skin::MUTED,
-                    ),
-                ));
-                skin::rule(panel);
-                panel
+
+                // The page: its title, its tabs, its rows and a line of help.
+                window
                     .spawn(Node {
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::SpaceBetween,
-                        column_gap: Val::Px(12.),
+                        flex_grow: 1.,
+                        min_width: Val::Px(0.),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::axes(Val::Px(20.), Val::Px(16.)),
+                        row_gap: Val::Px(12.),
                         ..default()
                     })
-                    .with_children(|row| {
-                        row.spawn(text(
-                            f,
-                            "Changes apply immediately and are saved automatically.",
-                            12.,
-                            skin::MUTED,
-                        ));
-                        control(row, f, "Back", Action::Back);
+                    .with_children(|page| {
+                        page.spawn(Node {
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(12.),
+                            ..default()
+                        })
+                        .with_children(|title| {
+                            title
+                                .spawn(Node {
+                                    width: Val::Px(34.),
+                                    height: Val::Px(34.),
+                                    ..default()
+                                })
+                                .with_children(|seat| {
+                                    for (i, topic) in TOPICS.iter().enumerate() {
+                                        seat.spawn((TopicIcon(i as u8), icon(topic.icon, 34.)));
+                                    }
+                                });
+                            title
+                                .spawn(Node {
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: Val::Px(2.),
+                                    ..default()
+                                })
+                                .with_children(|t| {
+                                    t.spawn((PageText::Title, text(f, "", 19., col::TEXT_HI)));
+                                    t.spawn((PageText::About, text(f, "", 11., col::TEXT_DIM)));
+                                });
+                        });
+                        page.spawn((
+                            Node {
+                                column_gap: Val::Px(4.),
+                                border: UiRect::bottom(Val::Px(1.)),
+                                min_height: Val::Px(31.),
+                                ..default()
+                            },
+                            BorderColor::all(EDGE_DIM),
+                        ))
+                        .with_children(|tabs| {
+                            for (t, topic) in TOPICS.iter().enumerate() {
+                                for (k, name) in topic.tabs.iter().enumerate() {
+                                    let action = Action::Tab(t as u8, k as u8);
+                                    tabs.spawn((
+                                        Button,
+                                        action,
+                                        Node {
+                                            padding: UiRect::new(
+                                                Val::Px(12.),
+                                                Val::Px(12.),
+                                                Val::Px(6.),
+                                                Val::Px(7.),
+                                            ),
+                                            margin: UiRect::bottom(Val::Px(-1.)),
+                                            border: UiRect::bottom(Val::Px(2.)),
+                                            display: Display::None,
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::NONE),
+                                        BorderColor::all(Color::NONE),
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            NavLabel(action),
+                                            text(f, name, 12., col::TEXT_DIM),
+                                        ));
+                                    });
+                                }
+                            }
+                        });
+                        preview::spawn(page, f);
+                        page.spawn(Node {
+                            flex_grow: 1.,
+                            flex_wrap: FlexWrap::Wrap,
+                            align_content: AlignContent::FlexStart,
+                            column_gap: Val::Px(10.),
+                            row_gap: Val::Px(6.),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        })
+                        .with_children(|rows| {
+                            for item in Item::all() {
+                                rows.spawn((
+                                    Row(item),
+                                    Node {
+                                        width: Val::Percent(48.5),
+                                        min_height: Val::Px(34.),
+                                        padding: UiRect::axes(Val::Px(10.), Val::Px(4.)),
+                                        justify_content: JustifyContent::SpaceBetween,
+                                        align_items: AlignItems::Center,
+                                        column_gap: Val::Px(10.),
+                                        border: UiRect::all(Val::Px(1.)),
+                                        display: Display::None,
+                                        ..default()
+                                    },
+                                    BackgroundColor(ROW),
+                                    BorderColor::all(EDGE_DIM),
+                                    Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
+                                ))
+                                .with_children(|row| {
+                                    let (t, k) = item.place();
+                                    let topic = &TOPICS[usize::from(t)];
+                                    row.spawn(Node {
+                                        flex_direction: FlexDirection::Column,
+                                        min_width: Val::Px(0.),
+                                        flex_shrink: 1.,
+                                        ..default()
+                                    })
+                                    .with_children(|words| {
+                                        words.spawn(text(f, item.label(), 12.5, col::TEXT_HI));
+                                        words.spawn((
+                                            RowWhere,
+                                            Node {
+                                                display: Display::None,
+                                                ..default()
+                                            },
+                                            text(
+                                                f,
+                                                &format!(
+                                                    "{} · {}",
+                                                    topic.name,
+                                                    topic.tabs[usize::from(k)]
+                                                ),
+                                                9.5,
+                                                col::TEXT_DIM,
+                                            ),
+                                        ));
+                                    });
+                                    match item {
+                                        Item::Value(i) => {
+                                            row.spawn((
+                                                Node {
+                                                    height: Val::Px(22.),
+                                                    flex_shrink: 0.,
+                                                    align_items: AlignItems::Center,
+                                                    border: UiRect::all(Val::Px(1.)),
+                                                    ..default()
+                                                },
+                                                BackgroundColor(WELL),
+                                                BorderColor::all(EDGE_DIM),
+                                                Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
+                                            ))
+                                            .with_children(|pick| {
+                                                arrow(pick, f, "‹", Action::Adjust(i, -1));
+                                                // A text node sizes to its words, so a box
+                                                // round it centres them.
+                                                pick.spawn(Node {
+                                                    width: Val::Px(84.),
+                                                    justify_content: JustifyContent::Center,
+                                                    ..default()
+                                                })
+                                                .with_child((
+                                                    ValueLabel(i),
+                                                    text(f, "", 11.5, col::TEXT_HI),
+                                                ));
+                                                arrow(pick, f, "›", Action::Adjust(i, 1));
+                                            });
+                                        }
+                                        Item::Flag(setting) => {
+                                            row.spawn((
+                                                Button,
+                                                Action::Toggle(setting),
+                                                Node {
+                                                    width: Val::Px(34.),
+                                                    height: Val::Px(16.),
+                                                    flex_shrink: 0.,
+                                                    padding: UiRect::all(Val::Px(1.)),
+                                                    align_items: AlignItems::Center,
+                                                    border: UiRect::all(Val::Px(1.)),
+                                                    border_radius: BorderRadius::MAX,
+                                                    ..default()
+                                                },
+                                                BackgroundColor(WELL),
+                                                BorderColor::all(EDGE_DIM),
+                                                Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
+                                            ))
+                                            .with_children(|track| {
+                                                track.spawn((
+                                                    Switch(setting),
+                                                    Node {
+                                                        width: Val::Px(12.),
+                                                        height: Val::Px(12.),
+                                                        border_radius: BorderRadius::MAX,
+                                                        ..default()
+                                                    },
+                                                    BackgroundColor(col::STEEL),
+                                                ));
+                                            });
+                                        }
+                                    }
+                                });
+                            }
+                            rows.spawn((
+                                NoMatch,
+                                Node {
+                                    display: Display::None,
+                                    ..default()
+                                },
+                                text(f, "No setting matches.", 12., col::TEXT_DIM),
+                            ));
+                        });
+                        page.spawn(Node {
+                            justify_content: JustifyContent::SpaceBetween,
+                            column_gap: Val::Px(12.),
+                            ..default()
+                        })
+                        .with_children(|foot| {
+                            foot.spawn((
+                                InterfaceHint,
+                                Node {
+                                    display: Display::None,
+                                    ..default()
+                                },
+                                text(
+                                    f,
+                                    "V: nearby enemies · Shift+V: friends · Ctrl+V: both",
+                                    11.,
+                                    col::TEXT_DIM,
+                                ),
+                            ));
+                            foot.spawn(Node {
+                                flex_grow: 1.,
+                                ..default()
+                            });
+                            foot.spawn(text(
+                                f,
+                                "Changes apply at once and are saved.",
+                                11.,
+                                col::TEXT_DIM,
+                            ));
+                        });
                     });
             });
         });
+}
+
+/// Type into the search box while it has focus.
+fn search_input(
+    mut keyboard: MessageReader<KeyboardInput>,
+    mut options: ResMut<Options>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut clipboard: NonSendMut<crate::textinput::HostClipboard>,
+    windows: Query<&bevy::window::RawHandleWrapper, With<bevy::window::PrimaryWindow>>,
+) {
+    let events: Vec<_> = keyboard.read().cloned().collect();
+    if !options.settings || !options.search_active {
+        return;
+    }
+    let control = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let wl = crate::textinput::wayland_display(windows.single().ok());
+    let options = &mut *options;
+    for event in events
+        .into_iter()
+        .filter(|e| e.state == ButtonState::Pressed)
+    {
+        match event.key_code {
+            KeyCode::Enter | KeyCode::NumpadEnter => options.search_active = false,
+            KeyCode::Escape => {}
+            KeyCode::KeyC | KeyCode::KeyX if control => {
+                if !options.cursor.selected(&options.search).is_empty() {
+                    clipboard.write(wl, options.cursor.selected(&options.search));
+                    if event.key_code == KeyCode::KeyX {
+                        options
+                            .cursor
+                            .key(&mut options.search, KeyCode::Backspace, false, false);
+                    }
+                }
+            }
+            KeyCode::KeyV if control => {
+                if let Some(value) = clipboard.read(wl) {
+                    options.cursor.insert(&mut options.search, &value, 32);
+                }
+            }
+            key => {
+                if !options.cursor.key(&mut options.search, key, shift, control) && !control {
+                    if let Some(text) = event.text {
+                        options.cursor.insert(&mut options.search, &text, 32);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn clicks(
@@ -451,45 +1084,40 @@ fn clicks(
     mut cvars: ResMut<crate::cvars::Cvars>,
     mut nameplates: ResMut<super::plates::NameplateSettings>,
     mut commands: Commands,
-    mut buttons: Query<(&Interaction, &Action, &mut BackgroundColor), Changed<Interaction>>,
+    buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
 ) {
     if !options.settings {
         return;
     }
-    for (interaction, action, mut bg) in &mut buttons {
-        bg.0 = if *interaction == Interaction::None {
-            skin::SURFACE
-        } else {
-            Color::srgb(0.15, 0.12, 0.075)
-        };
+    for (interaction, action) in &buttons {
         if *interaction != Interaction::Pressed {
             continue;
         }
+        options.search_active = *action == Action::Search;
         match *action {
-            Action::Graphics => {
-                options.audio = false;
-                options.names = false;
+            Action::Search => {
+                let end = options.search.len();
+                let search = options.search.clone();
+                options.cursor.place(&search, end, false);
             }
-            Action::Audio => {
-                options.audio = true;
-                options.names = false;
+            Action::Topic(topic) => {
+                options.topic = topic;
+                options.tab = 0;
+                options.search.clear();
             }
-            Action::Names => {
-                options.audio = false;
-                options.names = true;
+            Action::Tab(topic, tab) => {
+                options.topic = topic;
+                options.tab = tab;
             }
             Action::Back => {
-                options.settings = false;
-                if *phase.get() == Phase::Menu {
-                    options.open = false;
-                }
+                options.close_settings(*phase.get());
             }
             Action::Adjust(i, delta) => {
-                let s = &SETTINGS[i];
-                if options.names || s.audio != options.audio {
+                if !Item::Value(i).shown(&options) {
                     continue;
                 }
-                let at = nearest(s, cvars.get(s.key).unwrap_or(s.values[0]));
+                let s = &SETTINGS[i];
+                let at = nearest(s, cvars.get(s.key).unwrap_or(unset(s)));
                 let index = (at as i32 + delta).clamp(0, s.values.len() as i32 - 1) as usize;
                 cvars.set(s.key, s.values[index]);
                 cvars.commit_latched();
@@ -515,6 +1143,8 @@ fn clicks(
                         InterfaceSetting::FriendlyPlates => {
                             nameplates.friends = !nameplates.friends
                         }
+                        InterfaceSetting::CompactPlates => nameplates.compact = !nameplates.compact,
+                        InterfaceSetting::HeroPlate => nameplates.hero = !nameplates.hero,
                         _ => unreachable!("CVar-backed interface setting"),
                     }
                     super::plates::persist_nameplate_settings(
@@ -528,78 +1158,200 @@ fn clicks(
     }
 }
 
-fn paint(
+/// The buttons' tones: the open topic and tab in crimson, hover a step lighter, a switch crimson
+/// when on with its knob at the right.
+#[allow(clippy::type_complexity)]
+fn paint_nav(
     options: Res<Options>,
     cvars: Res<crate::cvars::Cvars>,
     nameplates: Res<super::plates::NameplateSettings>,
-    mut roots: Query<&mut Node, (With<Root>, Without<Row>)>,
-    mut rows: Query<(&Row, &mut Node), Without<Root>>,
-    mut labels: Query<(&ValueLabel, &mut Text), Without<FlagLabel>>,
-    mut interface_rows: Query<
-        (&InterfaceRow, &mut Node),
-        (Without<Row>, Without<Root>, Without<InterfaceHint>),
-    >,
-    mut flag_labels: Query<(&FlagLabel, &mut Text), Without<ValueLabel>>,
-    mut hints: Query<&mut Node, (With<InterfaceHint>, Without<Root>, Without<Row>)>,
-    mut tabs: Query<(&Action, &mut BorderColor)>,
+    mut buttons: Query<(
+        &Action,
+        &Interaction,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        &mut Node,
+    )>,
+    mut knobs: Query<(&Switch, &mut BackgroundColor), Without<Action>>,
 ) {
-    for (action, mut border) in &mut tabs {
-        let on = match action {
-            Action::Graphics => !options.audio && !options.names,
-            Action::Audio => options.audio,
-            Action::Names => options.names,
-            _ => false,
+    if !options.settings {
+        return;
+    }
+    let searching = !options.search.trim().is_empty();
+    for (action, interaction, mut bg, mut border, mut node) in &mut buttons {
+        let hot = *interaction != Interaction::None;
+        let (fill, edge) = match *action {
+            Action::Topic(t) if t == options.topic && !searching => (PICKED, col::WINE_HI),
+            Action::Topic(_) => (if hot { HOVER } else { Color::NONE }, Color::NONE),
+            Action::Tab(t, k) => {
+                let open = t == options.topic && k == options.tab;
+                (
+                    Color::NONE,
+                    if open {
+                        col::WINE_HI
+                    } else if hot {
+                        col::STEEL_LO
+                    } else {
+                        Color::NONE
+                    },
+                )
+            }
+            Action::Toggle(s) => {
+                let on = s.enabled(&cvars, &nameplates);
+                let want = if on {
+                    JustifyContent::FlexEnd
+                } else {
+                    JustifyContent::FlexStart
+                };
+                if node.justify_content != want {
+                    node.justify_content = want;
+                }
+                if on {
+                    (col::WINE, col::WINE_HI)
+                } else {
+                    (WELL, if hot { col::STEEL_LO } else { EDGE_DIM })
+                }
+            }
+            Action::Adjust(..) => (if hot { PICKED } else { Color::NONE }, Color::NONE),
+            Action::Search => (
+                WELL,
+                if options.search_active || hot {
+                    col::STEEL
+                } else {
+                    EDGE_DIM
+                },
+            ),
+            Action::Back => (
+                if hot { HOVER } else { col::KNOB },
+                if hot { col::WINE_HI } else { col::STEEL_LO },
+            ),
         };
-        let want = BorderColor::all(if on { skin::GOLD } else { skin::EDGE });
-        if *border != want {
-            *border = want;
+        bg.set_if_neq(BackgroundColor(fill));
+        let edge = BorderColor::all(edge);
+        if *border != edge {
+            *border = edge;
         }
     }
-    for mut node in &mut roots {
-        node.display = if options.settings {
-            Display::Flex
-        } else {
-            Display::None
-        };
+    for (switch, mut bg) in &mut knobs {
+        let on = switch.0.enabled(&cvars, &nameplates);
+        bg.set_if_neq(BackgroundColor(if on { Color::WHITE } else { col::STEEL }));
     }
-    for (row, mut node) in &mut rows {
-        node.display = if !options.names && SETTINGS[row.0].audio == options.audio {
-            Display::Flex
+}
+
+/// What the page shows: the open topic's title, tabs and rows, or every row the search matches.
+#[allow(clippy::type_complexity)]
+fn paint_page(
+    options: Res<Options>,
+    cvars: Res<crate::cvars::Cvars>,
+    mut nodes: Query<
+        (
+            &mut Node,
+            Option<&Row>,
+            Option<&TopicIcon>,
+            Option<&Action>,
+            Has<Root>,
+            Has<RowWhere>,
+            Has<InterfaceHint>,
+            Has<NoMatch>,
+        ),
+        Or<(
+            With<Root>,
+            With<Row>,
+            With<TopicIcon>,
+            With<Action>,
+            With<RowWhere>,
+            With<InterfaceHint>,
+            With<NoMatch>,
+        )>,
+    >,
+    mut texts: Query<
+        (
+            &mut Text,
+            &mut TextColor,
+            Option<&PageText>,
+            Option<&ValueLabel>,
+            Option<&NavLabel>,
+            Has<SearchText>,
+        ),
+        Or<(
+            With<PageText>,
+            With<ValueLabel>,
+            With<NavLabel>,
+            With<SearchText>,
+        )>,
+    >,
+) {
+    let query = options.search.trim();
+    let searching = !query.is_empty();
+    let matches = searching && Item::all().any(|item| item.shown(&options));
+    for (mut node, row, topic_icon, action, root, place, hint, none) in &mut nodes {
+        let shown = if root {
+            options.settings
+        } else if let Some(row) = row {
+            row.0.shown(&options)
+        } else if let Some(icon) = topic_icon {
+            !searching && icon.0 == options.topic
+        } else if let Some(Action::Tab(t, _)) = action {
+            !searching && *t == options.topic
+        } else if place {
+            searching
+        } else if hint {
+            !searching && options.topic == 4
+        } else if none {
+            searching && !matches
         } else {
-            Display::None
+            continue;
         };
+        let want = if shown { Display::Flex } else { Display::None };
+        if node.display != want {
+            node.display = want;
+        }
     }
-    for (_, mut node) in &mut interface_rows {
-        node.display = if options.names {
-            Display::Flex
+    if !options.settings {
+        return;
+    }
+    let topic = &TOPICS[usize::from(options.topic)];
+    for (mut text, mut color, page, value, nav, search) in &mut texts {
+        let (want, tone) = if let Some(page) = page {
+            match (page, searching) {
+                (PageText::Title, false) => (topic.name.to_string(), col::TEXT_HI),
+                (PageText::Title, true) => ("Search".to_string(), col::TEXT_HI),
+                (PageText::About, false) => (topic.about.to_string(), col::TEXT_DIM),
+                (PageText::About, true) => {
+                    (format!("Settings matching \"{query}\""), col::TEXT_DIM)
+                }
+            }
+        } else if let Some(value) = value {
+            let s = &SETTINGS[value.0];
+            let at = nearest(s, cvars.get(s.key).unwrap_or(unset(s)));
+            (s.labels[at].to_string(), col::TEXT_HI)
+        } else if let Some(nav) = nav {
+            let open = match nav.0 {
+                Action::Topic(t) => t == options.topic && !searching,
+                Action::Tab(t, k) => t == options.topic && k == options.tab,
+                _ => false,
+            };
+            (
+                text.0.clone(),
+                if open { col::TEXT_HI } else { col::TEXT_DIM },
+            )
+        } else if search {
+            if options.search_active {
+                let at = options.cursor.at.min(options.search.len());
+                let (a, b) = options.search.split_at(at);
+                (format!("{a}|{b}"), col::TEXT_HI)
+            } else if options.search.is_empty() {
+                ("Search settings…".to_string(), col::TEXT_DIM)
+            } else {
+                (options.search.clone(), col::TEXT_HI)
+            }
         } else {
-            Display::None
+            continue;
         };
-    }
-    for mut node in &mut hints {
-        node.display = if options.names {
-            Display::Flex
-        } else {
-            Display::None
-        };
-    }
-    for (label, mut text) in &mut labels {
-        let s = &SETTINGS[label.0];
-        let value = cvars.get(s.key).unwrap_or(s.values[0]);
-        let want = s.labels[nearest(s, value)];
         if text.0 != want {
-            text.0 = want.into();
+            text.0 = want;
         }
-    }
-    for (label, mut text) in &mut flag_labels {
-        let want = if label.0.enabled(&cvars, &nameplates) {
-            "On"
-        } else {
-            "Off"
-        };
-        if text.0 != want {
-            text.0 = want.into();
-        }
+        color.set_if_neq(TextColor(tone));
     }
 }
 
@@ -623,6 +1375,72 @@ mod tests {
         assert!(matches!(next, NextState::Pending(Phase::Playing)));
     }
     #[test]
+    fn the_settings_window_spawns() {
+        // A bundle with a component twice panics when it is applied, at startup.
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.insert_resource(HudFont(Handle::default()));
+        world.run_system_once(spawn).unwrap();
+        assert_eq!(
+            world.query::<&Row>().iter(&world).count(),
+            Item::all().count()
+        );
+    }
+
+    #[test]
+    fn escape_clears_a_search_before_closing_the_settings() {
+        let mut o = Options {
+            open: true,
+            settings: true,
+            search: "size".into(),
+            ..default()
+        };
+        let mut next = NextState::default();
+        o.escape(Phase::Paused, &mut next);
+        assert!(o.settings && o.search.is_empty());
+        o.escape(Phase::Paused, &mut next);
+        assert!(o.open && !o.settings);
+    }
+
+    #[test]
+    fn every_row_has_a_tab_and_search_finds_rows_across_topics() {
+        for item in Item::all() {
+            let (topic, tab) = item.place();
+            assert!(
+                usize::from(tab) < TOPICS[usize::from(topic)].tabs.len(),
+                "{item:?}"
+            );
+        }
+        let o = Options {
+            search: "SIZE".into(),
+            ..default()
+        };
+        let found: Vec<_> = Item::all()
+            .filter(|i| i.shown(&o))
+            .map(Item::label)
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "Minimap size",
+                "Run tracker size",
+                "Damage meter size",
+                "Action bar size",
+                "Frame buff size",
+                "Frame debuff size",
+                "Plate debuff size",
+                "Plate buff size",
+            ]
+        );
+        // A topic's name finds its rows too.
+        let o = Options {
+            search: "nameplates".into(),
+            ..default()
+        };
+        assert!(Item::all().filter(|i| i.shown(&o)).count() >= 7);
+    }
+
+    #[test]
     fn opening_menu_during_reward_selection_does_not_discard_the_reward() {
         let mut o = Options::default();
         let mut next = NextState::default();
@@ -642,6 +1460,22 @@ mod tests {
         assert_eq!(nearest(&SETTINGS[2], "1.00"), 2);
     }
 
+    /// The CVar store refuses writes to a name it does not know, so an unregistered row's arrows
+    /// do nothing.
+    #[test]
+    fn every_row_writes_a_registered_cvar() {
+        let known: Vec<&str> = crate::cvars::registered_pairs().map(|(n, _)| n).collect();
+        let keys = SETTINGS.iter().map(|s| s.key).chain([
+            "SurvivorNameplateEnemies",
+            "SurvivorNameplateFriends",
+            "SurvivorNameplateCompact",
+            "SurvivorHeroPlate",
+        ]);
+        for key in keys.chain(InterfaceSetting::ALL.iter().filter_map(|f| f.cvar())) {
+            assert!(known.contains(&key), "{key} is not registered");
+        }
+    }
+
     #[test]
     fn setting_buttons_update_the_live_audio_and_graphics_backends() {
         let mut app = App::new();
@@ -651,8 +1485,8 @@ mod tests {
             .insert_resource(Options {
                 open: true,
                 settings: true,
-                audio: true,
-                names: false,
+                topic: 1,
+                ..default()
             })
             .init_resource::<crate::survivors::plates::NameplateSettings>()
             .insert_resource(State::new(Phase::Paused))
@@ -665,11 +1499,7 @@ mod tests {
             .unwrap();
         let button = app
             .world_mut()
-            .spawn((
-                Interaction::Pressed,
-                Action::Adjust(volume, -1),
-                BackgroundColor(Color::BLACK),
-            ))
+            .spawn((Interaction::Pressed, Action::Adjust(volume, -1)))
             .id();
         app.update();
         assert!((app.world().resource::<crate::sound::SoundConfig>().master - 0.9).abs() < 0.001);
@@ -680,16 +1510,13 @@ mod tests {
             Some("0.9")
         );
         app.world_mut().despawn(button);
-        app.world_mut().resource_mut::<Options>().audio = false;
+        app.world_mut().resource_mut::<Options>().topic = 0;
         let render = SETTINGS
             .iter()
             .position(|s| s.key == "renderScale")
             .unwrap();
-        app.world_mut().spawn((
-            Interaction::Pressed,
-            Action::Adjust(render, 1),
-            BackgroundColor(Color::BLACK),
-        ));
+        app.world_mut()
+            .spawn((Interaction::Pressed, Action::Adjust(render, 1)));
         app.update();
         assert_eq!(
             app.world()

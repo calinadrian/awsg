@@ -132,7 +132,8 @@ pub fn png(bytes: &[u8], images: &mut Assets<Image>) -> Handle<Image> {
 }
 
 impl CardArt {
-    pub fn load(fonts: &mut Assets<Font>, images: &mut Assets<Image>) -> Self {
+    /// The cards letter in the HUD's one font, `font`, like every other survivors screen.
+    pub fn load(font: Handle<Font>, images: &mut Assets<Image>) -> Self {
         macro_rules! layers {
             ($kind:literal) => {
                 ["common", "uncommon", "rare", "epic", "legendary"].map(|name| {
@@ -158,22 +159,10 @@ impl CardArt {
             };
         }
         Self {
-            label: fonts.add(
-                Font::try_from_bytes(include_bytes!("../../assets/cards/font-0.ttf").to_vec())
-                    .expect("Cinzel regular"),
-            ),
-            title: fonts.add(
-                Font::try_from_bytes(include_bytes!("../../assets/cards/font-1.ttf").to_vec())
-                    .expect("Cinzel bold"),
-            ),
-            body: fonts.add(
-                Font::try_from_bytes(include_bytes!("../../assets/cards/font-2.ttf").to_vec())
-                    .expect("Crimson Pro regular"),
-            ),
-            value: fonts.add(
-                Font::try_from_bytes(include_bytes!("../../assets/cards/font-3.ttf").to_vec())
-                    .expect("Crimson Pro semibold"),
-            ),
+            label: font.clone(),
+            title: font.clone(),
+            body: font.clone(),
+            value: font,
             arrow: comparison_arrow(images),
             background: layers!("background"),
             border: layers!("border"),
@@ -185,10 +174,11 @@ impl CardArt {
 
 pub fn setup(
     mut commands: Commands,
-    mut fonts: ResMut<Assets<Font>>,
+    asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    commands.insert_resource(CardArt::load(&mut fonts, &mut images));
+    let font = crate::char_select::wow_font(&asset_server);
+    commands.insert_resource(CardArt::load(font, &mut images));
 }
 
 pub struct StatRow {

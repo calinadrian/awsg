@@ -37,6 +37,10 @@ const VENOM: u32 = 6917;
 const SWOOP: u32 = 5708;
 const CONSECRATION: u32 = 26573;
 
+mod story {
+    include!("story_bosses.rs");
+}
+
 /// A mid-boss's two moves, both from the start of the fight.
 macro_rules! pair {
     ($a:expr, $b:expr) => {
@@ -528,6 +532,7 @@ static FINALE: Kit = Kit {
 
 /// A last boss's own three phases.
 fn finale(boss: &str) -> &'static Kit {
+    if let Some(kit) = story::finale(boss) { return kit; }
     match boss {
         "Gnarlpine Augur" => &GNARLPINE_AUGUR,
         "Bjarn" => &BJARN,

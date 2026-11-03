@@ -51,6 +51,7 @@ fn track(
     phase: Res<State<Phase>>, gear: Res<super::inventory::Equipment>, coop: Res<super::coop::Coop>,
     creatures: Option<Res<crate::entities::Creatures>>,
     auto: Option<Res<super::auto::Auto>>,
+    mut talents: ResMut<super::talents::TalentBook>,
 ) {
     let mut changed = false;
     if *phase.get() != Phase::Menu {
@@ -77,6 +78,7 @@ fn track(
         selection.cleared.clone_from(&progress.cleared_zones);
         selection.version += 1;
     }
+    refresh_story(&mut selection, &gear, &coop, &mut talents);
     if *phase.get() != Phase::Menu { return; }
     let race = selection.look.and_then(|i| selection.looks.get(i)).map(|look| look.1);
     if race.is_none_or(|race| !selection.race_unlocked(race)) {
@@ -97,6 +99,26 @@ fn track(
         if let Some(map) = super::data::MAPS.iter().position(|map| map.name == name) { selection.select_map(map); }
     }
 }
+
+/// Raid access follows the selected class and current solo/realm quest ledger.
+pub(super) fn refresh_story(
+    selection: &mut Selection,
+    gear: &super::inventory::Equipment,
+    coop: &super::coop::Coop,
+    talents: &mut super::talents::TalentBook,
+) {
+    let class = selection.class_def().map(|class| class.id);
+    let level = class.map_or(1, |class| talents.class(class).level());
+    let quests = class.and_then(|class| gear.hero(&gear.realm(coop), class))
+        .map(|hero| hero.inventory.quests_done.iter().filter(|(_, count)| **count > 0)
+            .map(|(id, _)| id.clone()).collect()).unwrap_or_default();
+    if selection.story_class != class || selection.class_level != level || selection.story_quests != quests {
+        selection.story_class = class;
+        selection.class_level = level;
+        selection.story_quests = quests;
+        selection.version += 1;
+    }
+}
 fn begin(mut progress: ResMut<Progress>) {
     progress.paid = false;
 }
@@ -110,7 +132,7 @@ impl Progress {
         }
     }
     pub fn settle(&mut self, run: &Run, zone: &str, coop: bool) {
-        if self.paid || (run.elapsed <= 0. && run.kills == 0) {
+        if run.test || self.paid || (run.elapsed <= 0. && run.kills == 0) {
             return;
         }
         self.paid = true;

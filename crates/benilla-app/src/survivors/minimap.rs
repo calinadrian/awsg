@@ -1,12 +1,11 @@
-//! The minimap, laid out as `Minimap.xml` lays out `MinimapCluster` at the top right: the zone line
-//! on the border's top strip, the 140-unit map in its ring with the zoom buttons, the minimize
-//! button, and `GameTime.xml`'s day clock.
+//! The minimap at the head of the right column ([`super::right_column`]): a square map in a steel
+//! frame, the close, day and zoom knobs down its left, and a plate under it with the zone and the
+//! player's local time.
 //!
-//! Bevy UI clips only to rectangles, so the round map is composited here each frame: the ADT tiles
-//! through `md5translate.trs` (north up, 533.33 yd per 256-px tile), masked by `MinimapMask.blp`,
-//! then the player arrow, then the red `ObjectIcons` cell per live enemy, the dot the reference
-//! draws for a tracked creature. Sizes are the engine minimap's ([`crate::minimap`]), measured
-//! against its 140.8-px blip basis.
+//! The map is composited here each frame: the ADT tiles through `md5translate.trs` (north up,
+//! 533.33 yd per 256-px tile), then the player arrow, then the red `ObjectIcons` cell per live
+//! enemy, the dot the reference draws for a tracked creature. Sizes are the engine minimap's
+//! ([`crate::minimap`]), measured against its 140.8-px blip basis.
 
 use std::collections::HashMap;
 
@@ -22,7 +21,9 @@ use benilla_world::world_point::WorldPoint;
 use super::Run;
 use super::enemies::Enemy;
 use super::hero::Hero;
-use super::hud::UiArt;
+use super::damage_meter::RightStack;
+use super::hud::{HudFont, UiArt};
+use super::right_column::{self as col, HudSizes, Slot};
 use crate::area::AreaTableRes;
 
 /// The composite's edge in texels; the 140-unit widget is ~200 px at 1080p.
@@ -54,7 +55,19 @@ const GROUP_HORDE: u32 = 4;
 #[derive(Component)]
 pub(super) struct ZoneText;
 
-/// The map body: hidden by the minimize button with everything in its ring.
+/// The local time on the zone plate.
+#[derive(Component)]
+pub(super) struct ClockText;
+
+/// The cluster's root, built at this scale.
+#[derive(Component)]
+pub(super) struct MapCluster(f32);
+
+/// A knob's glyph, dimmed when its button can do nothing.
+#[derive(Component)]
+pub(super) struct KnobGlyph(MapButton);
+
+/// The map and everything but the close knob: hidden by that knob.
 #[derive(Component)]
 pub(super) struct MapBody;
 
@@ -104,7 +117,6 @@ impl Rgba {
 
 struct Art {
     translate: MinimapTranslate,
-    mask: Option<Rgba>,
     arrow: Option<Rgba>,
     icons: Option<Rgba>,
 }
@@ -150,157 +162,237 @@ impl MiniMap {
     }
 }
 
-/// `MinimapCluster` and its children, in cluster-local units (top-left origin) from `Minimap.xml`.
-pub(super) fn spawn_cluster(root: &mut ChildSpawnerCommands, font: &Handle<Font>, map: &MiniMap) {
+/// Build the cluster at the head of the right column, again when its size setting changes.
+pub(super) fn build(
+    mut commands: Commands,
+    font: Option<Res<HudFont>>,
+    sizes: Res<HudSizes>,
+    map: Option<Res<MiniMap>>,
+    stacks: Query<Entity, With<RightStack>>,
+    clusters: Query<(Entity, &MapCluster)>,
+) {
+    let (Some(font), Some(map)) = (font, map) else { return };
+    let Ok(stack) = stacks.single() else { return };
+    let k = sizes.map;
+    if let Some((e, c)) = clusters.iter().next() {
+        if c.0 == k {
+            return;
+        }
+        commands.entity(e).despawn();
+    }
+    let root = spawn_cluster(&mut commands, &font.0, &map, k);
+    commands
+        .entity(root)
+        .insert((ChildOf(stack), Slot(0), super::hud_layout::Movable::new("minimap", "Minimap")));
+}
+
+/// The cluster's height in units: the framed map and the zone plate under it, or the close knob
+/// alone while the map is hidden.
+fn cluster_height(shown: bool) -> f32 {
+    if shown { 188.0 } else { 20.0 }
+}
+
+/// The 210-unit cluster at scale `k`: the framed 164-unit map at its right, the knobs down its left.
+fn spawn_cluster(commands: &mut Commands, f: &Handle<Font>, map: &MiniMap, k: f32) -> Entity {
+    let px = |v: f32| Val::Px(v * k);
     let at = |left: f32, top: f32, w: f32, h: f32| Node {
         position_type: PositionType::Absolute,
-        left: Val::Px(left),
-        top: Val::Px(top),
-        width: Val::Px(w),
-        height: Val::Px(h),
+        left: px(left),
+        top: px(top),
+        width: px(w),
+        height: px(h),
         ..default()
     };
-    let art = |path: &'static str, coords: [f32; 4]| {
-        (
-            ImageNode {
-                color: Color::NONE,
-                ..default()
+    let knob = |c: &mut ChildSpawnerCommands, node: Node, size: f32| {
+        c.spawn((
+            Node {
+                width: px(size),
+                height: px(size),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::MAX,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..node
             },
-            UiArt::crop(path, coords),
-        )
+            BackgroundColor(col::KNOB),
+            BorderColor::all(col::STEEL_LO),
+            Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
+        ))
+        .id()
     };
-    // Inset so the clock (to x 196) and the minimize button (from y -3) stay on screen.
-    root.spawn(Node {
-        position_type: PositionType::Absolute,
-        right: Val::Px(6.0),
-        top: Val::Px(4.0),
-        width: Val::Px(192.0),
-        height: Val::Px(192.0),
-        ..default()
-    })
-    .with_children(|cluster| {
-        cluster.spawn((
-            at(0.0, 0.0, 192.0, 32.0),
-            art(
-                "Interface\\Minimap\\UI-Minimap-Border",
-                [0.25, 1.0, 0.0, 0.125],
-            ),
-        ));
-        cluster
-            .spawn(at(29.0, 7.0, 128.0, 12.0))
-            .with_children(|zone| {
-                zone.spawn((
-                    ZoneText,
-                    Text::new(""),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(1.0, 0.82, 0.0)),
-                    TextShadow {
-                        offset: Vec2::new(1.0, 1.0),
-                        color: Color::BLACK,
-                    },
-                    TextLayout::new(Justify::Center, LineBreak::NoWrap),
+    // A knob's glyph as bars, not a character, so it sits on the knob's exact centre: `len`
+    // long and 1.5 thick, one bar for "-", two crossed for "+", the cross turned for "x".
+    let glyph = |c: &mut ChildSpawnerCommands, button: MapButton, len: f32, bars: &[f32]| {
+        for &turn in bars {
+            c.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|centre| {
+                centre.spawn((
+                    KnobGlyph(button),
                     Node {
-                        width: Val::Percent(100.0),
+                        width: px(len),
+                        height: px(1.5),
+                        flex_shrink: 0.0,
                         ..default()
                     },
+                    BackgroundColor(col::STEEL_HI),
+                    UiTransform::from_rotation(Rot2::degrees(turn)),
                 ));
             });
-        cluster
-            .spawn((MapBody, at(35.0, 22.0, 140.0, 140.0)))
-            .with_children(|body| {
-                body.spawn((
+        }
+    };
+    commands
+        .spawn((
+            MapCluster(k),
+            Node {
+                width: px(210.0),
+                height: px(cluster_height(map.shown)),
+                ..default()
+            },
+        ))
+        .with_children(|c| {
+            // The boss bars' frame: a black line, the grey edge, a dark inset, then the map.
+            c.spawn((
+                MapBody,
+                col::plate(Node {
+                    padding: UiRect::all(Val::Px(2.0)),
+                    ..at(46.0, 4.0, 164.0, 164.0)
+                }),
+            ))
+            .with_children(|frame| {
+                frame.spawn((
                     Node {
                         width: Val::Percent(100.0),
                         height: Val::Percent(100.0),
                         ..default()
                     },
                     ImageNode::new(map.image.clone()),
-                ));
-                // `MinimapBackdrop`: the ring, 192² at the cluster's (0, 20).
-                body.spawn((
-                    at(-35.0, -2.0, 192.0, 192.0),
-                    art(
-                        "Interface\\Minimap\\UI-Minimap-Border",
-                        [0.25, 1.0, 0.125, 0.875],
-                    ),
-                ));
-                body.spawn((
-                    MapButton::ZoomIn,
-                    Button,
-                    at(122.0, 91.0, 32.0, 32.0),
-                    ImageNode::default(),
-                ));
-                body.spawn((
-                    MapButton::ZoomOut,
-                    Button,
-                    at(96.0, 119.0, 32.0, 32.0),
-                    ImageNode::default(),
+                    Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
                 ));
             });
-        // `GameTimeFrame`, 50² at the cluster's top right, offset (4, -19).
-        let tod = if (DAWN..DUSK).contains(&super::hero::MINUTE_OF_DAY) {
-            0.0
-        } else {
-            0.5
-        };
-        cluster.spawn((
-            at(146.0, 19.0, 50.0, 50.0),
-            art(
-                "Interface\\Minimap\\UI-TOD-Indicator",
-                [tod, tod + 50.0 / 128.0, 0.0, 50.0 / 64.0],
-            ),
-        ));
-        cluster.spawn((
-            MapButton::Toggle,
-            Button,
-            at(161.0, -3.0, 32.0, 32.0),
-            ImageNode::default(),
-        ));
-    });
+            // North: a steel diamond on the frame's top edge.
+            c.spawn((
+                MapBody,
+                col::diamond(at(121.5, -2.5, 13.0, 13.0), 13.0 * k, col::STEEL_LO),
+            ));
+            c.spawn((
+                MapBody,
+                Node {
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..at(121.5, -2.5, 13.0, 13.0)
+                },
+            ))
+            .with_children(|n| {
+                n.spawn((
+                    Text::new("N"),
+                    TextFont {
+                        font: f.clone(),
+                        font_size: 8.0 * k,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.043, 0.055, 0.078)),
+                ));
+            });
+            // The zone and the local time.
+            c.spawn((
+                MapBody,
+                col::plate(Node {
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::horizontal(px(6.0)),
+                    column_gap: px(6.0),
+                    overflow: Overflow::clip(),
+                    ..at(46.0, 172.0, 164.0, 16.0)
+                }),
+            ))
+            .with_children(|plate| {
+                plate.spawn((ZoneText, col::label(f, "", 10.0 * k, col::TEXT_HI)));
+                plate.spawn((ClockText, col::label(f, "", 10.0 * k, col::STEEL_HI)));
+            });
+            let x = knob(c, at(28.0, 6.0, 14.0, 14.0), 14.0);
+            c.commands().entity(x).insert((MapButton::Toggle, Button));
+            c.commands().entity(x).with_children(|b| glyph(b, MapButton::Toggle, 7.0, &[45.0, -45.0]));
+            // `GameTimeFrame`'s sun or moon, by the run's hour.
+            let tod = if (DAWN..DUSK).contains(&super::hero::MINUTE_OF_DAY) {
+                0.0
+            } else {
+                0.5
+            };
+            let day = knob(c, at(26.0, 28.0, 18.0, 18.0), 18.0);
+            c.commands().entity(day).insert(MapBody).with_children(|b| {
+                b.spawn((
+                    Node {
+                        width: px(16.0),
+                        height: px(16.0),
+                        border_radius: BorderRadius::MAX,
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    ImageNode {
+                        color: Color::NONE,
+                        ..default()
+                    },
+                    UiArt::crop(
+                        "Interface\\Minimap\\UI-TOD-Indicator",
+                        [tod + 0.06, tod + 50.0 / 128.0 - 0.06, 0.1, 50.0 / 64.0 - 0.1],
+                    ),
+                ));
+            });
+            for (button, top, bars) in [
+                (MapButton::ZoomIn, 128.0, &[0.0, 90.0][..]),
+                (MapButton::ZoomOut, 150.0, &[0.0][..]),
+            ] {
+                let e = knob(c, at(26.0, top, 18.0, 18.0), 18.0);
+                c.commands().entity(e).insert((button, Button, MapBody));
+                c.commands().entity(e).with_children(|b| glyph(b, button, 8.0, bars));
+            }
+        })
+        .id()
 }
 
-/// The zoom and minimize buttons: their `Up`/`Down`/`Disabled` art, and a press acts.
+/// The knobs: a press acts, hover lights the ring, and a zoom at its end dims.
+#[allow(clippy::type_complexity)]
 pub(super) fn map_buttons(
     mut map: ResMut<MiniMap>,
-    mut buttons: Query<(Ref<Interaction>, &MapButton, &mut ImageNode)>,
-    mut bodies: Query<&mut Node, With<MapBody>>,
-    assets: Option<ResMut<WorldAssets>>,
-    mut images: ResMut<Assets<Image>>,
+    mut buttons: Query<(Ref<Interaction>, &MapButton, &mut BorderColor)>,
+    mut glyphs: Query<(&KnobGlyph, &mut BackgroundColor)>,
+    mut bodies: Query<&mut Node, (With<MapBody>, Without<MapCluster>)>,
+    mut clusters: Query<(&MapCluster, &mut Node), Without<MapBody>>,
 ) {
-    let Some(mut assets) = assets else { return };
-    for (interaction, button, mut img) in &mut buttons {
-        let pressed = *interaction == Interaction::Pressed;
-        if pressed && interaction.is_changed() {
+    for (interaction, button, mut border) in &mut buttons {
+        if *interaction == Interaction::Pressed && interaction.is_changed() {
             match button {
                 MapButton::ZoomIn => map.zoom = (map.zoom + 1).min(ZOOM_CHUNKS.len() - 1),
                 MapButton::ZoomOut => map.zoom = map.zoom.saturating_sub(1),
                 MapButton::Toggle => map.shown = !map.shown,
             }
         }
-        let disabled = match button {
-            MapButton::ZoomIn => map.zoom == ZOOM_CHUNKS.len() - 1,
-            MapButton::ZoomOut => map.zoom == 0,
-            MapButton::Toggle => false,
-        };
-        let stem = match button {
-            MapButton::ZoomIn => "Interface\\Minimap\\UI-Minimap-ZoomInButton",
-            MapButton::ZoomOut => "Interface\\Minimap\\UI-Minimap-ZoomOutButton",
-            MapButton::Toggle => "Interface\\Buttons\\UI-Panel-MinimizeButton",
-        };
-        let state = match (disabled, pressed) {
-            (true, _) => "Disabled",
-            (false, true) => "Down",
-            (false, false) => "Up",
-        };
-        if let Some(h) = assets.sprite_texture(&format!("{stem}-{state}"), &mut images) {
-            if img.image != h {
-                img.image = h;
-            }
+        let want = BorderColor::all(if *interaction == Interaction::None {
+            col::STEEL_LO
+        } else {
+            col::STEEL_HI
+        });
+        if *border != want {
+            *border = want;
         }
+    }
+    for (glyph, mut color) in &mut glyphs {
+        let want = match glyph.0 {
+            MapButton::ZoomIn if map.zoom == ZOOM_CHUNKS.len() - 1 => col::STEEL_LO,
+            MapButton::ZoomOut if map.zoom == 0 => col::STEEL_LO,
+            MapButton::Toggle => col::CRIMSON,
+            _ => col::STEEL_HI,
+        };
+        color.set_if_neq(BackgroundColor(want));
     }
     let display = if map.shown {
         Display::Flex
@@ -310,6 +402,48 @@ pub(super) fn map_buttons(
     for mut node in &mut bodies {
         if node.display != display {
             node.display = display;
+        }
+    }
+    for (cluster, mut node) in &mut clusters {
+        let want = Val::Px(cluster_height(map.shown) * cluster.0);
+        if node.height != want {
+            node.height = want;
+        }
+    }
+}
+
+/// The cluster shows over the run, the pause menu included, as the HUD does.
+pub(super) fn show_cluster(
+    phase: Res<State<super::Phase>>,
+    mut clusters: Query<&mut Visibility, With<MapCluster>>,
+) {
+    let p = *phase.get();
+    let want = if p != super::Phase::Menu && p != super::Phase::GameOver {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut clusters {
+        v.set_if_neq(want);
+    }
+}
+
+/// The player's local time, "21:47", read once a second.
+pub(super) fn clock(
+    time: Res<Time<Real>>,
+    mut texts: Query<&mut Text, With<ClockText>>,
+    mut next_at: Local<f32>,
+) {
+    let now = time.elapsed_secs();
+    if now < *next_at && texts.iter().all(|t| !t.0.is_empty()) {
+        return;
+    }
+    *next_at = now + 1.0;
+    let [_, _, hour, minute, _, _] = crate::ui_chat::logging::local_now();
+    let want = format!("{hour:02}:{minute:02}");
+    for mut text in &mut texts {
+        if text.0 != want {
+            text.0.clone_from(&want);
         }
     }
 }
@@ -402,7 +536,6 @@ pub(super) fn compose(
         };
         map.art = Some(Art {
             translate,
-            mask: Rgba::decode(&mut assets, "Textures\\MinimapMask"),
             arrow: Rgba::decode(&mut assets, crate::minimap::blips::PLAYER_ARROW_TEXTURE),
             icons: Rgba::decode(&mut assets, "Interface\\Minimap\\ObjectIcons"),
         });
@@ -475,21 +608,7 @@ pub(super) fn compose(
     for v in 0..SIDE {
         for u in 0..SIDE {
             let o = (v * SIDE + u) * 4;
-            let mask = match &art.mask {
-                Some(m) => {
-                    let (mx, my) = (u * m.w / SIDE, v * m.h / SIDE);
-                    let i = (my * m.w + mx) * 4;
-                    m.px[i].min(m.px[i + 3])
-                }
-                None => {
-                    let d = Vec2::new(u as f32 + 0.5 - half, v as f32 + 0.5 - half).length();
-                    ((half - d).clamp(0.0, 1.0) * 255.0) as u8
-                }
-            };
-            if mask == 0 {
-                buf[o..o + 4].copy_from_slice(&[0; 4]);
-                continue;
-            }
+            let mask = 255u8;
             let g = origin + (Vec2::new(u as f32, v as f32) + 0.5 - half) * tex_per_px - 0.5;
             let (x0, y0) = (g.x.floor() as i32, g.y.floor() as i32);
             let (fx, fy) = (g.x - x0 as f32, g.y - y0 as f32);
@@ -537,7 +656,7 @@ pub(super) fn compose(
                 continue;
             }
             let off = Vec2::new(tf.translation.x - p.x, tf.translation.z - p.z);
-            if off.length() > radius {
+            if off.x.abs() > radius || off.y.abs() > radius {
                 continue;
             }
             blit(buf, center + off / yd_per_px, size, |q| {
@@ -547,7 +666,7 @@ pub(super) fn compose(
                 Some(icons.sample(x, y))
             });
         }
-        // The held lairs, big and gold; one out of view sits on the rim, pointing the way.
+        // The held lairs, big and gold; one out of view sits on the edge, pointing the way.
         let size = DOT_PX * scale * 2.2;
         for (at, held) in lairs.marks() {
             if !held {
@@ -555,8 +674,9 @@ pub(super) fn compose(
             }
             let mut off = Vec2::new(at.x - p.x, at.z - p.z) / yd_per_px;
             let rim = half - size * 0.6;
-            if off.length() > rim {
-                off = off.normalize_or_zero() * rim;
+            let far = off.x.abs().max(off.y.abs());
+            if far > rim {
+                off *= rim / far;
             }
             blit(buf, center + off, size, |q| {
                 let f = q / size + 0.5;

@@ -12,7 +12,7 @@ use super::data::{self, EnemyDef};
 use super::hero::{self, HERO_RADIUS, Hero};
 use super::units::{self, COLOR_HURT, Fx, Marks, UnitSpec, flat, yaw_toward};
 use super::{Phase, Rng, Run, Selection};
-use crate::creature_anim::{MovementState, move_flags};
+use crate::creature_anim::{Engaged, MovementState, move_flags};
 use crate::net::{FieldChanged, Guid, ObjectStore};
 
 #[derive(Component)]
@@ -48,15 +48,45 @@ pub(super) struct Enemy {
     pub ward: bool,
     /// Raised to hold up a master's ward: every spell goes for it first.
     pub guard: bool,
-    /// A regular Elwynn mob's next short move towards a slot around the hero.
-    approach: Option<Approach>,
+    /// Holding in melee reach: it stands and swings until the hero steps clear.
+    melee: bool,
+    /// Wears [`Engaged`] for the Ready stance while it holds in melee.
+    engaged: bool,
+    /// The level it shows, set from the hero's at spawn.
+    pub level: u32,
+    /// Its render size against the row's scale: below 1 where [`cap_heights`] shrank it.
+    pub size: f32,
+    /// A silver: a bigger, tougher horde mob that pays a chest and extra XP, with no bar or kit.
+    pub silver: bool,
 }
 
-struct Approach {
-    angle: f32,
-    next: f32,
-    goal: Vec3,
+/// A silver's health, damage, size and XP against its horde row.
+const SILVER_HP: f32 = 5.0;
+const SILVER_DAMAGE: f32 = 1.6;
+const SILVER_SCALE: f32 = 1.4;
+const SILVER_XP: u32 = 3;
+
+/// Enemies take the hero's level when they spawn, elites and bosses three above it, capped at 63.
+/// Native 0x5bff540 writes `min(hero + 3 × elite, 63)` to UNIT_FIELD_LEVEL; the boss (0x5c13564)
+/// and lair (0x5c664ba) spawns pass the elite flag, as does a roaming row's +0x4c.
+/// A silver stands one above the hero.
+fn scaled_level(hero: u32, role: Role) -> u32 {
+    let above = match role {
+        Role::Horde => 0,
+        Role::Silver => 1,
+        Role::Roaming | Role::Lair | Role::Boss => 3,
+    };
+    (hero + above).min(63)
 }
+
+/// Every chaser's pace against its row speed. Native 0x5c0a1e2 sends each chaser an 8-yard move
+/// lasting `8 / (0.8 × speed)` seconds (0x1461bbf70 = 0.8, 0x146f873f0 = 8.0); the boss
+/// (0x5c139a7) and lair (0x5c66a0a) spawns join the same record list, so it holds for them too.
+/// Charges and the walk home keep their own speeds.
+const CHASE_PACE: f32 = 0.8;
+
+/// How far past its reach the hero may step before a mob in melee gives chase again.
+const MELEE_LEEWAY: f32 = 0.6;
 
 impl Enemy {
     /// A lair guardian not yet woken: spells pass it by until the hero comes near or strikes it.
@@ -73,14 +103,9 @@ impl Enemy {
         self.boss || self.home.is_some() || self.guard
     }
 
-    pub(super) fn relocated(&mut self, pos: Vec3, center: Vec3) {
+    pub(super) fn relocated(&mut self, _pos: Vec3, _center: Vec3) {
         self.cast = None;
-        if let Some(approach) = self.approach.as_mut() {
-            let side = flat(pos - center);
-            approach.angle = side.z.atan2(side.x);
-            approach.goal = pos;
-            approach.next = 0.0;
-        }
+        self.melee = false;
     }
 }
 
@@ -196,6 +221,7 @@ pub(super) struct Loot {
     pub spawn_cost: f32,
     pub roaming_elite: bool,
     pub elite: bool,
+    pub silver: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -259,11 +285,30 @@ pub(super) fn spawn_enemy(
     spawn_with(commands, run, def, pos, hero, role, 0, None)
 }
 
+/// A silver from a horde row, taking one of the horde's spawn slots.
+pub(super) fn spawn_silver(
+    commands: &mut Commands,
+    run: &mut Run,
+    def: &'static EnemyDef,
+    pos: Vec3,
+    hero: Vec3,
+) -> Entity {
+    if let Some(slots) = run.horde_spawn_slots.as_mut() {
+        if *slots == 0 {
+            return Entity::PLACEHOLDER;
+        }
+        *slots -= 1;
+    }
+    spawn_with(commands, run, def, pos, hero, Role::Silver, 0, None)
+}
+
 /// How an enemy entered the fight, which picks its stat curve.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Role {
     /// An ordinary chaser from the roster's horde rows.
     Horde,
+    /// A horde row sent as a silver: bigger and tougher, no bar or kit.
+    Silver,
     /// An elite row sent with the horde, away from any lair.
     Roaming,
     /// An elite holding a lair.
@@ -281,6 +326,15 @@ pub(super) fn spawn_stats(def: &EnemyDef, role: Role, elapsed: f32, slain: u32) 
             let (hp, damage, speed) =
                 super::elwynn_behavior::regular_stats(def.hp, def.damage, def.speed, elapsed);
             (hp * tier.normal_hp, damage * tier.normal_damage, speed)
+        }
+        Role::Silver => {
+            let (hp, damage, speed) =
+                super::elwynn_behavior::regular_stats(def.hp, def.damage, def.speed, elapsed);
+            (
+                hp * tier.normal_hp * SILVER_HP,
+                damage * tier.normal_damage * SILVER_DAMAGE,
+                speed,
+            )
         }
         Role::Roaming => {
             let (hp, damage, speed) =
@@ -326,14 +380,23 @@ fn spawn_with(
     home: Option<Home>,
 ) -> Entity {
     let boss = role == Role::Boss;
+    let silver = role == Role::Silver;
+    let grow = if home.is_some() {
+        1.35
+    } else if silver {
+        SILVER_SCALE
+    } else {
+        1.0
+    };
+    let level = scaled_level(run.level, role);
     let serial = run.guid();
     let e = units::spawn_unit(
         commands,
         &UnitSpec {
             serial,
             display: def.display,
-            scale: def.scale * if home.is_some() { 1.35 } else { 1.0 },
-            level: def.level,
+            scale: def.scale * grow,
+            level,
             faction: units::FACTION_MONSTER,
             bytes0: 1 << 8,
             weapons: &[],
@@ -363,8 +426,8 @@ fn spawn_with(
             max_hp: hp,
             speed,
             damage,
-            radius: radius_for(def) * if home.is_some() { 1.35 } else { 1.0 },
-            xp: def.xp,
+            radius: radius_for(def) * grow,
+            xp: def.xp * if silver { SILVER_XP } else { 1 },
             boss,
             attack_cd: if home.is_some() {
                 def.attack * 0.5
@@ -386,14 +449,11 @@ fn spawn_with(
             affixes,
             ward: false,
             guard: false,
-            approach: (home.is_some() || def.cost > 0.0 || def.roaming_elite).then(|| {
-                let side = flat(pos - hero);
-                Approach {
-                    angle: side.z.atan2(side.x),
-                    next: 0.0,
-                    goal: pos,
-                }
-            }),
+            melee: false,
+            engaged: false,
+            level,
+            size: 1.0,
+            silver,
         },
         Marks::debuffs(),
     ));
@@ -430,7 +490,8 @@ pub(super) fn spawn_enemies(
     coop: Res<super::coop::Coop>,
 ) {
     let Ok(h) = hero.single() else { return };
-    if run.dead_t.is_some() && !coop.living_guests() {
+    // Test Grounds spawns only what its panel asks for.
+    if run.test || (run.dead_t.is_some() && !coop.living_guests()) {
         return;
     }
     let hpos = if run.dead_t.is_some() {
@@ -478,6 +539,7 @@ pub(super) fn spawn_enemies(
 /// swinging when in reach.
 #[allow(clippy::type_complexity)]
 pub(super) fn move_enemies(
+    mut commands: Commands,
     time: Res<Time>,
     mut run: ResMut<Run>,
     ground: super::dungeon::Ground,
@@ -676,7 +738,7 @@ pub(super) fn move_enemies(
             if c.windup <= 0.0 && !c.hit && {
                 let reach = if e.home.is_some() || e.def.roaming_elite {
                     let scale = if e.home.is_some() { 1.35 } else { 1.0 };
-                    (e.def.scale * scale * 1.2).clamp(4.0, 7.0)
+                    (e.def.scale * e.size * scale * 1.2).clamp(4.0, 7.0)
                 } else {
                     HERO_RADIUS + e.radius + 0.6
                 };
@@ -763,11 +825,19 @@ pub(super) fn move_enemies(
 
         let held = e.stun_t > 0.0 || e.root_t > 0.0;
         let contact_reach = if e.home.is_some() {
-            2.2 + 1.2 * e.def.scale * 1.35
+            2.2 + 1.2 * e.def.scale * e.size * 1.35
         } else {
             HERO_RADIUS + e.radius + 0.35
         };
-        let contact = dist <= contact_reach;
+        // WoW's melee hold: a mob stops a little inside its reach and gives chase again only
+        // once the hero steps clear of it plus a leeway, so it never stutters between run and
+        // stand at the edge.
+        if dist <= contact_reach {
+            e.melee = true;
+        } else if dist > contact_reach + MELEE_LEEWAY {
+            e.melee = false;
+        }
+        let contact = e.melee && dist <= contact_reach + MELEE_LEEWAY;
         // A caster stops once the hero is in its reach and throws from there.
         let in_reach = e
             .def
@@ -775,61 +845,36 @@ pub(super) fn move_enemies(
             .is_some_and(|r| dist <= r.range && homing.is_none());
         let mut step = Vec3::ZERO;
         let mut speed = 0.0;
-        let mut approach_distance = None;
         if let Some(dir) = homing {
             speed = e.speed;
             step = dir * speed;
             tf.rotation = Quat::from_rotation_y(yaw_toward(dir));
         } else if !held && !hero_down {
-            let mut dir = if e.fear_t > 0.0 {
+            let fleeing = e.fear_t > 0.0;
+            let dir = if fleeing {
                 -to_hero.normalize_or_zero()
             } else {
                 to_hero.normalize_or_zero()
             };
-            if e.def.ranged.is_none() && e.fear_t <= 0.0 && !contact {
-                let scale = e.def.scale;
-                let speed = e.speed * e.slow;
-                if let Some(approach) = e.approach.as_mut() {
-                    // A slot reached out of reach is stale (the hero moved on): re-aim now rather
-                    // than stand idle until the timer.
-                    if now >= approach.next || flat(approach.goal - pos).length() < 0.1 {
-                        // WoW XY -> Bevy XZ reverses the native angle's handedness.
-                        approach.angle -= 0.15;
-                        // The native minimum slot radius is 1.5. This renderer's smaller
-                        // contact bodies need the slot inside melee reach to allow a swing.
-                        let radius =
-                            super::elwynn_behavior::approach_radius(scale).min(contact_reach * 0.8);
-                        let goal = super::elwynn_behavior::approach_goal(
-                            [pos.x, pos.z],
-                            [hpos.x, hpos.z],
-                            approach.angle,
-                            radius,
-                        );
-                        approach.goal = Vec3::new(goal[0], pos.y, goal[1]);
-                        approach.next = now
-                            + super::elwynn_behavior::repath_after(
-                                flat(approach.goal - pos).length(),
-                                speed,
-                            );
-                    }
-                    let remaining = flat(approach.goal - pos);
-                    approach_distance = Some(remaining.length());
-                    dir = remaining.normalize_or_zero();
-                }
-            }
-            if (!contact && !in_reach) || e.fear_t > 0.0 {
-                speed = e.speed * e.slow;
-                if let Some(remaining) = approach_distance {
-                    speed = speed.min(remaining / dt);
-                }
-                step = dir * speed;
+            if fleeing || (!contact && !in_reach) {
+                // Straight at the hero at the full gait. The last stride is clipped to stop at
+                // the hold distance, but the animation keeps the run's speed: a creeping speed
+                // would freeze the run cycle mid-stride while the body glides.
+                speed = e.speed * e.slow * CHASE_PACE;
+                let stride = if fleeing {
+                    speed * dt
+                } else {
+                    (speed * dt).min((dist - contact_reach * 0.9).max(0.0))
+                };
+                step = dir * (stride / dt);
             }
             if dir != Vec3::ZERO {
                 let target = Quat::from_rotation_y(yaw_toward(dir));
-                tf.rotation = tf.rotation.slerp(target, (dt * 10.0).min(1.0));
+                tf.rotation = tf.rotation.slerp(target, 1.0 - (-12.0 * dt).exp());
             }
         }
-        let shove = push.get(&ent).copied().unwrap_or_default();
+        // A mob holding in melee is only nudged by the crowd, not slid around in its stance.
+        let shove = push.get(&ent).copied().unwrap_or_default() * if speed > 0.0 { 1.0 } else { 0.3 };
         let mut next = pos + step * dt + shove * (dt * 8.0).min(0.5);
         next = ground.at(next, pos.y);
         tf.translation = next;
@@ -839,6 +884,16 @@ pub(super) fn move_enemies(
         } else if mv.speed != 0.0 || mv.flags != 0 {
             mv.speed = 0.0;
             mv.flags = 0;
+        }
+        // In melee it stands in its combat Ready stance between swings, as in WoW.
+        let engaged = contact && !hero_down && homing.is_none() && e.fear_t <= 0.0;
+        if engaged != e.engaged {
+            e.engaged = engaged;
+            if engaged {
+                commands.entity(ent).insert(Engaged(0));
+            } else {
+                commands.entity(ent).remove::<Engaged>();
+            }
         }
 
         let free = homing.is_none()
@@ -917,6 +972,48 @@ pub(super) fn move_enemies(
     run.coop_target = 0;
 }
 
+/// Hogger standing (GnollMelee's Stand box, 1.757 yd, × his 3.5): the tallest a boss stands.
+/// Bigger rigs stretch their animations badly and swallow the screen.
+const BOSS_HEIGHT: f32 = 6.15;
+/// Elites stand a head shorter than the bosses.
+const ELITE_HEIGHT: f32 = 5.0;
+
+/// Shrink an elite or boss whose model, at its row's scale, stands taller than its cap, as soon
+/// as the model loads and its Stand-box height is known; smaller ones keep their size. Reach and
+/// body follow the new size.
+pub(super) fn cap_heights(
+    mut fresh: Query<
+        (
+            &mut Enemy,
+            &mut crate::net::NetEntity,
+            &mut ObjectStore,
+            &mut Transform,
+            &crate::entities::StandBoxHeight,
+        ),
+        Added<crate::entities::StandBoxHeight>,
+    >,
+) {
+    for (mut e, mut net, mut store, mut tf, stand) in &mut fresh {
+        let limit = if e.boss {
+            BOSS_HEIGHT
+        } else if e.home.is_some() || e.def.roaming_elite {
+            ELITE_HEIGHT
+        } else {
+            continue;
+        };
+        if stand.0 <= 0.0 || stand.0 * net.scale <= limit * 1.01 {
+            continue;
+        }
+        let cap = limit / stand.0;
+        let shrink = cap / net.scale;
+        e.size *= shrink;
+        e.radius *= shrink;
+        net.scale = cap;
+        tf.scale = Vec3::splat(cap);
+        store.0.merge(benilla_protocol::ObjectFields::from_pairs(&[(4, cap.to_bits())]));
+    }
+}
+
 /// Mark timers run down; the state kits reap with them.
 pub(super) fn tick_marks(
     time: Res<Time>,
@@ -960,6 +1057,7 @@ pub(super) fn drop_loot(
     gems: Query<(Entity, &Transform, &Gem)>,
     mut coop: ResMut<super::coop::Coop>,
     mut spawner: ResMut<Spawner>,
+    mut next: ResMut<NextState<Phase>>,
 ) {
     if drops.is_empty() {
         return;
@@ -1016,10 +1114,18 @@ pub(super) fn drop_loot(
             );
             info!("survivors gold: dropped base={amount} balance={}", run.gold);
         }
-        if d.boss || d.elite {
-            // The elite/boss reward is a physical free cache; only picking it opens its reward.
+        if d.boss {
+            // A boss leaves a physical free cache; only picking it opens its reward.
             coop.cache(d.pos);
             super::caches::spawn(&mut commands, run.guid(), d.pos, false);
+        } else if d.elite || d.silver {
+            // An elite's or a silver's chest opens on the kill. Guests still get a free cache at
+            // the spot.
+            coop.cache(d.pos);
+            if run.dead_t.is_none() {
+                run.pending_chests += 1;
+                next.set(Phase::LevelUp);
+            }
         }
         if d.elite && rng.f32() < super::magnets::DROP_CHANCE {
             spawn_gem(
@@ -1368,7 +1474,7 @@ pub(super) fn collect_gems(
     });
     let mut collected_xp = 0u32;
     for (e, mut tf, mut g, visible) in &mut gems {
-        let vacuum = magnet_collected && matches!(g.kind, GemKind::Xp(_));
+        let vacuum = magnet_collected && matches!(g.kind, GemKind::Xp(_) | GemKind::Gold(_));
         if *visible == Visibility::Hidden && !vacuum {
             continue;
         }
@@ -1405,8 +1511,9 @@ pub(super) fn collect_gems(
         }
         if let GemKind::Gold(base) = g.kind {
             // As in the original, gold is collected within pickup range. Distant piles
-            // stay put; only collection credits the balance and applies gold-find.
-            if flat(d).length() <= stats.magnet {
+            // stay put unless a magnet sweeps them; only collection credits the balance and
+            // applies gold-find.
+            if vacuum || flat(d).length() <= stats.magnet {
                 let earned =
                     super::gold::collected(base, run.gold_find(), run.party_factor(0.48));
                 if run.dead_t.is_none() {

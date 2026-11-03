@@ -659,6 +659,7 @@ fn receive(
     mut commands: Commands,
     mut coop: ResMut<Coop>,
     mut selection: ResMut<Selection>,
+    (gear, mut talents): (Res<super::inventory::Equipment>, ResMut<super::talents::TalentBook>),
     mut run: ResMut<Run>,
     phase: Res<State<Phase>>,
     mut next: ResMut<NextState<Phase>>,
@@ -757,6 +758,14 @@ fn receive(
                 selection.look = Some(0);
                 selection.map = room.map;
                 selection.version += 1;
+                super::progress::refresh_story(&mut selection, &gear, &coop, &mut talents);
+                if !selection.raid_ready(selection.map_def().name)
+                    || (coop.peer == 0 && !selection.unlocked(room.map)) {
+                    let reason = selection.unlock_hint(selection.map_def().name);
+                    coop.leave();
+                    coop.status = format!("Story access required: {reason}");
+                    continue;
+                }
                 if !super::hud::start_run(&mut run, &mut selection) {
                     coop.leave();
                     continue;
@@ -1648,6 +1657,7 @@ pub(super) fn apply_guest_hits(
                 },
                 roaming_elite: enemy.home.is_none() && enemy.def.roaming_elite,
                 elite: enemy.home.is_some() || enemy.def.roaming_elite,
+                silver: enemy.silver,
             });
             units::kill_unit(&mut store);
             marks.clear();

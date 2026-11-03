@@ -270,6 +270,7 @@ fn paint_tracker(
                 .spawn((
                     Tracker,
                     ChildOf(stack),
+                    super::hud_layout::Movable::new("quests", "Quest tracker"),
                     Node {
                         width: Val::Percent(100.),
                         flex_direction: FlexDirection::Column,

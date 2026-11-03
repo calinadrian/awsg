@@ -740,28 +740,17 @@ impl MapDef {
 
 /// Every battleground defined, playable or not: the adventure atlas lists the locked ones too.
 pub(crate) fn all_maps() -> &'static [MapDef] {
-    ALL_MAPS
+    &ALL_MAPS
 }
+
+static STORY_MAPS: &[MapDef] = include!("story_maps.rs");
+static ALL_MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::new(|| {
+    ORIGINAL_MAPS.iter().chain(STORY_MAPS).copied().collect()
+});
 
 /// Stable menu/save/co-op indices: append new maps so existing picks keep their meaning.
 pub(crate) static MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::new(|| {
-    [
-        "Elwynn Forest",
-        "Hall of Thanes",
-        "Durotar",
-        "Westfall",
-        "Duskwood",
-        "The Barrens",
-        "Stonetalon Mountains",
-        "Stranglethorn Vale",
-        "Teldrassil",
-        "Mulgore",
-        "Tirisfal Glades",
-        "The Deadmines",
-        "Wailing Caverns",
-        "Dun Morogh",
-    ]
-        .into_iter()
+    asr_coop::story::ARENAS.iter().copied()
         .map(|name| {
             *ALL_MAPS
                 .iter()
@@ -771,7 +760,7 @@ pub(crate) static MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::
         .collect()
 });
 
-static ALL_MAPS: &[MapDef] = &[
+static ORIGINAL_MAPS: &[MapDef] = &[
     MapDef {
         name: "The Barrens",
         zone: "Kalimdor",
@@ -853,7 +842,7 @@ static ALL_MAPS: &[MapDef] = &[
         ],
     },
     MapDef {
-        name: "Fire Plume Ridge",
+        name: "Un'Goro Crater",
         zone: "Un'Goro Crater",
         map: 1,
         // The summit plateau, its lava lake on the west rim; the crater floor's canopy would

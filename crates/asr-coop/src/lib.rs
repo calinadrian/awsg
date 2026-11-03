@@ -5,6 +5,7 @@ pub mod economy;
 pub mod economy_store;
 pub mod ledger;
 pub mod quests;
+pub mod story;
 
 pub const PROTOCOL: u32 = 1;
 pub const BUILD: &str = "asr-elwynn-coop-economy-7";

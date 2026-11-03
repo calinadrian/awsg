@@ -1,5 +1,5 @@
 {
-  "revision": 1,
+  "revision": 2,
   "status": "candidate balance; native integration and visual review pending",
   "source_sha256": "b3566ef8e14411a237bd1e7d9f1dadc04cee300335d77ff8589642757ccd6835",
   "max_upgrade": 5,
@@ -81789,6 +81789,263 @@
         }
       ],
       "tier": 2
+    },
+    "scarlet-monastery": {
+      "name": "Scarlet Monastery",
+      "tier": 6,
+      "equipment": [],
+      "bosses": [
+        "Scarlet Commander Mograine",
+        "High Inquisitor Whitemane"
+      ],
+      "boss_drops": [],
+      "equipment_chance_bp": {
+        "normal": 0,
+        "elite": 0,
+        "boss": 0
+      },
+      "material_chance_bp": {
+        "normal": 3500,
+        "elite": 10000,
+        "boss": 10000
+      },
+      "materials": {
+        "normal": 1,
+        "elite": 3,
+        "boss": 8
+      },
+      "material_pool": [
+        "cloth",
+        "leather",
+        "iron",
+        "wood"
+      ]
+    },
+    "tanaris": {
+      "name": "Tanaris",
+      "tier": 7,
+      "equipment": [],
+      "bosses": [
+        "Dune Stalker",
+        "Wastewander Captain",
+        "Desert Colossus"
+      ],
+      "boss_drops": [],
+      "equipment_chance_bp": {
+        "normal": 0,
+        "elite": 0,
+        "boss": 0
+      },
+      "material_chance_bp": {
+        "normal": 3500,
+        "elite": 10000,
+        "boss": 10000
+      },
+      "materials": {
+        "normal": 1,
+        "elite": 3,
+        "boss": 8
+      },
+      "material_pool": [
+        "cloth",
+        "leather",
+        "iron",
+        "wood"
+      ]
+    },
+    "ungoro": {
+      "name": "Un'Goro Crater",
+      "tier": 8,
+      "equipment": [],
+      "bosses": [
+        "Ravasaur Matriarch",
+        "Uhk'loc",
+        "Blazerunner",
+        "Baron Charr",
+        "Tyrant Devilsaur",
+        "King Mosh"
+      ],
+      "boss_drops": [],
+      "equipment_chance_bp": {
+        "normal": 0,
+        "elite": 0,
+        "boss": 0
+      },
+      "material_chance_bp": {
+        "normal": 3500,
+        "elite": 10000,
+        "boss": 10000
+      },
+      "materials": {
+        "normal": 1,
+        "elite": 3,
+        "boss": 8
+      },
+      "material_pool": [
+        "cloth",
+        "leather",
+        "iron",
+        "wood"
+      ]
+    },
+    "burning-steppes": {
+      "name": "Burning Steppes",
+      "tier": 9,
+      "equipment": [],
+      "bosses": [
+        "Blackrock Warleader",
+        "Obsidian Sentinel",
+        "Blackrock Firelord"
+      ],
+      "boss_drops": [],
+      "equipment_chance_bp": {
+        "normal": 0,
+        "elite": 0,
+        "boss": 0
+      },
+      "material_chance_bp": {
+        "normal": 3500,
+        "elite": 10000,
+        "boss": 10000
+      },
+      "materials": {
+        "normal": 1,
+        "elite": 3,
+        "boss": 8
+      },
+      "material_pool": [
+        "cloth",
+        "leather",
+        "iron",
+        "wood"
+      ]
+    },
+    "swamp-of-sorrows": {
+      "name": "Swamp of Sorrows",
+      "tier": 7,
+      "equipment": [],
+      "bosses": [
+        "Marshfang",
+        "Sorrowfang",
+        "Brood Trail Guardian"
+      ],
+      "boss_drops": [],
+      "equipment_chance_bp": {
+        "normal": 0,
+        "elite": 0,
+        "boss": 0
+      },
+      "material_chance_bp": {
+        "normal": 3500,
+        "elite": 10000,
+        "boss": 10000
+      },
+      "materials": {
+        "normal": 1,
+        "elite": 3,
+        "boss": 8
+      },
+      "material_pool": [
+        "cloth",
+        "leather",
+        "iron",
+        "wood"
+      ]
+    },
+    "zulfarrak": {
+      "name": "Zul'Farrak",
+      "tier": 8,
+      "equipment": [],
+      "bosses": [
+        "Theka the Martyr",
+        "Witch Doctor Zum'rah",
+        "Chief Ukorz Sandscalp"
+      ],
+      "boss_drops": [],
+      "equipment_chance_bp": {
+        "normal": 0,
+        "elite": 0,
+        "boss": 0
+      },
+      "material_chance_bp": {
+        "normal": 3500,
+        "elite": 10000,
+        "boss": 10000
+      },
+      "materials": {
+        "normal": 1,
+        "elite": 3,
+        "boss": 8
+      },
+      "material_pool": [
+        "cloth",
+        "leather",
+        "iron",
+        "wood"
+      ]
+    },
+    "onyxia": {
+      "name": "Onyxia's Lair",
+      "tier": 10,
+      "equipment": [],
+      "bosses": [
+        "Onyxia"
+      ],
+      "boss_drops": [],
+      "equipment_chance_bp": {
+        "normal": 0,
+        "elite": 0,
+        "boss": 0
+      },
+      "material_chance_bp": {
+        "normal": 3500,
+        "elite": 10000,
+        "boss": 10000
+      },
+      "materials": {
+        "normal": 1,
+        "elite": 3,
+        "boss": 8
+      },
+      "material_pool": [
+        "cloth",
+        "leather",
+        "iron",
+        "wood"
+      ]
+    },
+    "molten-core": {
+      "name": "Molten Core",
+      "tier": 10,
+      "equipment": [],
+      "bosses": [
+        "Lucifron",
+        "Golemagg the Incinerator",
+        "Majordomo Executus",
+        "Ragnaros"
+      ],
+      "boss_drops": [],
+      "equipment_chance_bp": {
+        "normal": 0,
+        "elite": 0,
+        "boss": 0
+      },
+      "material_chance_bp": {
+        "normal": 3500,
+        "elite": 10000,
+        "boss": 10000
+      },
+      "materials": {
+        "normal": 1,
+        "elite": 3,
+        "boss": 8
+      },
+      "material_pool": [
+        "cloth",
+        "leather",
+        "iron",
+        "wood"
+      ]
     }
   },
   "sets": {

@@ -339,7 +339,7 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
         run.coop_damage.push((run.coop_target, raw));
         return raw;
     }
-    if run.immune_t > 0.0 || run.dead_t.is_some() {
+    if run.immune_t > 0.0 || run.dead_t.is_some() || run.test_god {
         return 0.0;
     }
     // Native co-op damage intake (0x5be466b..0x5be46d4): +4.48% per extra living player.

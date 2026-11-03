@@ -150,7 +150,7 @@ mod directory {
                         self.error(id, "Leave your current room before hosting");
                         return;
                     }
-                    if name.len() > 64 || !valid_member(&member) || map > 1 {
+                    if name.len() > 64 || !valid_member(&member) || map >= asr_coop::story::ARENAS.len() {
                         self.error(id, "Invalid room or hero");
                         return;
                     }

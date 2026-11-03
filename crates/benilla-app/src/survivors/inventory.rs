@@ -536,6 +536,10 @@ impl Equipment {
     /// Queue what the run has earned since the last batch; `end` is the party size of a run
     /// that is over, which also reports its gold and best-of progress.
     fn rewards(&mut self, run: &Run, gold: u32, end: Option<u32>) {
+        // A Test Grounds run earns nothing.
+        if run.test {
+            return;
+        }
         let delta = std::array::from_fn::<_, 3, _>(|i| {
             run.equipment_kills[i].saturating_sub(self.counted[i])
         });

@@ -1,4 +1,4 @@
-//! Elite magnet pickups collect all existing XP; their mesh is authored here.
+//! Elite magnet pickups collect all existing XP and gold; their mesh is authored here.
 use super::{loot_ground::GroundedLoot, RunEntity};
 use crate::net::Guid;
 use bevy::prelude::*;

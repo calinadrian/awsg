@@ -171,27 +171,6 @@ pub(super) fn draw(count: u8, serial: u64) -> u16 {
     bits
 }
 
-/// The affixes by name: "Molten, Arcane".
-pub(super) fn affix_names(bits: u16) -> String {
-    AFFIXES
-        .iter()
-        .filter(|(bit, _)| bits & bit != 0)
-        .map(|(_, name)| *name)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// An encounter's name as its bar shows it, with its affixes or its ward.
-pub(super) fn bar_name(e: &Enemy) -> String {
-    if e.ward {
-        format!("{}  ·  Shielded", e.def.name)
-    } else if e.affixes != 0 {
-        format!("{}  ·  {}", e.def.name, affix_names(e.affixes))
-    } else {
-        e.def.name.to_string()
-    }
-}
-
 /// The moves an affix brings; the rest (Juggernaut, Vampiric, Frenzied) are passive.
 fn affix_moves(bits: u16) -> Vec<Move> {
     use spell::*;
@@ -318,6 +297,8 @@ pub(super) struct Mechanics {
     enraged: bool,
     frenzied: bool,
     busy: f32,
+    /// The move it is winding up: its spell, its verb, and the run seconds it began and ends.
+    cast: Option<(u32, Verb, f32, f32)>,
     second: Option<(f32, u32, f32)>,
     impacts: Vec<Impact>,
     queued: Vec<Queued>,
@@ -354,6 +335,7 @@ impl Mechanics {
             enraged: false,
             frenzied: false,
             busy: 0.0,
+            cast: None,
             second: None,
             impacts: Vec::new(),
             queued: Vec::new(),
@@ -365,6 +347,27 @@ impl Mechanics {
             speed: 0.0,
             last_hp: f32::NAN,
         }
+    }
+
+    /// The health shares its script turns at, for the bar's phase lines.
+    pub(super) fn phase_marks(&self) -> impl Iterator<Item = f32> + '_ {
+        self.kit
+            .into_iter()
+            .flat_map(|k| k.phases)
+            .map(|p| p.below)
+            .filter(|b| *b > 0.0 && *b < 1.0)
+    }
+
+    /// Enraged by its timer, or frenzied by its affix.
+    pub(super) fn raging(&self) -> bool {
+        self.enraged || self.frenzied
+    }
+
+    /// The move it is winding up at `now`: its spell, a name for it when the spell has none, and
+    /// how far through it is.
+    pub(super) fn casting(&self, now: f32) -> Option<(u32, &'static str, f32)> {
+        let (spell, verb, from, to) = self.cast?;
+        (now < to).then(|| (spell, verb_name(verb), ((now - from) / (to - from)).clamp(0.0, 1.0)))
     }
 
     /// Takes every turn its health has reached, returning the lines it yells.
@@ -767,6 +770,7 @@ pub(super) fn run_mechanics(
             }
             m.moves[slot].wait = every * pace;
             let damage = power * scale;
+            let was_busy = m.busy;
             debug!("survivors mechanics: {} {:?} for {damage:.0} at t={now:.0}", en.def.name, verb);
             let land = |m: &mut Mechanics, at: f32, shape: Shape, spell: u32, spot: Option<Vec3>| {
                 m.impacts.push(Impact {
@@ -1005,12 +1009,232 @@ pub(super) fn run_mechanics(
                     m.busy = now + 0.6;
                 }
             }
+            // A move that holds it shows on its bar as a cast.
+            if m.busy != was_busy && m.busy > now + 0.3 {
+                m.cast = Some((spell, verb, now, m.busy));
+            }
             if !support {
                 free = false;
             }
         }
     }
     run.coop_target = 0;
+}
+
+/// A move's name on the bar when its spell has none to give.
+fn verb_name(verb: Verb) -> &'static str {
+    match verb {
+        Verb::Stomp { .. } => "Stomp",
+        Verb::Throw { .. } => "Hurl",
+        Verb::Bombs { .. } => "Bombard",
+        Verb::Charge { .. } => "Charge",
+        Verb::Cone { .. } => "Cleave",
+        Verb::Pool { .. } => "Fire Pool",
+        Verb::Summon { .. } => "Call Minions",
+        Verb::Soak { .. } => "Meteor",
+        Verb::SafeZone { .. } => "Rain of Fire",
+        Verb::Nova { .. } => "Nova",
+        Verb::Closing { .. } => "Closing Ring",
+        Verb::Beam { .. } => "Beam",
+        Verb::Volley { .. } => "Volley",
+        Verb::Vortex { .. } => "Vortex",
+        Verb::Fixate { .. } => "Fixate",
+        Verb::Shield { .. } => "Shield",
+        Verb::Mend { .. } => "Mend",
+        Verb::Blink => "Blink",
+    }
+}
+
+/// One buff or debuff on an encounter, as its boss bar shows it and its tooltip explains it.
+#[derive(Clone, PartialEq, Debug)]
+pub(super) struct Aura {
+    /// The spell whose icon it wears.
+    pub icon: u32,
+    pub name: String,
+    pub text: String,
+    /// Seconds left, if it runs out.
+    pub left: Option<f32>,
+    pub buff: bool,
+    /// Copies of it, shown over the icon from two up.
+    pub stacks: u32,
+}
+
+fn aura(icon: u32, name: &str, text: impl Into<String>, left: Option<f32>, buff: bool) -> Aura {
+    Aura {
+        icon,
+        name: name.to_string(),
+        text: text.into(),
+        left,
+        buff,
+        stacks: 1,
+    }
+}
+
+/// What an affix does, and the spell whose icon it wears.
+fn affix_aura(bit: u16, frenzied: bool) -> (u32, &'static str) {
+    match bit {
+        affix::MOLTEN => (spell::FLAMESTRIKE, "Leaves pools of fire where it strikes."),
+        affix::ARCANE => (spell::ARCANE_EXPLOSION, "Scatters arcane bombs around its target."),
+        affix::VORTEX => (spell::WAR_STOMP, "Drags everything near it inward, then stomps."),
+        affix::HUNTER => (spell::MULTI_SHOT, "Hurls volleys at its target from range."),
+        affix::SUMMONER => (688, "Calls minions to its side."),
+        affix::BLINKER => (spell::BLINK, "Vanishes and steps out behind its target."),
+        affix::JUGGERNAUT => (
+            871,
+            "35% more health. Immune to stuns and fear; slows barely hold it.",
+        ),
+        affix::VAMPIRIC => (15286, "Its melee swings heal it for three times the damage."),
+        _ if frenzied => (12292, "Frenzied: 35% faster and 25% more damage."),
+        _ => (12292, "Below half health it frenzies: 35% faster and 25% more damage."),
+    }
+}
+
+/// An encounter's buffs, then its debuffs: its affixes, its script's state, and what the hero's
+/// spells left on it. `now` is the run's clock; `spell_name` names a damage-over-time spell.
+pub(super) fn auras(
+    en: &Enemy,
+    mech: Option<&Mechanics>,
+    mark: Option<&super::spell_passives::Mark>,
+    now: f32,
+    spell_name: impl Fn(u32) -> Option<String>,
+) -> Vec<Aura> {
+    let mut out = Vec::new();
+    if let Some(m) = mech {
+        if let Some(kit) = m.kit.filter(|k| k.enrage > 0.0) {
+            if m.enraged {
+                out.push(aura(
+                    spell::ENRAGE,
+                    "Enraged",
+                    "Its swings and abilities hit 50% harder, and its abilities come faster.",
+                    None,
+                    true,
+                ));
+            } else if let Some(born) = m.born {
+                out.push(aura(
+                    spell::ENRAGE,
+                    "Enrage Timer",
+                    "Enrages when the timer runs out: 50% more damage and faster abilities.",
+                    Some((born + kit.enrage - now).max(0.0)),
+                    true,
+                ));
+            }
+        }
+        if let Some((_, until)) = m.ward.filter(|_| en.ward) {
+            out.push(aura(
+                642,
+                "Shielded",
+                "Immune to all damage while its guards stand. Kill the guards to break it.",
+                Some((until - now).max(0.0)),
+                true,
+            ));
+        }
+        if let Some(mend) = &m.mend {
+            out.push(aura(
+                2061,
+                "Mending",
+                format!(
+                    "Rooted in place and regaining health. Deal {} more damage to break it.",
+                    (mend.need - mend.taken).max(0.0).round()
+                ),
+                Some((mend.until - now).max(0.0)),
+                true,
+            ));
+        }
+    }
+    for (bit, name) in AFFIXES {
+        if en.affixes & bit != 0 {
+            let frenzied = mech.is_some_and(|m| m.frenzied);
+            let (icon, text) = affix_aura(bit, frenzied);
+            out.push(aura(icon, name, text, None, true));
+        }
+    }
+    if en.stun_t > 0.0 {
+        out.push(aura(853, "Stunned", "Cannot move or attack.", Some(en.stun_t), false));
+    }
+    if en.root_t > 0.0 && mech.is_none_or(|m| m.mend.is_none()) {
+        out.push(aura(122, "Rooted", "Cannot move.", Some(en.root_t), false));
+    }
+    if en.fear_t > 0.0 {
+        out.push(aura(5782, "Feared", "Flees in terror.", Some(en.fear_t), false));
+    }
+    if en.slow < 0.99 && en.slow_t > 0.0 {
+        out.push(aura(
+            116,
+            "Slowed",
+            format!("Movement speed reduced by {:.0}%.", (1.0 - en.slow) * 100.0),
+            Some(en.slow_t),
+            false,
+        ));
+    }
+    if en.weaken < 0.99 && en.weaken_t > 0.0 {
+        out.push(aura(
+            702,
+            "Weakened",
+            format!("Deals {:.0}% less damage.", (1.0 - en.weaken) * 100.0),
+            Some(en.weaken_t),
+            false,
+        ));
+    }
+    if let Some(mark) = mark {
+        if mark.hunter {
+            out.push(aura(
+                1130,
+                "Hunter's Mark",
+                "Takes increased damage, and explodes when it dies.",
+                None,
+                false,
+            ));
+        }
+        if mark.faerie {
+            out.push(aura(
+                770,
+                "Faerie Fire",
+                "Hits on it arc Nature damage to nearby enemies.",
+                None,
+                false,
+            ));
+        }
+        if mark.sheep_until > now {
+            out.push(aura(
+                118,
+                "Polymorph",
+                "Wanders as a sheep, unable to attack.",
+                Some(mark.sheep_until - now),
+                false,
+            ));
+        }
+    }
+    // One icon per damage-over-time spell, its stacks summed.
+    let mut dots: Vec<(u32, f32, f32, f32, u32)> = Vec::new();
+    for d in &en.dots {
+        match dots.iter_mut().find(|x| x.0 == d.spell) {
+            Some(x) => {
+                x.1 += d.damage;
+                x.3 = x.3.max(d.left);
+                x.4 += 1;
+            }
+            None => dots.push((d.spell, d.damage, d.every, d.left, 1)),
+        }
+    }
+    for (spell, damage, every, left, stacks) in dots {
+        let name = spell_name(spell).unwrap_or_else(|| "Burning".to_string());
+        let stacked = if stacks > 1 {
+            format!(" ({stacks} stacks)")
+        } else {
+            String::new()
+        };
+        out.push(Aura {
+            stacks,
+            ..aura(
+                spell,
+                &name,
+                format!("Takes {} damage every {every:.1} sec{stacked}.", damage.round()),
+                Some(left),
+                false,
+            )
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1090,7 +1314,6 @@ mod tests {
             }
         }
         assert_eq!(draw(0, 7), 0);
-        assert_eq!(affix_names(affix::MOLTEN | affix::VAMPIRIC), "Molten, Vampiric");
         // Every active affix brings a move; the passive ones bring none.
         assert_eq!(affix_moves(affix::MOLTEN | affix::BLINKER).len(), 2);
         assert!(affix_moves(affix::JUGGERNAUT | affix::VAMPIRIC | affix::FRENZIED).is_empty());

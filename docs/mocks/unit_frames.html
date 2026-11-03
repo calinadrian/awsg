@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unit Frame Variants</title>
+<style>
+  :root {
+    --steel: #9aa3b8; --steel-hi: #d4d9e4; --steel-lo: #5d6679;
+    --ink: #0d1517; --text-hi: #e8eaf0; --text-dim: #b8bdca;
+    --wine: #8a1f33; --wine-hi: #b83a50; --wine-lo: #4c0d1b; --well-red: #1b0a11;
+    --green: #2e8c33; --green-hi: #5cbd5c; --green-lo: #17531e; --well-green: #07120a;
+    --blue: #1d5be0; --blue-hi: #5b8cff;
+  }
+  body { margin: 0; background: #0c0b08; color: var(--text-dim); font: 13px Georgia, "Times New Roman", serif; }
+  .page { max-width: 1180px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { font-weight: normal; font-size: 18px; color: var(--text-hi); margin: 0 0 4px; }
+  .lead { margin: 0 0 18px; font: 12px Arial, sans-serif; color: #8a8572; }
+  .row { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: center; margin-bottom: 14px; }
+  .letter { font-size: 26px; color: var(--steel); text-align: center; }
+  .stage {
+    position: relative; height: 180px; border-radius: 4px; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 30%, #6d6f2c, #45481c 60%, #2f3214);
+    box-shadow: inset 0 0 0 1px #2a281c;
+  }
+  .stage .note { position: absolute; left: 10px; bottom: 8px; font: 11px Arial, sans-serif; color: rgba(255,255,255,.55); }
+  /* Everything inside is drawn at game units, shown at 2× */
+  .zoom { position: absolute; left: 50%; top: 50%; width: 540px; height: 80px; transform: translate(-50%, -50%) scale(2); transform-origin: 50% 50%; }
+  .u { position: absolute; top: 14px; }
+  .u.p { left: 0; } .u.t { right: 0; }
+
+  /* Shared pieces */
+  .txt { font-size: 10px; color: var(--text-hi); text-shadow: 0 1px 1px rgba(0,0,0,.95); white-space: nowrap; }
+  .num { font: 9px Arial, sans-serif; color: #cfd4df; text-shadow: 0 1px 1px rgba(0,0,0,.95); white-space: nowrap; }
+  .plate { background: rgba(13,21,23,.92); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 5px rgba(0,0,0,.55); }
+  .fill-g { background: linear-gradient(var(--green-hi) 0 1px, var(--green) 1px 45%, #22702a 70%, var(--green-lo)); }
+  .fill-r { background: linear-gradient(var(--wine-hi) 0 1px, var(--wine) 1px 45%, #6e1828 70%, var(--wine-lo)); }
+  .fill-b { background: linear-gradient(var(--blue-hi) 0 1px, var(--blue) 1px, #0a3fc0); }
+  .face { border-radius: 50%; background: radial-gradient(circle at 50% 38%, #e2ad7d, #8a5530 55%, #4a2a12 80%); }
+  .face.hog { background: radial-gradient(circle at 50% 40%, #b58a5a, #6b4a2a 55%, #2e1d0e 80%); }
+  .dia { position: absolute; width: 6px; height: 6px; transform: rotate(45deg); background: var(--steel-lo); box-shadow: 0 0 0 1px #000; }
+  .auras { position: absolute; display: flex; gap: 2px; }
+  .a { position: relative; width: 13px; height: 13px; border-radius: 1px; display: grid; place-items: center; font-size: 7px;
+       box-shadow: 0 0 0 1px #000, 0 0 0 1.5px var(--steel-lo); }
+  .a.d { box-shadow: 0 0 0 1px #000, 0 0 0 1.5px var(--wine-hi); }
+  .a b { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; line-height: 5px; text-align: center; font: 4.5px Arial, sans-serif; color: #fff; background: rgba(5,7,9,.75); font-weight: normal; }
+  .a s { position: absolute; top: -4px; left: 50%; transform: translateX(-50%); min-width: 6px; height: 6px; line-height: 6px; padding: 0 1px; text-align: center; text-decoration: none;
+         font: 4.5px Arial, sans-serif; color: #fff; background: #000; border: .5px solid var(--wine-hi); border-radius: 4px; }
+  .ic1 { background: linear-gradient(135deg,#3a4560,#c7cede); } .ic2 { background: linear-gradient(135deg,#5a1a14,#c0603a); }
+  .ic3 { background: linear-gradient(135deg,#4c0d1b,#b83a50); } .ic4 { background: linear-gradient(135deg,#2a1530,#7a4a8c); }
+  .ic5 { background: linear-gradient(135deg,#1c2b4a,#7f9fd6); } .ic6 { background: linear-gradient(135deg,#3a0a14,#a4303f); }
+
+  /* ---- A: the boss bar's twin, a size up. Name and level over the bar, health inside. ---- */
+  .A { width: 196px; height: 44px; }
+  .A .med { position: absolute; top: 4px; width: 36px; height: 36px; border-radius: 50%; background: #000; z-index: 3;
+            box-shadow: inset 0 0 0 1.5px var(--steel-lo), 0 0 0 1px #000, 0 2px 5px rgba(0,0,0,.6); }
+  .A .med .face { position: absolute; inset: 3px; }
+  .A .head { position: absolute; top: 3px; display: flex; gap: 5px; align-items: baseline; }
+  .A .head .lv { font: 8px Arial, sans-serif; color: var(--steel); }
+  .A .bar { position: absolute; top: 15px; width: 162px; height: 16px; box-sizing: border-box; padding: 2px; }
+  .A .well { position: relative; height: 100%; overflow: hidden; background: var(--well-green); box-shadow: 0 0 0 1px #000; display: flex; align-items: center; justify-content: flex-end; padding: 0 5px; }
+  .A.t .well { background: var(--well-red); justify-content: flex-start; }
+  .A .well i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .A .well .num { position: relative; }
+  .A .pw { position: absolute; top: 33px; width: 120px; height: 3px; background: #03050f; box-shadow: 0 0 0 1px #000; }
+  .A .pw i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .A .cap { top: 20px; }
+  .A.p .med { left: 0; } .A.p .head { left: 42px; } .A.p .bar { left: 30px; padding-left: 12px; } .A.p .pw { left: 42px; } .A.p .cap { left: 189px; }
+  .A.t .med { right: 0; } .A.t .head { right: 42px; flex-direction: row-reverse; } .A.t .bar { right: 30px; padding-right: 12px; } .A.t .pw { right: 42px; } .A.t .cap { right: 189px; }
+  .A .auras.up { top: -12px; } .A .auras.dn { top: 41px; }
+  .A.p .auras { left: 42px; } .A.t .auras { right: 42px; flex-direction: row-reverse; }
+
+  /* ---- B: no portrait. A steel diamond carries the level; the bar takes the whole width. ---- */
+  .B { width: 176px; height: 26px; }
+  .B .bar { position: absolute; top: 4px; width: 168px; height: 20px; box-sizing: border-box; padding: 2px 2px 2px 2px; }
+  .B .well { position: relative; height: 12px; overflow: hidden; background: var(--well-green); box-shadow: 0 0 0 1px #000; display: flex; align-items: center; justify-content: space-between; padding: 0 5px 0 17px; }
+  .B.t .well { background: var(--well-red); padding: 0 17px 0 5px; }
+  .B .well i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .B .well span { position: relative; }
+  .B .pw { position: relative; height: 2px; margin-top: 2px; background: #03050f; box-shadow: 0 0 0 1px #000; }
+  .B .pw i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .B .kd { position: absolute; top: 4px; width: 20px; height: 20px; transform: rotate(45deg); z-index: 3;
+           background: #141924; box-shadow: inset 0 0 0 1.5px var(--steel-lo), 0 0 0 1px #000, 0 2px 4px rgba(0,0,0,.6); }
+  .B .kd + .lv { position: absolute; top: 4px; width: 20px; height: 20px; z-index: 4; display: grid; place-items: center; font: 9px Arial, sans-serif; color: var(--text-hi); }
+  .B.p .kd, .B.p .kd + .lv { left: -2px; } .B.p .bar { left: 6px; }
+  .B.t .kd, .B.t .kd + .lv { right: -2px; } .B.t .bar { right: 6px; }
+  .B .auras.up { top: -14px; } .B .auras.dn { top: 28px; }
+  .B.p .auras { left: 20px; } .B.t .auras { right: 20px; flex-direction: row-reverse; }
+
+  /* ---- C: a framed portrait square beside a two-line plate; the bars stacked, the text over them. ---- */
+  .C { width: 184px; height: 38px; }
+  .C .port { position: absolute; top: 2px; width: 34px; height: 34px; box-sizing: border-box; padding: 2px; }
+  .C .port .face { width: 100%; height: 100%; border-radius: 1px; }
+  .C .lv { position: absolute; top: 27px; width: 14px; height: 10px; z-index: 3; display: grid; place-items: center; font: 7.5px Arial, sans-serif; color: var(--text-hi);
+           background: #141924; border-radius: 1px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .C .pl { position: absolute; top: 2px; width: 146px; height: 34px; box-sizing: border-box; padding: 3px; display: flex; flex-direction: column; gap: 2px; }
+  .C .nm { height: 11px; display: flex; align-items: center; justify-content: space-between; padding: 0 2px; }
+  .C .well { position: relative; height: 11px; overflow: hidden; background: var(--well-green); box-shadow: 0 0 0 1px #000; display: grid; place-items: center; }
+  .C.t .well { background: var(--well-red); }
+  .C .well i, .C .pwr i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .C .well span { position: relative; }
+  .C .pwr { position: relative; height: 3px; background: #03050f; box-shadow: 0 0 0 1px #000; }
+  .C.p .port { left: 0; } .C.p .lv { left: 10px; } .C.p .pl { left: 38px; }
+  .C.t .port { right: 0; } .C.t .lv { right: 10px; } .C.t .pl { right: 38px; }
+  .C.t .nm { flex-direction: row-reverse; }
+  .C .auras.up { top: -12px; } .C .auras.dn { top: 40px; }
+  .C.p .auras { left: 38px; } .C.t .auras { right: 38px; flex-direction: row-reverse; }
+
+  /* ---- D: the medallion leads, ringed like the boss bar's; the plate tucks under its rim. ---- */
+  .D { width: 190px; height: 42px; }
+  .D .med { position: absolute; top: 1px; width: 40px; height: 40px; border-radius: 50%; z-index: 3; background: #000;
+            box-shadow: inset 0 0 0 1px #000, inset 0 0 0 2.5px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.6); }
+  .D .med .face { position: absolute; inset: 4px; }
+  .D .lv { position: absolute; top: 30px; width: 12px; height: 12px; z-index: 4; transform: rotate(45deg); background: #141924; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .D .lv span { display: grid; place-items: center; width: 100%; height: 100%; transform: rotate(-45deg); font: 7px Arial, sans-serif; color: var(--text-hi); }
+  .D .pl { position: absolute; top: 7px; width: 162px; height: 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 3px 4px; }
+  .D .nm { height: 9px; display: flex; align-items: center; justify-content: space-between; }
+  .D .nm .num { color: var(--steel); }
+  .D .well { position: relative; height: 9px; overflow: hidden; background: var(--well-green); box-shadow: 0 0 0 1px #000; }
+  .D.t .well { background: var(--well-red); }
+  .D .well i, .D .pwr i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .D .pwr { position: relative; height: 2px; background: #03050f; box-shadow: 0 0 0 1px #000; }
+  .D .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(0,0,0,.45); }
+  .D.p .med { left: 0; } .D.p .lv { left: 4px; } .D.p .pl { left: 28px; padding-left: 16px; }
+  .D.t .med { right: 0; } .D.t .lv { right: 4px; } .D.t .pl { right: 28px; padding-right: 16px; }
+  .D.t .nm { flex-direction: row-reverse; }
+  .D .cap { top: 18px; } .D.p .cap { left: 187px; } .D.t .cap { right: 187px; }
+  .D .auras.up { top: -12px; } .D .auras.dn { top: 40px; }
+  .D.p .auras { left: 46px; } .D.t .auras { right: 46px; flex-direction: row-reverse; }
+
+  /* ---- E: simple. The boss bars' frame (grey edge, dark inset, black-lined wells) round a
+     health well and, under it, a slim power well in the power's colour; no portrait. ---- */
+  .E { width: 170px; }
+  .E .bar { position: relative; box-sizing: border-box; padding: 2px; display: flex; flex-direction: column; gap: 2px; }
+  .E .well { position: relative; height: 13px; overflow: hidden; background: var(--well-green); box-shadow: 0 0 0 1px #000;
+             display: flex; align-items: center; justify-content: space-between; padding: 0 5px; }
+  .E.t .well { background: var(--well-red); }
+  .E .well i, .E .pw i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .E .well span { position: relative; }
+  .E .well .lvl { color: var(--steel); font: 8px Arial, sans-serif; margin-right: 4px; }
+  .E .pw { position: relative; height: 4px; background: #05060b; box-shadow: 0 0 0 1px #000; }
+  .E .rage { background: linear-gradient(#e0574a 0 1px, #b3241a 1px, #7a140e); }
+  .E .mana { background: linear-gradient(#6b95ff 0 1px, #1d5be0 1px, #0b3a9e); }
+  .E .energy { background: linear-gradient(#ffe57a 0 1px, #e3b81c 1px, #9c7a08); }
+  .E .auras { position: absolute; } .E .auras.up { bottom: calc(100% + 4px); } .E .auras.dn { top: calc(100% + 4px); }
+  .E.p .auras { left: 0; } .E.t .auras { right: 0; flex-direction: row-reverse; }
+  /* The icons wear the bar's own edge (grey inside, black outside), so their outer lines
+     meet the bar's at both ends; a stack badge sits lower so the row under the bar keeps 4px. */
+  .E .a { width: 14px; height: 14px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .E .a.d { box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .E .a s { top: -3px; }
+  .opts { display: flex; gap: 10px; align-items: center; margin: 0 0 10px; font: 12px Arial, sans-serif; color: var(--text-dim); }
+  .opts select { font: 12px Arial, sans-serif; background: #1a1d24; color: var(--text-hi); border: 1px solid var(--steel-lo); border-radius: 3px; padding: 2px 4px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Unit frames: five compact designs</h1>
+  <div class="opts"><span>Settings → Interface → Health text</span>
+    <select id="fmt">
+      <option value="cur">Current</option>
+      <option value="curmax">Current / Max</option>
+      <option value="pct">Percent</option>
+      <option value="curpct">Current · Percent</option>
+      <option value="all" selected>Current / Max · Percent</option>
+      <option value="none">None</option>
+    </select></div>
+  <p class="lead">Each row shows the player frame (left) and the target frame (right), drawn at 2×. Buffs sit above, debuffs below. All four use the boss bars' grey edge, crimson and steel.</p>
+
+  <div class="row"><div class="letter">E</div><div class="stage"><div class="zoom">
+    <div class="u p E" style="top:28px">
+      <div class="auras up"><div class="a ic1">🛡<b>8</b></div><div class="a ic2">🔥<b>12</b></div></div>
+      <div class="bar plate"><div class="well"><i class="fill-g" style="width:100%"></i><span class="txt"><span class="lvl">6</span>Warrior</span><span class="num" data-hp="225" data-max="225"></span></div>
+        <div class="pw"><i class="rage" style="width:42%"></i></div></div>
+    </div>
+    <div class="u E" style="top:28px; left:185px">
+      <div class="auras up"><div class="a ic5">❄<b>24</b></div></div>
+      <div class="bar plate"><div class="well"><i class="fill-g" style="width:72%"></i><span class="txt"><span class="lvl">6</span>Mage</span><span class="num" data-hp="131" data-max="182"></span></div>
+        <div class="pw"><i class="mana" style="width:64%"></i></div></div>
+    </div>
+    <div class="u t E" style="top:28px">
+      <div class="auras up"><div class="a ic3">⚡</div><div class="a ic2">🔥</div></div>
+      <div class="bar plate"><div class="well"><i class="fill-r" style="width:91%"></i><span class="txt"><span class="lvl">11</span>Hogger</span><span class="num" data-hp="15435" data-max="16974"></span></div></div>
+      <div class="auras dn"><div class="a d ic4">☠<s>3</s><b>9</b></div><div class="a d ic5">❄<b>3</b></div><div class="a d ic6">◎<b>1m</b></div></div>
+    </div>
+  </div><span class="note">Simple: the boss bars' frame round the health well and a slim power well under it, rage red, mana blue, energy yellow; a unit with no power has the health well alone.</span></div></div>
+
+  <div class="row"><div class="letter">A</div><div class="stage"><div class="zoom">
+    <div class="u p A">
+      <div class="auras up"><div class="a ic1">🛡<b>8</b></div><div class="a ic2">🔥<b>12</b></div></div>
+      <div class="head"><span class="txt">Warrior</span><span class="lv">6</span></div>
+      <div class="bar plate"><div class="well"><i class="fill-g" style="width:100%"></i><span class="num">225 / 225</span></div></div>
+      <div class="pw"><i class="fill-b" style="width:35%"></i></div>
+      <i class="dia cap"></i>
+      <div class="med"><div class="face"></div></div>
+    </div>
+    <div class="u t A">
+      <div class="auras up"><div class="a ic3">⚡</div><div class="a ic2">🔥</div></div>
+      <div class="head"><span class="txt">Hogger</span><span class="lv">11</span></div>
+      <div class="bar plate"><div class="well"><i class="fill-r" style="width:91%"></i><span class="num">15.4k / 17.0k</span></div></div>
+      <i class="dia cap"></i>
+      <div class="med"><div class="face hog"></div></div>
+      <div class="auras dn"><div class="a d ic4">☠<s>3</s><b>9</b></div><div class="a d ic5">❄<b>3</b></div><div class="a d ic6">◎<b>1m</b></div></div>
+    </div>
+  </div><span class="note">Boss bar twin: the name and level over the bar, health inside it, a thin power line under it, the portrait medallion over the end.</span></div></div>
+
+  <div class="row"><div class="letter">B</div><div class="stage"><div class="zoom">
+    <div class="u p B">
+      <div class="auras up"><div class="a ic1">🛡<b>8</b></div><div class="a ic2">🔥<b>12</b></div></div>
+      <div class="bar plate"><div class="well"><i class="fill-g" style="width:100%"></i><span class="txt">Warrior</span><span class="num">225 / 225</span></div><div class="pw"><i class="fill-b" style="width:35%"></i></div></div>
+      <div class="kd"></div><div class="lv">6</div>
+    </div>
+    <div class="u t B">
+      <div class="auras up"><div class="a ic3">⚡</div><div class="a ic2">🔥</div></div>
+      <div class="bar plate"><div class="well"><i class="fill-r" style="width:91%"></i><span class="num">15.4k / 17.0k</span><span class="txt">Hogger</span></div><div class="pw"></div></div>
+      <div class="kd"></div><div class="lv">11</div>
+      <div class="auras dn"><div class="a d ic4">☠<s>3</s><b>9</b></div><div class="a d ic5">❄<b>3</b></div><div class="a d ic6">◎<b>1m</b></div></div>
+    </div>
+  </div><span class="note">Minimal: no portrait. The level rides in a steel diamond at the outer end; one bar holds name and health, the power line under it.</span></div></div>
+
+  <div class="row"><div class="letter">C</div><div class="stage"><div class="zoom">
+    <div class="u p C">
+      <div class="auras up"><div class="a ic1">🛡<b>8</b></div><div class="a ic2">🔥<b>12</b></div></div>
+      <div class="port plate"><div class="face"></div></div><div class="lv">6</div>
+      <div class="pl plate"><div class="nm"><span class="txt">Warrior</span><span class="num">100%</span></div>
+        <div class="well"><i class="fill-g" style="width:100%"></i><span class="num">225 / 225</span></div><div class="pwr"><i class="fill-b" style="width:35%"></i></div></div>
+    </div>
+    <div class="u t C">
+      <div class="auras up"><div class="a ic3">⚡</div><div class="a ic2">🔥</div></div>
+      <div class="port plate"><div class="face hog"></div></div><div class="lv">11</div>
+      <div class="pl plate"><div class="nm"><span class="txt">Hogger</span><span class="num">91%</span></div>
+        <div class="well"><i class="fill-r" style="width:91%"></i><span class="num">15.4k / 17.0k</span></div><div class="pwr"></div></div>
+      <div class="auras dn"><div class="a d ic4">☠<s>3</s><b>9</b></div><div class="a d ic5">❄<b>3</b></div><div class="a d ic6">◎<b>1m</b></div></div>
+    </div>
+  </div><span class="note">Square portrait: a framed square face beside a plate with name and percent, the health bar and a power line; the level tab on the portrait's foot.</span></div></div>
+
+  <div class="row"><div class="letter">D</div><div class="stage"><div class="zoom">
+    <div class="u p D">
+      <div class="auras up"><div class="a ic1">🛡<b>8</b></div><div class="a ic2">🔥<b>12</b></div></div>
+      <div class="pl plate"><div class="nm"><span class="txt">Warrior</span><span class="num">225 / 225</span></div>
+        <div class="well"><i class="fill-g" style="width:100%"></i><i class="tick" style="left:25%"></i><i class="tick" style="left:50%"></i><i class="tick" style="left:75%"></i></div>
+        <div class="pwr"><i class="fill-b" style="width:35%"></i></div></div>
+      <i class="dia cap"></i>
+      <div class="med"><div class="face"></div></div><div class="lv"><span>6</span></div>
+    </div>
+    <div class="u t D">
+      <div class="auras up"><div class="a ic3">⚡</div><div class="a ic2">🔥</div></div>
+      <div class="pl plate"><div class="nm"><span class="txt">Hogger</span><span class="num">15.4k / 17.0k · 91%</span></div>
+        <div class="well"><i class="fill-r" style="width:91%"></i><i class="tick" style="left:25%"></i><i class="tick" style="left:50%"></i><i class="tick" style="left:75%"></i></div>
+        <div class="pwr"></div></div>
+      <i class="dia cap"></i>
+      <div class="med"><div class="face hog"></div></div><div class="lv"><span>11</span></div>
+      <div class="auras dn"><div class="a d ic4">☠<s>3</s><b>9</b></div><div class="a d ic5">❄<b>3</b></div><div class="a d ic6">◎<b>1m</b></div></div>
+    </div>
+  </div><span class="note">Medallion lead: the ringed portrait overlaps a plate whose top line carries name and health; a slim bar with quarter ticks, the level in a diamond on the rim.</span></div></div>
+</div>
+<script>
+  // Numbers past 10,000 shorten, as the boss bars do: 15435 → 15.4k.
+  const short = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e4 ? (v / 1e3).toFixed(1) + 'k' : String(v);
+  function paint() {
+    const f = document.getElementById('fmt').value;
+    for (const el of document.querySelectorAll('.E .num[data-hp]')) {
+      const hp = +el.dataset.hp, max = +el.dataset.max, pct = Math.round(hp / max * 100) + '%';
+      el.textContent = { cur: short(hp), curmax: short(hp) + ' / ' + short(max), pct, curpct: short(hp) + ' · ' + pct,
+                         all: short(hp) + ' / ' + short(max) + ' · ' + pct, none: '' }[f];
+    }
+  }
+  document.getElementById('fmt').addEventListener('change', paint);
+  paint();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
-//! The damage meter under the minimap: each hero's damage this run, largest first, with its DPS
-//! and share. Every client counts only its own hits (health actually taken, so overkill and hits
+//! The damage meter in the right column, under the run tracker: each hero's damage this run,
+//! largest first, with its DPS, as small crimson bars in the boss bars' steel frame. Every client counts only its own hits (health actually taken, so overkill and hits
 //! on a replica the host already killed add nothing) and carries the total in its co-op pose;
 //! the host relays every pose, so all players read the same table.
 
@@ -8,6 +8,7 @@ use bevy::prelude::*;
 
 use super::coop::Coop;
 use super::hud::{compact, HudFont};
+use super::right_column::{self as col, HudSizes, Slot};
 use super::{data, Phase, Run};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,14 +73,15 @@ impl Source {
 
 /// Room for party members or the hero's spells, talents and item effects.
 const ROWS: usize = 32;
-const WIDTH: f32 = 280.0;
-const ROW_H: f32 = 17.0;
-/// Below the 192-unit minimap cluster, inset 4 from the top.
-const TOP: f32 = 204.0;
+const WIDTH: f32 = 210.0;
+const ROW_H: f32 = 14.0;
+const TOP: f32 = 8.0;
 
+/// The meter, built at this scale.
 #[derive(Component)]
-struct Meter;
-/// The column down the right edge under the minimap: this meter, then the quest tracker.
+struct Meter(f32);
+/// The column down the right edge: the minimap, the run tracker, this meter, then the quest
+/// tracker ([`super::right_column`]).
 #[derive(Component)]
 pub(super) struct RightStack;
 #[derive(Component)]
@@ -87,11 +89,17 @@ struct MeterRow(usize);
 #[derive(Component)]
 struct MeterFill(usize);
 #[derive(Component)]
-struct MeterName(usize);
-#[derive(Component)]
-struct MeterValue(usize);
-#[derive(Component)]
 struct MeterIcon(usize);
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum MeterText {
+    Rank(usize),
+    Name(usize),
+    Value(usize),
+    Dps(usize),
+    Total,
+    TotalDps,
+    Clock,
+}
 
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -101,8 +109,6 @@ enum Mode {
 }
 #[derive(Component)]
 struct ModeButton(Mode);
-#[derive(Component)]
-struct Summary;
 #[derive(Component)]
 struct MeterScroll;
 
@@ -155,8 +161,8 @@ fn spell_entries(run: &Run, spells: Option<&crate::ui_action::Spells>) -> Vec<En
         .map(|(&source, &damage)| Entry {
             source: Some(source),
             name: source.info(run.class.id, spells).0,
-            color: run.class.color,
             damage,
+            own: true,
         })
         .collect();
     rows.sort_by(|a, b| {
@@ -171,8 +177,9 @@ fn spell_entries(run: &Run, spells: Option<&crate::ui_action::Spells>) -> Vec<En
 struct Entry {
     source: Option<Source>,
     name: String,
-    color: u32,
     damage: f64,
+    /// The local hero's own row, drawn in crimson; teammates' are slate.
+    own: bool,
 }
 
 /// The table, largest first: the room's members in co-op, else the lone hero.
@@ -192,22 +199,20 @@ fn entries(run: &Run, coop: &Coop) -> Vec<Entry> {
                 } else {
                     m.name.clone()
                 },
-                color: data::CLASSES
-                    .get(m.hero.class)
-                    .map_or(0xFFFFFF, |c| c.color),
                 // Our own total is live; a teammate's arrives with their pose.
                 damage: if m.peer == coop.peer {
                     run.damage_done
                 } else {
                     coop.players.get(&m.peer).map_or(0.0, |p| p.damage)
                 },
+                own: m.peer == coop.peer,
             })
             .collect(),
         None => vec![Entry {
             source: None,
             name: own(&coop.name),
-            color: run.class.color,
             damage: run.damage_done,
+            own: true,
         }],
     };
     rows.sort_by(|a, b| {
@@ -219,117 +224,95 @@ fn entries(run: &Run, coop: &Coop) -> Vec<Entry> {
     rows
 }
 
-fn rgb(hex: u32) -> Color {
-    Color::srgb_u8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
-}
-
-fn text(font: &Handle<Font>, size: f32, color: Color, justify: Justify) -> impl Bundle {
-    (
-        Text::new(""),
-        TextFont {
-            font: font.clone(),
-            font_size: size,
-            ..default()
-        },
-        TextColor(color),
-        TextShadow {
-            offset: Vec2::ONE,
-            color: Color::BLACK,
-        },
-        TextLayout::new(justify, LineBreak::NoWrap),
-    )
-}
-
-fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, meters: Query<(), With<Meter>>) {
+fn spawn(
+    mut commands: Commands,
+    font: Option<Res<HudFont>>,
+    sizes: Res<HudSizes>,
+    stacks: Query<Entity, With<RightStack>>,
+    meters: Query<(Entity, &Meter)>,
+) {
     let Some(font) = font else {
         return;
     };
-    if !meters.is_empty() {
-        return;
+    let stack = match stacks.single() {
+        Ok(stack) => stack,
+        Err(_) => commands
+            .spawn((
+                RightStack,
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(8.0),
+                    top: Val::Px(TOP),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::FlexEnd,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                },
+                GlobalZIndex(85),
+            ))
+            .id(),
+    };
+    let k = sizes.meter;
+    if let Some((e, meter)) = meters.iter().next() {
+        if meter.0 == k {
+            return;
+        }
+        commands.entity(e).despawn();
     }
     let f = &font.0;
-    let stack = commands
-        .spawn((
-            RightStack,
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(8.0),
-                top: Val::Px(TOP),
-                width: Val::Px(WIDTH),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-            GlobalZIndex(85),
-        ))
-        .id();
+    let px = |v: f32| Val::Px(v * k);
+    let text = |which: MeterText, size: f32, color: Color| (which, col::label(f, "", size * k, color));
     commands
         .spawn((
-            Meter,
+            Meter(k),
+            Slot(2),
             ChildOf(stack),
-            Node {
-                width: Val::Percent(100.0),
+            super::hud_layout::Movable::new("meter", "Damage meter"),
+            col::plate(Node {
+                width: px(WIDTH),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(1.0),
-                padding: UiRect::all(Val::Px(4.0)),
-                border: UiRect::all(Val::Px(1.0)),
+                row_gap: px(1.0),
+                padding: UiRect {
+                    left: px(5.0),
+                    right: px(5.0),
+                    top: px(4.0),
+                    bottom: px(5.0),
+                },
                 ..default()
-            },
-            BackgroundColor(Color::srgba(0.02, 0.025, 0.02, 0.72)),
-            BorderColor::all(Color::srgb(0.42, 0.38, 0.23)),
+            }),
             Visibility::Hidden,
         ))
         .with_children(|panel| {
             panel
                 .spawn(Node {
-                    width: Val::Percent(100.0),
-                    column_gap: Val::Px(4.0),
+                    align_items: AlignItems::Center,
+                    column_gap: px(8.0),
+                    padding: UiRect::horizontal(px(2.0)),
+                    margin: UiRect::bottom(px(2.0)),
                     ..default()
                 })
                 .with_children(|tabs| {
-                    for (mode, label) in [(Mode::Party, "Party DPS"), (Mode::SelfDps, "Self DPS")] {
+                    for (mode, label) in [(Mode::Party, "Party"), (Mode::SelfDps, "Self")] {
                         tabs.spawn((
                             Button,
                             ModeButton(mode),
                             Node {
-                                flex_grow: 1.0,
-                                justify_content: JustifyContent::Center,
-                                padding: UiRect::all(Val::Px(4.0)),
+                                padding: UiRect::bottom(px(1.0)),
+                                border: UiRect::bottom(px(2.0)),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgba(0.12, 0.12, 0.12, 0.9)),
+                            BorderColor::all(Color::NONE),
                         ))
                         .with_children(|b| {
-                            b.spawn((
-                                Text::new(label),
-                                TextFont {
-                                    font: f.clone(),
-                                    font_size: 12.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
-                            ));
+                            b.spawn((ModeButton(mode), col::label(f, label, 10.0 * k, col::STEEL_LO)));
                         });
                     }
+                    tabs.spawn(Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    });
+                    tabs.spawn(text(MeterText::Clock, 10.0, col::STEEL));
                 });
-            panel.spawn((
-                Summary,
-                Node {
-                    margin: UiRect::bottom(Val::Px(2.0)),
-                    ..default()
-                },
-                Text::new("Party DPS"),
-                TextFont {
-                    font: f.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.82, 0.0)),
-                TextShadow {
-                    offset: Vec2::ONE,
-                    color: Color::BLACK,
-                },
-            ));
             panel
                 .spawn((
                     MeterScroll,
@@ -338,7 +321,8 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, meters: Query<(), W
                     bevy::ui::FocusPolicy::Pass,
                     Node {
                         flex_direction: FlexDirection::Column,
-                        max_height: Val::Px(300.0),
+                        row_gap: px(1.0),
+                        max_height: px(240.0),
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
@@ -350,16 +334,16 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, meters: Query<(), W
                                 MeterRow(i),
                                 Node {
                                     width: Val::Percent(100.0),
-                                    height: Val::Px(ROW_H),
+                                    height: px(ROW_H),
                                     flex_shrink: 0.0,
-                                    padding: UiRect::horizontal(Val::Px(4.0)),
+                                    padding: UiRect::horizontal(px(4.0)),
                                     align_items: AlignItems::Center,
-                                    justify_content: JustifyContent::FlexStart,
-                                    column_gap: Val::Px(4.0),
+                                    column_gap: px(4.0),
                                     display: Display::None,
                                     ..default()
                                 },
-                                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+                                BackgroundColor(col::WELL),
+                                Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
                             ))
                             .with_children(|row| {
                                 row.spawn((
@@ -372,23 +356,25 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, meters: Query<(), W
                                         width: Val::Percent(0.0),
                                         ..default()
                                     },
-                                    BackgroundColor(Color::NONE),
+                                    BackgroundColor(col::WINE),
                                 ));
+                                row.spawn((text(MeterText::Rank(i), 9.0, col::STEEL), Node {
+                                    min_width: px(9.0),
+                                    ..default()
+                                }));
                                 row.spawn((
                                     MeterIcon(i),
                                     ImageNode::default(),
                                     Node {
-                                        width: Val::Px(15.0),
-                                        height: Val::Px(15.0),
+                                        width: px(12.0),
+                                        height: px(12.0),
                                         flex_shrink: 0.0,
-                                        margin: UiRect::right(Val::Px(3.0)),
                                         display: Display::None,
                                         ..default()
                                     },
                                 ));
                                 row.spawn((
-                                    MeterName(i),
-                                    text(f, 11.0, Color::WHITE, Justify::Left),
+                                    text(MeterText::Name(i), 10.0, col::TEXT_HI),
                                     Node {
                                         flex_grow: 1.0,
                                         flex_basis: Val::Px(0.0),
@@ -397,17 +383,43 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, meters: Query<(), W
                                         ..default()
                                     },
                                 ));
+                                row.spawn(text(MeterText::Value(i), 10.0, col::TEXT_HI));
                                 row.spawn((
-                                    MeterValue(i),
-                                    text(f, 10.0, Color::WHITE, Justify::Right),
+                                    text(MeterText::Dps(i), 8.0, col::TEXT_DIM),
                                     Node {
-                                        width: Val::Px(126.0),
-                                        flex_shrink: 0.0,
+                                        min_width: px(20.0),
+                                        justify_content: JustifyContent::FlexEnd,
                                         ..default()
                                     },
                                 ));
                             });
                     }
+                });
+            panel.spawn((
+                Node {
+                    height: Val::Px(1.0),
+                    margin: UiRect::top(px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(col::STEEL_LO.with_alpha(0.45)),
+            ));
+            panel
+                .spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: px(4.0),
+                    padding: UiRect::horizontal(px(4.0)),
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn((
+                        col::label(f, "Total", 10.0 * k, col::STEEL),
+                        Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        },
+                    ));
+                    row.spawn(text(MeterText::Total, 10.0, col::TEXT_HI));
+                    row.spawn(text(MeterText::TotalDps, 8.0, col::TEXT_DIM));
                 });
         });
 }
@@ -419,16 +431,11 @@ fn paint(
     phase: Res<State<Phase>>,
     mode: Res<Mode>,
     spells: Option<Res<crate::ui_action::Spells>>,
-    mut summary: Query<&mut Text, (With<Summary>, Without<MeterName>, Without<MeterValue>)>,
-    mut buttons: Query<(&ModeButton, &mut BackgroundColor), Without<MeterFill>>,
+    mut buttons: Query<(&ModeButton, Option<&mut BorderColor>, Option<&mut TextColor>)>,
     mut meters: Query<&mut Visibility, With<Meter>>,
     mut rows: Query<(&MeterRow, &mut Node), Without<MeterFill>>,
-    mut fills: Query<
-        (&MeterFill, &mut Node, &mut BackgroundColor),
-        (Without<MeterRow>, Without<ModeButton>),
-    >,
-    mut names: Query<(&MeterName, &mut Text), (Without<MeterValue>, Without<Summary>)>,
-    mut values: Query<(&MeterValue, &mut Text), (Without<MeterName>, Without<Summary>)>,
+    mut fills: Query<(&MeterFill, &mut Node, &mut BackgroundColor), Without<MeterRow>>,
+    mut texts: Query<(&MeterText, &mut Text)>,
 ) {
     let Ok(mut visibility) = meters.single_mut() else {
         return;
@@ -452,20 +459,17 @@ fn paint(
     let top = table.first().map_or(0.0, |e| e.damage);
     let sum: f64 = table.iter().map(|e| e.damage).sum();
     let secs = f64::from(run.elapsed).max(1.0);
-    for mut text in &mut summary {
-        let total = if *mode == Mode::Party {
-            sum
-        } else {
-            run.damage_done
-        };
-        text.0 = format!("{} DPS · {} damage", compact(total / secs), compact(total));
-    }
-    for (button, mut color) in &mut buttons {
-        color.0 = if button.0 == *mode {
-            Color::srgb(0.35, 0.27, 0.10)
-        } else {
-            Color::srgb(0.10, 0.10, 0.10)
-        };
+    for (button, border, color) in &mut buttons {
+        let on = button.0 == *mode;
+        if let Some(mut border) = border {
+            let want = BorderColor::all(if on { col::WINE_HI } else { Color::NONE });
+            if *border != want {
+                *border = want;
+            }
+        }
+        if let Some(mut color) = color {
+            color.set_if_neq(TextColor(if on { col::TEXT_HI } else { col::STEEL_LO }));
+        }
     }
     for (row, mut node) in &mut rows {
         let display = if row.0 < table.len() {
@@ -483,32 +487,38 @@ fn paint(
         };
         let share = if top > 0.0 { e.damage / top } else { 0.0 };
         node.width = Val::Percent((share * 100.0) as f32);
-        color.set_if_neq(BackgroundColor(rgb(e.color).with_alpha(0.55)));
+        color.set_if_neq(BackgroundColor(if e.own { col::WINE } else { col::SLATE }));
     }
-    for (name, mut t) in &mut names {
-        let Some(e) = table.get(name.0) else {
-            continue;
+    let total = if *mode == Mode::Party {
+        sum
+    } else {
+        run.damage_done
+    };
+    for (which, mut t) in &mut texts {
+        let want = match *which {
+            MeterText::Rank(i) => match table.get(i) {
+                Some(_) => (i + 1).to_string(),
+                None => continue,
+            },
+            MeterText::Name(i) => match table.get(i) {
+                Some(e) => e.name.clone(),
+                None => continue,
+            },
+            MeterText::Value(i) => match table.get(i) {
+                Some(e) => compact(e.damage),
+                None => continue,
+            },
+            MeterText::Dps(i) => match table.get(i) {
+                Some(e) => compact(e.damage / secs),
+                None => continue,
+            },
+            MeterText::Total => compact(total),
+            MeterText::TotalDps => format!("{} DPS", compact(total / secs)),
+            MeterText::Clock => {
+                let s = run.elapsed as u32;
+                format!("{:02}:{:02}", s / 60, s % 60)
+            }
         };
-        let want = format!("{}. {}", name.0 + 1, e.name);
-        if t.0 != want {
-            t.0 = want;
-        }
-    }
-    for (value, mut t) in &mut values {
-        let Some(e) = table.get(value.0) else {
-            continue;
-        };
-        let percent = if sum > 0.0 {
-            e.damage / sum * 100.0
-        } else {
-            0.0
-        };
-        let want = format!(
-            "{} DPS · {} · {:.0}%",
-            compact(e.damage / secs),
-            compact(e.damage),
-            percent
-        );
         if t.0 != want {
             t.0 = want;
         }

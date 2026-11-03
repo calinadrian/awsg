@@ -105,7 +105,9 @@ fn request(coop: &mut Coop, editor: &mut Editor, pending: Pending) {
 fn controls(
     mut coop: ResMut<Coop>,
     mut editor: ResMut<Editor>,
-    selection: Res<Selection>,
+    mut selection: ResMut<Selection>,
+    gear: Res<super::inventory::Equipment>,
+    mut talents: ResMut<super::talents::TalentBook>,
     buttons: Query<(Entity, &Action, &skin::Control)>,
     clicks: Res<GlueClicks>,
     mut keyboard: MessageReader<KeyboardInput>,
@@ -116,12 +118,17 @@ fn controls(
     fields: super::text_edit::FieldQuery,
     real: Res<Time<Real>>,
 ) {
+    super::progress::refresh_story(&mut selection, &gear, &coop, &mut talents);
     // Deferred actions survive the asynchronous connection handshake.
     if coop.connected {
         if let Some(pending) = editor.pending.take() {
             if let Some(member) = coop.member(&selection) {
                 match pending {
                     Pending::Host => {
+                        if !selection.unlocked(selection.map) {
+                            coop.status = selection.unlock_hint(selection.map_def().name);
+                            return;
+                        }
                         let name = format!("{}'s party", coop.name);
                         let private = coop.private;
                         coop.send(Client::Create {
@@ -194,6 +201,12 @@ fn controls(
             Action::Private => coop.private = !coop.private,
             Action::Refresh => request(&mut coop, &mut editor, Pending::Browse),
             Action::Ready => {
+                if let Some(zone) = coop.room.as_ref().and_then(|room| data::MAPS.get(room.map)) {
+                    if !selection.raid_ready(zone.name) {
+                        coop.status = selection.unlock_hint(zone.name);
+                        continue;
+                    }
+                }
                 let ready = coop
                     .room
                     .as_ref()
@@ -201,7 +214,13 @@ fn controls(
                     .is_none_or(|m| !m.ready);
                 coop.send(Client::Ready { ready });
             }
-            Action::Start => coop.send(Client::Start),
+            Action::Start => {
+                if selection.unlocked(selection.map) {
+                    coop.send(Client::Start);
+                } else {
+                    coop.status = selection.unlock_hint(selection.map_def().name);
+                }
+            }
             Action::Copy => {
                 if let Some(room) = &coop.room {
                     clipboard.write(wl, &room.code);

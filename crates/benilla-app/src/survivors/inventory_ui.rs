@@ -1299,7 +1299,10 @@ fn zone_loot(
             );
             p.spawn(scroller(4)).with_children(|p| {
                 if items.is_empty() {
-                    skin::label(p, f, "No drops match these filters.", size::BODY, skin::TEXT);
+                    let message = if zone.equipment.is_empty() && zone.boss_drops.is_empty() {
+                        "Equipment rewards have not been assigned to this zone yet. Materials and quest rewards are available."
+                    } else { "No drops match these filters." };
+                    skin::label(p, f, message, size::BODY, skin::TEXT);
                     return;
                 }
                 p.spawn(Node {

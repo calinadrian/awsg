@@ -6,8 +6,13 @@ use super::{
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-pub(super) const SIZE: Vec2 = Vec2::new(240., 76.);
+/// A unit frame's bar, its auras aside ([`super::unit_frames`]).
+pub(super) const SIZE: Vec2 = Vec2::new(170., 25.);
 const MENU: Vec2 = Vec2::new(240., 326.);
+/// The frames' names in the HUD's stacking ([`super::hud_layout`]), player then target.
+pub(super) const STACK_IDS: [&str; 2] = ["player_frame", "target_frame"];
+/// The drag's snap, the same grid the other panels move on.
+const GRID: f32 = 8.;
 const ROW: f32 = 28.;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,6 +73,10 @@ impl Default for FrameSettings {
     }
 }
 impl FrameSettings {
+    /// Whether a frame has the pointer: its menu is open, it is being dragged or clicked.
+    pub(super) fn busy(&self) -> bool {
+        self.menu.is_some() || self.drag.is_some() || self.captured
+    }
     fn menu_size(&self) -> Vec2 {
         if self.draft.is_some() {
             Vec2::new(MENU.x, 186.)
@@ -336,8 +345,9 @@ fn paint_menu(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn input(
+pub(super) fn input(
     mut settings: ResMut<FrameSettings>,
+    mut layout: ResMut<super::hud_layout::HudLayout>,
     phase: Res<State<Phase>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Res<UiScale>,
@@ -364,6 +374,10 @@ fn input(
     let Ok(window) = windows.single() else { return };
     let scale = ui_scale.0.max(0.01);
     let canvas = Vec2::new(window.width(), window.height()) / scale;
+    // A minimized window reports no size; clamping to it would pile the frames in the corner.
+    if canvas.x < SIZE.x || canvas.y < SIZE.y {
+        return;
+    }
     for item in &mut settings.items {
         item.clamp(canvas);
     }
@@ -390,6 +404,12 @@ fn input(
         pointer.0 = true;
         panel.0 = true;
         consumed.0 = true;
+    }
+    // A clicked frame comes to the front of the HUD.
+    if let Some(index) = hit.filter(|_| {
+        mouse.just_pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Right)
+    }) {
+        layout.raise(STACK_IDS[index]);
     }
     if mouse.just_pressed(MouseButton::Right) {
         if let Some(index) = hit {
@@ -456,7 +476,7 @@ fn input(
     }
     if let Some((index, offset)) = settings.drag {
         if mouse.pressed(MouseButton::Left) {
-            settings.items[index].pos = ((cursor - offset) / 2.).round() * 2.;
+            settings.items[index].pos = ((cursor - offset) / GRID).round() * GRID;
             settings.items[index].clamp(canvas);
         } else {
             settings.drag = None;
@@ -510,6 +530,7 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = World::new();
         world.insert_resource(FrameSettings::default());
+        world.insert_resource(super::super::hud_layout::HudLayout::default());
         world.insert_resource(State::new(Phase::Playing));
         world.insert_resource(UiScale(1.));
         world.insert_resource(ButtonInput::<MouseButton>::default());
@@ -538,6 +559,9 @@ mod tests {
         step(&mut world, Vec2::new(50., 40.), Some(MouseButton::Right));
         assert_eq!(world.resource::<FrameSettings>().menu.unwrap().0, 0);
         assert!(world.resource::<crate::ui_script::PointerOverUi>().0);
+        assert!(world
+            .resource::<super::super::hud_layout::HudLayout>()
+            .is_front(STACK_IDS[0]));
         step(&mut world, Vec2::new(70., 90.), Some(MouseButton::Left));
         assert!(!world.resource::<FrameSettings>().items[0].locked);
         step(&mut world, Vec2::new(50., 40.), None);
@@ -551,7 +575,7 @@ mod tests {
         world.run_system_once(input).unwrap();
         assert_eq!(
             world.resource::<FrameSettings>().items[0].pos,
-            Vec2::new(316., 216.)
+            Vec2::new(320., 216.)
         );
         step(&mut world, Vec2::new(350., 240.), None);
         step(&mut world, Vec2::new(350., 240.), Some(MouseButton::Right));
@@ -578,6 +602,11 @@ mod tests {
         step(&mut world, Vec2::new(370., 367.), Some(MouseButton::Left));
         assert!(world.resource::<FrameSettings>().draft.is_none());
         assert_eq!(world.resource::<FrameSettings>().items[0].design, 2);
+        // Minimized (alt-tab out), the window has no size: the frames stay where they were.
+        let before = world.resource::<FrameSettings>().items[0].pos;
+        world.get_mut::<Window>(window).unwrap().resolution.set(0., 0.);
+        world.run_system_once(input).unwrap();
+        assert_eq!(world.resource::<FrameSettings>().items[0].pos, before);
         assert_eq!(
             FrameSettings::decode(&world.resource::<FrameSettings>().encode()).items[0].design,
             2
