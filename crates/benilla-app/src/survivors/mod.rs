@@ -53,6 +53,7 @@ mod horde_spawning;
 mod hud;
 mod hud_layout;
 mod food;
+mod fps_counter;
 mod jewelry;
 mod journal_ui;
 mod inventory;
@@ -160,6 +161,7 @@ impl Plugin for SurvivorsPlugin {
             )
             .add_plugins(unit_frames::plugin)
             .add_plugins(hud_layout::plugin)
+            .add_plugins(fps_counter::plugin)
             .add_plugins(boss_cooldowns::plugin)
             .add_plugins(boss_enrage::plugin)
             .add_plugins(hogger::plugin)

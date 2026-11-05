@@ -465,7 +465,7 @@ impl Item {
     /// The topic and tab the row sits on.
     fn place(self) -> (u8, u8) {
         match self {
-            Self::Quality => (0, 0),
+            Self::Quality | Self::Flag(InterfaceSetting::FpsCounter) => (0, 0),
             Self::Value(i) => match SETTINGS[i].key {
                 "gxWindow" | "gxVSync" | "renderScale" | "gxMultisample" | "SurvivorUpscaler"
                 | "SurvivorFxaa" => (0, 0),
@@ -564,6 +564,7 @@ enum Action {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum InterfaceSetting {
+    FpsCounter,
     EncounterWarnings,
     WarningLethal,
     WarningDangerous,
@@ -580,7 +581,8 @@ enum InterfaceSetting {
 }
 
 impl InterfaceSetting {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
+        Self::FpsCounter,
         Self::EncounterWarnings,
         Self::WarningLethal,
         Self::WarningDangerous,
@@ -598,6 +600,7 @@ impl InterfaceSetting {
 
     fn label(self) -> &'static str {
         match self {
+            Self::FpsCounter => "Show FPS counter",
             Self::EncounterWarnings => "Show encounter warnings",
             Self::WarningLethal => "Lethal warnings (red skull)",
             Self::WarningDangerous => "Dangerous warnings (white skull)",
@@ -616,6 +619,7 @@ impl InterfaceSetting {
 
     fn cvar(self) -> Option<&'static str> {
         match self {
+            Self::FpsCounter => None,
             Self::EncounterWarnings => Some("SurvivorEncounterWarnings"),
             Self::WarningLethal => Some("SurvivorWarningLethal"),
             Self::WarningDangerous => Some("SurvivorWarningDangerous"),
@@ -635,8 +639,10 @@ impl InterfaceSetting {
         self,
         cvars: &crate::cvars::Cvars,
         plates: &super::plates::NameplateSettings,
+        fps: &super::fps_counter::FpsSettings,
     ) -> bool {
         match self {
+            Self::FpsCounter => fps.enabled,
             Self::EnemyPlates => plates.enemies,
             Self::FriendlyPlates => plates.friends,
             Self::CompactPlates => plates.compact,
@@ -1237,6 +1243,7 @@ fn clicks(
     mut nameplates: ResMut<super::plates::NameplateSettings>,
     mut commands: Commands,
     buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
+    mut fps: ResMut<super::fps_counter::FpsSettings>,
     msaa: Option<Res<MsaaFormats>>,
 ) {
     if !options.settings {
@@ -1313,6 +1320,10 @@ fn clicks(
                 }
             }
             Action::Toggle(setting) => {
+                if setting == InterfaceSetting::FpsCounter {
+                    fps.toggle();
+                    continue;
+                }
                 if let Some(key) = setting.cvar() {
                     let value = if !cvars.flag(key).unwrap_or(false) {
                         "1"
@@ -1352,6 +1363,7 @@ fn paint_nav(
     options: Res<Options>,
     cvars: Res<crate::cvars::Cvars>,
     nameplates: Res<super::plates::NameplateSettings>,
+    fps: Res<super::fps_counter::FpsSettings>,
     mut buttons: Query<(
         &Action,
         &Interaction,
@@ -1389,7 +1401,7 @@ fn paint_nav(
                 )
             }
             Action::Toggle(s) => {
-                let on = s.enabled(&cvars, &nameplates);
+                let on = s.enabled(&cvars, &nameplates, &fps);
                 let want = if on {
                     JustifyContent::FlexEnd
                 } else {
@@ -1427,7 +1439,7 @@ fn paint_nav(
         }
     }
     for (switch, mut bg) in &mut knobs {
-        let on = switch.0.enabled(&cvars, &nameplates);
+        let on = switch.0.enabled(&cvars, &nameplates, &fps);
         bg.set_if_neq(BackgroundColor(if on { Color::WHITE } else { col::STEEL }));
     }
     for (side, mut image) in &mut side_icons {
@@ -1704,6 +1716,7 @@ mod tests {
     fn setting_buttons_update_the_live_audio_and_graphics_backends() {
         let mut app = App::new();
         app.init_resource::<crate::cvars::Cvars>()
+            .init_resource::<super::super::fps_counter::FpsSettings>()
             .init_resource::<crate::sound::SoundConfig>()
             .insert_resource(crate::world_backdrop::RenderScale(1.))
             .insert_resource(Options {
