@@ -14,16 +14,16 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use benilla_assets::{LockRecover, MapCatalogRes, WorldAssets};
-use benilla_formats::{MinimapTranslate, tile_to_world, world_to_tile};
+use benilla_formats::{tile_to_world, world_to_tile, MinimapTranslate};
 use benilla_world::world_map::CurrentMap;
 use benilla_world::world_point::WorldPoint;
 
-use super::Run;
+use super::damage_meter::RightStack;
 use super::enemies::Enemy;
 use super::hero::Hero;
-use super::damage_meter::RightStack;
 use super::hud::{HudFont, UiArt};
 use super::right_column::{self as col, HudSizes, Slot};
+use super::Run;
 use crate::area::AreaTableRes;
 
 /// The composite's edge in texels; the 140-unit widget is ~200 px at 1080p.
@@ -171,7 +171,9 @@ pub(super) fn build(
     stacks: Query<Entity, With<RightStack>>,
     clusters: Query<(Entity, &MapCluster)>,
 ) {
-    let (Some(font), Some(map)) = (font, map) else { return };
+    let (Some(font), Some(map)) = (font, map) else {
+        return;
+    };
     let Ok(stack) = stacks.single() else { return };
     let k = sizes.map;
     if let Some((e, c)) = clusters.iter().next() {
@@ -181,15 +183,21 @@ pub(super) fn build(
         commands.entity(e).despawn();
     }
     let root = spawn_cluster(&mut commands, &font.0, &map, k);
-    commands
-        .entity(root)
-        .insert((ChildOf(stack), Slot(0), super::hud_layout::Movable::new("minimap", "Minimap")));
+    commands.entity(root).insert((
+        ChildOf(stack),
+        Slot(0),
+        super::hud_layout::Movable::new("minimap", "Minimap"),
+    ));
 }
 
 /// The cluster's height in units: the framed map and the zone plate under it, or the close knob
 /// alone while the map is hidden.
 fn cluster_height(shown: bool) -> f32 {
-    if shown { 188.0 } else { 20.0 }
+    if shown {
+        188.0
+    } else {
+        20.0
+    }
 }
 
 /// The 210-unit cluster at scale `k`: the framed 164-unit map at its right, the knobs down its left.
@@ -320,7 +328,9 @@ fn spawn_cluster(commands: &mut Commands, f: &Handle<Font>, map: &MiniMap, k: f3
             });
             let x = knob(c, at(28.0, 6.0, 14.0, 14.0), 14.0);
             c.commands().entity(x).insert((MapButton::Toggle, Button));
-            c.commands().entity(x).with_children(|b| glyph(b, MapButton::Toggle, 7.0, &[45.0, -45.0]));
+            c.commands()
+                .entity(x)
+                .with_children(|b| glyph(b, MapButton::Toggle, 7.0, &[45.0, -45.0]));
             // `GameTimeFrame`'s sun or moon, by the run's hour.
             let tod = if (DAWN..DUSK).contains(&super::hero::MINUTE_OF_DAY) {
                 0.0
@@ -343,7 +353,12 @@ fn spawn_cluster(commands: &mut Commands, f: &Handle<Font>, map: &MiniMap, k: f3
                     },
                     UiArt::crop(
                         "Interface\\Minimap\\UI-TOD-Indicator",
-                        [tod + 0.06, tod + 50.0 / 128.0 - 0.06, 0.1, 50.0 / 64.0 - 0.1],
+                        [
+                            tod + 0.06,
+                            tod + 50.0 / 128.0 - 0.06,
+                            0.1,
+                            50.0 / 64.0 - 0.1,
+                        ],
                     ),
                 ));
             });
@@ -353,7 +368,9 @@ fn spawn_cluster(commands: &mut Commands, f: &Handle<Font>, map: &MiniMap, k: f3
             ] {
                 let e = knob(c, at(26.0, top, 18.0, 18.0), 18.0);
                 c.commands().entity(e).insert((button, Button, MapBody));
-                c.commands().entity(e).with_children(|b| glyph(b, button, 8.0, bars));
+                c.commands()
+                    .entity(e)
+                    .with_children(|b| glyph(b, button, 8.0, bars));
             }
         })
         .id()
@@ -414,11 +431,12 @@ pub(super) fn map_buttons(
 
 /// The cluster shows over the run, the pause menu included, as the HUD does.
 pub(super) fn show_cluster(
+    editor: Res<super::ui_edit::UiEditor>,
     phase: Res<State<super::Phase>>,
     mut clusters: Query<&mut Visibility, With<MapCluster>>,
 ) {
     let p = *phase.get();
-    let want = if p != super::Phase::Menu && p != super::Phase::GameOver {
+    let want = if editor.active || (p != super::Phase::Menu && p != super::Phase::GameOver) {
         Visibility::Inherited
     } else {
         Visibility::Hidden
@@ -490,19 +508,21 @@ pub(super) fn zone_text(
 /// Recomposite the map around the hero: tiles, mask, arrow, then the enemy dots.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compose(
+    editor: Res<super::ui_edit::UiEditor>,
     mut map: ResMut<MiniMap>,
     assets: Option<ResMut<WorldAssets>>,
     catalog: Option<Res<MapCatalogRes>>,
     current: Option<Res<CurrentMap>>,
     phase: Res<State<super::Phase>>,
     hero: Query<&Transform, With<Hero>>,
+    cameras: Query<&Transform, With<benilla_world::view::WorldCamera>>,
     enemies: Query<(&Transform, &Enemy)>,
     lairs: Res<super::guardians::Lairs>,
     mut images: ResMut<Assets<Image>>,
     time: Res<Time<Real>>,
     mut next_at: Local<f32>,
 ) {
-    if *phase.get() == super::Phase::Menu || !map.shown {
+    if (!editor.active && *phase.get() == super::Phase::Menu) || !map.shown {
         return;
     }
     // A CPU composite plus a texture upload: on the browser's one thread it was the single
@@ -515,7 +535,9 @@ pub(super) fn compose(
     let (Some(mut assets), Some(catalog), Some(current)) = (assets, catalog, current) else {
         return;
     };
-    let Ok(hero) = hero.single() else { return };
+    let Ok(hero) = hero.single().or_else(|_| cameras.single()) else {
+        return;
+    };
     let Some(dir) = catalog.0.directory(current.0).map(str::to_string) else {
         return;
     };

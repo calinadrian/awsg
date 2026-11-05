@@ -119,7 +119,13 @@ impl Timer {
             "Shield" => 17,
             "Mend" => 136,
             "Blink" => 1953,
-            _ => if self.spell == 0 { 688 } else { self.spell },
+            _ => {
+                if self.spell == 0 {
+                    688
+                } else {
+                    self.spell
+                }
+            }
         }
     }
 
@@ -169,10 +175,15 @@ pub(super) fn snapshot(
         .unwrap_or_else(|| script.map(|s| s.cooldowns.clone()).unwrap_or_default());
     if enemy.boss && !enemy.dead && !enemy.timed_enraged {
         let warning = enemy.enrage_at - now <= 10.0;
-        timers.push(Timer { spell: 8599, name: super::boss_enrage::NAME.into(),
-            due: enemy.enrage_at, period: super::boss_enrage::SECONDS,
+        timers.push(Timer {
+            spell: 8599,
+            name: super::boss_enrage::NAME.into(),
+            due: enemy.enrage_at,
+            period: super::boss_enrage::SECONDS,
             cast_until: if warning { enemy.enrage_at } else { 0.0 },
-            cast_duration: 10.0, ready: false });
+            cast_duration: 10.0,
+            ready: false,
+        });
     }
     timers.into_iter().filter(Timer::valid).collect()
 }
@@ -366,7 +377,7 @@ fn build(
 #[allow(clippy::type_complexity)]
 fn paint(
     mut commands: Commands,
-    phase: Res<State<Phase>>,
+    phase: (Res<State<Phase>>, Res<super::ui_edit::UiEditor>),
     run: Res<Run>,
     font: Option<Res<HudFont>>,
     coop: Res<super::coop::Coop>,
@@ -388,6 +399,7 @@ fn paint(
     mut icons: Query<(&mut super::hud::SpellIcon, &mut ImageNode)>,
     cvars: Res<crate::cvars::Cvars>,
 ) {
+    let (phase, editor) = phase;
     let Some(font) = font else { return };
     let now = run.elapsed;
     let Ok((panel_id, mut panel, mut visible)) = panels.single_mut() else {
@@ -431,13 +443,29 @@ fn paint(
         })
         .collect();
     // Spawn order is stable; moving past another boss never exchanges their groups.
+    if editor.active && fights.is_empty() {
+        let timers = [(15496, "Cleave", 4.2, 8.), (20549, "War Stomp", 12., 18.)]
+            .map(|(spell, name, left, period)| Timer {
+                spell,
+                name: name.into(),
+                due: now + left,
+                period,
+                cast_until: 0.,
+                cast_duration: 0.,
+                ready: false,
+            })
+            .to_vec();
+        fights.push((Entity::PLACEHOLDER, "Hogger", timers));
+    }
     fights.sort_by_key(|(id, _, _)| id.to_bits());
     let signature: Vec<_> = fights
         .iter()
         .map(|(id, _, timers)| (*id, timers.len()))
         .collect();
-    let shown = cvars.flag("SurvivorBossCooldowns").unwrap_or(true)
-        && !matches!(phase.get(), Phase::Menu | Phase::GameOver) && !fights.is_empty();
+    let shown = editor.active
+        || (cvars.flag("SurvivorBossCooldowns").unwrap_or(true)
+            && !matches!(phase.get(), Phase::Menu | Phase::GameOver)
+            && !fights.is_empty());
     *visible = if shown {
         Visibility::Inherited
     } else {
@@ -506,10 +534,24 @@ fn paint(
                 }
             }
             // Native labels distinguish additional stomps and poison pools sharing a DBC row.
-            let name = if matches!(timer.name.as_str(), "Enraged Stomp" | "Poison Pools" | "Lay Eggs"
-                | "Boar Rush" | "Tusk Sweep" | "Stampede" | "Boar Ambush"
-                | "Collector's Cut" | "Marked for Collection" | "Dirty Money"
-                | "Call the Brotherhood" | "Smoke and Daggers" | "Dirty Money: Second Blast" | "Collector's Bombs" | "Berserk") {
+            let name = if matches!(
+                timer.name.as_str(),
+                "Enraged Stomp"
+                    | "Poison Pools"
+                    | "Lay Eggs"
+                    | "Boar Rush"
+                    | "Tusk Sweep"
+                    | "Stampede"
+                    | "Boar Ambush"
+                    | "Collector's Cut"
+                    | "Marked for Collection"
+                    | "Dirty Money"
+                    | "Call the Brotherhood"
+                    | "Smoke and Daggers"
+                    | "Dirty Money: Second Blast"
+                    | "Collector's Bombs"
+                    | "Berserk"
+            ) {
                 timer.name.clone()
             } else {
                 spells

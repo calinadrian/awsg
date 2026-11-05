@@ -9,8 +9,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use super::enemies::Enemy;
-use super::unit_frames::{AuraLayout, AuraPos};
 use super::hud::{HudFont, UiArt};
+use super::unit_frames::{AuraLayout, AuraPos};
 use super::{Phase, RunEntity};
 use crate::entities::{mount::MountChild, overhead_anchor, BoneAttach, OverheadFallback};
 
@@ -22,6 +22,7 @@ const NAME_H: f32 = 0.01;
 const NEARBY_SQ: f32 = 20.0 * 20.0;
 /// At most this many ordinary plates at once, nearest first.
 const MAX_NEARBY: usize = 24;
+/// Bosses get first choice; off-screen encounters do not retain UI trees.
 const MAX_ENCOUNTER_PLATES: usize = 8;
 
 /// The settings page's equivalent of the two FrameXML nameplate toggles. The Survivors world does
@@ -39,7 +40,10 @@ pub(super) struct NameplateSettings {
 }
 
 /// Follow the Auras tab: a new layout rebuilds the compact plates in [`enemy_plates`].
-pub(super) fn sync_plate_auras(cvars: Res<crate::cvars::Cvars>, mut settings: ResMut<NameplateSettings>) {
+pub(super) fn sync_plate_auras(
+    cvars: Res<crate::cvars::Cvars>,
+    mut settings: ResMut<NameplateSettings>,
+) {
     if !cvars.is_changed() {
         return;
     }
@@ -90,9 +94,15 @@ mod tests {
         toggle_nameplates(&mut s, false, true);
         assert!(s.enemies && !s.friends, "Shift+V leaves enemy plates alone");
         toggle_nameplates(&mut s, true, false);
-        assert!(s.enemies && s.friends, "Ctrl+V shows both when either is off");
+        assert!(
+            s.enemies && s.friends,
+            "Ctrl+V shows both when either is off"
+        );
         toggle_nameplates(&mut s, true, false);
-        assert!(!s.enemies && !s.friends, "Ctrl+V hides both when both are on");
+        assert!(
+            !s.enemies && !s.friends,
+            "Ctrl+V hides both when both are on"
+        );
     }
 
     #[test]
@@ -109,7 +119,10 @@ mod tests {
             ..shared
         };
         let g = CompactGeometry::of(split);
-        assert_eq!((g.above, g.below, g.bar_top, g.height), (13.0, 9.0, 15.0, 37.0));
+        assert_eq!(
+            (g.above, g.below, g.bar_top, g.height),
+            (13.0, 9.0, 15.0, 37.0)
+        );
         assert_eq!(rooms(split, 2, 1), (10, 7));
         // A hidden kind takes no room and no row.
         let hidden = AuraLayout {
@@ -154,7 +167,10 @@ mod tests {
         assert!(!glyph_covers(BarGlyph::Skull, 2.0, 2.0), "corner");
         assert!(glyph_covers(BarGlyph::Star, 12.0, 12.0), "star centre");
         assert!(glyph_covers(BarGlyph::Star, 12.0, 6.0), "top point");
-        assert!(!glyph_covers(BarGlyph::Star, 12.0, 16.5), "between the lower points");
+        assert!(
+            !glyph_covers(BarGlyph::Star, 12.0, 16.5),
+            "between the lower points"
+        );
         let img = glyph_image(BarGlyph::Star);
         let alpha = |x: usize, y: usize| img.data.as_ref().unwrap()[(y * 64 + x) * 4 + 3];
         assert_eq!(alpha(32, 32), 255);
@@ -199,8 +215,7 @@ pub(super) struct Plate {
 
 /// A compact plate's health text, its name's clip box and its aura row: your debuffs from the
 /// left, the unit's buffs from the right, each side's "+n" for what does not fit. A side's icons
-/// are spawned the first time it has an aura: most of a horde never does, and a plate comes and
-/// goes with its unit's distance.
+/// are spawned the first time the plate needs them and retained when the plate is recycled.
 #[derive(Component)]
 pub(super) struct CompactParts {
     health: Entity,
@@ -271,15 +286,26 @@ struct CompactGeometry {
 impl CompactGeometry {
     fn of(layout: AuraLayout) -> Self {
         let edge = |at: AuraPos| {
-            [(layout.debuffs, layout.debuff_size), (layout.buffs, layout.buff_size)]
-                .into_iter()
-                .filter(|(pos, _)| *pos == at)
-                .map(|(_, size)| size)
-                .fold(0.0, f32::max)
+            [
+                (layout.debuffs, layout.debuff_size),
+                (layout.buffs, layout.buff_size),
+            ]
+            .into_iter()
+            .filter(|(pos, _)| *pos == at)
+            .map(|(_, size)| size)
+            .fold(0.0, f32::max)
         };
         let (above, below) = (edge(AuraPos::Above), edge(AuraPos::Below));
-        let bar_top = if above > 0.0 { above + COMPACT_ROW_GAP } else { 0.0 };
-        let under = if below > 0.0 { COMPACT_ROW_GAP + below } else { 0.0 };
+        let bar_top = if above > 0.0 {
+            above + COMPACT_ROW_GAP
+        } else {
+            0.0
+        };
+        let under = if below > 0.0 {
+            COMPACT_ROW_GAP + below
+        } else {
+            0.0
+        };
         Self {
             above,
             below,
@@ -297,11 +323,24 @@ fn row_fit(size: f32) -> usize {
 /// Each side's slots in a layout, debuffs then buffs: a shared row splits by [`share`], a row of
 /// its own takes what fits, a hidden kind none.
 fn rooms(layout: AuraLayout, debuffs: usize, buffs: usize) -> (usize, usize) {
-    let fit = |pos: AuraPos, size: f32| if pos == AuraPos::Hidden { 0 } else { row_fit(size) };
+    let fit = |pos: AuraPos, size: f32| {
+        if pos == AuraPos::Hidden {
+            0
+        } else {
+            row_fit(size)
+        }
+    };
     if layout.debuffs == layout.buffs && layout.buffs != AuraPos::Hidden {
-        share(debuffs, buffs, row_fit(layout.debuff_size.max(layout.buff_size)))
+        share(
+            debuffs,
+            buffs,
+            row_fit(layout.debuff_size.max(layout.buff_size)),
+        )
     } else {
-        (fit(layout.debuffs, layout.debuff_size), fit(layout.buffs, layout.buff_size))
+        (
+            fit(layout.debuffs, layout.debuff_size),
+            fit(layout.buffs, layout.buff_size),
+        )
     }
 }
 /// The name's size, and the least it shrinks to before its end is clipped; the level and health.
@@ -347,7 +386,12 @@ fn overflow(len: usize, slots: usize) -> (usize, usize) {
 
 /// The compact style: the boss bars' frame round an 11px crimson well with the level, name and
 /// health text in it, and the aura icons on the edges `layout` names.
-fn spawn_compact_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy, layout: AuraLayout) -> Entity {
+fn spawn_compact_plate(
+    commands: &mut Commands,
+    f: &Handle<Font>,
+    en: &Enemy,
+    layout: AuraLayout,
+) -> Entity {
     let geometry = CompactGeometry::of(layout);
     use super::right_column::{label as text, STEEL, TEXT_HI, WELL};
     let span = || Node {
@@ -368,10 +412,20 @@ fn spawn_compact_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy, la
             BackgroundColor(WINE_HI),
         ))
         .id();
-    let fill = commands.spawn((span(), BackgroundColor(WINE))).add_child(hi).id();
-    let level = commands.spawn(text(f, &en.level.to_string(), COMPACT_SMALL, STEEL)).id();
+    let fill = commands
+        .spawn((span(), BackgroundColor(WINE)))
+        .add_child(hi)
+        .id();
+    let level = commands
+        .spawn(text(f, &en.level.to_string(), COMPACT_SMALL, STEEL))
+        .id();
     let name = commands
-        .spawn(text(f, en.def.name, COMPACT_NAME, if en.silver { SILVER } else { TEXT_HI }))
+        .spawn(text(
+            f,
+            en.def.name,
+            COMPACT_NAME,
+            if en.silver { SILVER } else { TEXT_HI },
+        ))
         .id();
     let name_box = commands
         .spawn(Node {
@@ -415,7 +469,11 @@ fn spawn_compact_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy, la
     // The rows: the debuffs from the left and the buffs from the right, each on its edge, each
     // side's "+n" after its icons, which [`compact_plates`] adds when the side first needs them.
     let side = |commands: &mut Commands, left: bool| {
-        let size = if left { layout.debuff_size } else { layout.buff_size };
+        let size = if left {
+            layout.debuff_size
+        } else {
+            layout.buff_size
+        };
         let count = commands.spawn(text(f, "", COMPACT_SMALL, TEXT_HI)).id();
         let chip = commands
             .spawn((
@@ -437,7 +495,11 @@ fn spawn_compact_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy, la
             .id();
         let row = commands
             .spawn(Node {
-                flex_direction: if left { FlexDirection::Row } else { FlexDirection::RowReverse },
+                flex_direction: if left {
+                    FlexDirection::Row
+                } else {
+                    FlexDirection::RowReverse
+                },
                 column_gap: Val::Px(COMPACT_AURA_GAP),
                 ..default()
             })
@@ -463,29 +525,45 @@ fn spawn_compact_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy, la
             .id()
     };
     let above = edge(0.0, geometry.above, AlignItems::FlexEnd);
-    let below = edge(geometry.height - geometry.below, geometry.below, AlignItems::FlexStart);
+    let below = edge(
+        geometry.height - geometry.below,
+        geometry.below,
+        AlignItems::FlexStart,
+    );
     // A buffs row alone on its edge still keeps to the right.
     for (row, pos) in [(left_row, layout.debuffs), (right_row, layout.buffs)] {
         match pos {
             AuraPos::Above => commands.entity(above).add_child(row),
             AuraPos::Below => commands.entity(below).add_child(row),
-            AuraPos::Hidden => commands.entity(row).insert(Node { display: Display::None, ..default() }).insert(ChildOf(above)),
+            AuraPos::Hidden => commands
+                .entity(row)
+                .insert(Node {
+                    display: Display::None,
+                    ..default()
+                })
+                .insert(ChildOf(above)),
         };
     }
     for (row, pos) in [(right_row, layout.buffs)] {
         if pos != AuraPos::Hidden && pos != layout.debuffs {
-            commands.entity(row).entry::<Node>().and_modify(|mut n| n.margin.left = Val::Auto);
+            commands
+                .entity(row)
+                .entry::<Node>()
+                .and_modify(|mut n| n.margin.left = Val::Auto);
         }
     }
     commands
         .spawn((
             RunEntity,
             Node {
+                left: Val::Px(0.),
+                top: Val::Px(0.),
                 width: Val::Px(COMPACT_W),
                 height: Val::Px(geometry.height),
                 ..absolute()
             },
             GlobalZIndex(-1),
+            UiTransform::default(),
             Visibility::Hidden,
             Plate {
                 bar,
@@ -565,7 +643,12 @@ fn spawn_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy) -> Entity 
     commands
         .spawn((
             RunEntity,
-            absolute(),
+            Node {
+                left: Val::Px(0.),
+                top: Val::Px(0.),
+                ..absolute()
+            },
+            UiTransform::default(),
             // Under the HUD: a plate near the top of the screen must not cover the clock.
             GlobalZIndex(-1),
             Visibility::Hidden,
@@ -582,6 +665,44 @@ fn spawn_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy) -> Entity 
         .id()
 }
 
+/// Fixed-cost seating for a Survivors horde. Dense piles never start a breadth-first search.
+#[derive(Default)]
+pub(super) struct PlateSeats(Vec<Rect>);
+
+impl PlateSeats {
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    fn claim(&mut self, rect: Rect) {
+        self.0.push(rect);
+    }
+
+    fn resolve(&self, desired: Rect, viewport: Vec2) -> Rect {
+        let size = desired.size();
+        let max = (viewport - size).max(Vec2::ZERO);
+        let seed = desired.min.clamp(Vec2::ZERO, max).round();
+        for row in [0., -1., 1., -2., 2., -3., 3., -4., 4., -5., 5., -6., 6.] {
+            for column in [0., -1., 1.] {
+                let at = (seed + Vec2::new(column * (size.x + 2.), row * (size.y + 2.)))
+                    .clamp(Vec2::ZERO, max)
+                    .round();
+                let candidate = Rect::from_corners(at, at + size);
+                if self
+                    .0
+                    .iter()
+                    .all(|other| other.intersect(candidate).is_empty())
+                {
+                    return candidate;
+                }
+            }
+        }
+        Rect::from_corners(seed, seed + size)
+    }
+}
+
+/// Keep encounter plates visible and add ordinary enemy plates while the WoW-style V toggle is on.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 #[derive(Default)]
 pub(super) struct PlatePool {
     by_unit: HashMap<Entity, Entity>,
@@ -590,7 +711,6 @@ pub(super) struct PlatePool {
     shown: Vec<Entity>,
 }
 
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn enemy_plates(
     mut commands: Commands,
     phase: Res<State<Phase>>,
@@ -600,7 +720,7 @@ pub(super) fn enemy_plates(
     enemies: Query<(Entity, &Transform, &Enemy)>,
     hero: Query<&Transform, (With<super::hero::Hero>, Without<Enemy>)>,
     cams: Query<(&Camera, &Transform), (With<WorldCamera>, Without<Enemy>)>,
-    mut plates: Query<(&Plate, Option<&mut CompactParts>)>,
+    mut plates: Query<(&Plate, &mut UiTransform, Option<&mut CompactParts>)>,
     mut nodes: Query<&mut Node>,
     mut vis: Query<(Entity, &mut Visibility), With<Plate>>,
     mut texts: Query<&mut TextFont>,
@@ -612,7 +732,7 @@ pub(super) fn enemy_plates(
         Query<(), With<MountChild>>,
     ),
     mut pool: Local<PlatePool>,
-    mut bucket: Local<crate::smart_rect::SmartBucket>,
+    mut bucket: Local<PlateSeats>,
     hud: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<super::hud::TopStack>>,
 ) {
     use crate::vplates::{
@@ -625,7 +745,10 @@ pub(super) fn enemy_plates(
         style,
         shown,
     } = &mut *pool;
-    let in_run = *phase.get() != Phase::Menu;
+    let in_run = matches!(
+        *phase.get(),
+        Phase::Playing | Phase::Paused | Phase::LevelUp
+    );
     let want_style = Some((settings.compact, settings.auras));
     if !in_run || *style != want_style {
         *style = want_style;
@@ -741,7 +864,7 @@ pub(super) fn enemy_plates(
     for (_, (unit, en, screen)) in encounters.into_iter().chain(nearby) {
         let Some(&plate) = by_unit.get(&unit) else {
             let p = if let Some(p) = spare.pop() {
-                let (parts, compact_parts) = plates.get_mut(p).expect("live spare plate");
+                let (parts, _, compact_parts) = plates.get_mut(p).expect("live spare plate");
                 set_display(&mut nodes, p, true);
                 let name_color = if en.silver {
                     SILVER
@@ -773,7 +896,7 @@ pub(super) fn enemy_plates(
             by_unit.insert(unit, p);
             continue;
         };
-        let Ok((parts, _)) = plates.get_mut(plate) else {
+        let Ok((parts, mut position, _)) = plates.get_mut(plate) else {
             continue;
         };
         let desired = Rect::new(
@@ -788,14 +911,16 @@ pub(super) fn enemy_plates(
         }
         bucket.claim(seated);
         shown.push(plate);
+        let translation = Val2::px(seated.min.x.round(), seated.min.y.round());
+        if position.translation != translation {
+            position.translation = translation;
+        }
         if let Ok(mut n) = nodes.get_mut(plate) {
-            let (width, height) = (Val::Px(pw), Val::Px(ph));
-            let (left, top) = (Val::Px(seated.min.x), Val::Px(seated.min.y));
-            if (n.width, n.height, n.left, n.top) != (width, height, left, top) {
-                n.width = width;
-                n.height = height;
-                n.left = left;
-                n.top = top;
+            if n.width != Val::Px(pw) {
+                n.width = Val::Px(pw);
+            }
+            if n.height != Val::Px(ph) {
+                n.height = Val::Px(ph);
             }
         }
         if compact {
@@ -1066,7 +1191,9 @@ fn glyph_image(glyph: BarGlyph) -> Image {
             let mut hits = 0;
             for sy in 0..SAMPLES {
                 for sx in 0..SAMPLES {
-                    let at = |p: u32, s: u32| (p as f32 + (s as f32 + 0.5) / SAMPLES as f32) * 24.0 / SIZE as f32;
+                    let at = |p: u32, s: u32| {
+                        (p as f32 + (s as f32 + 0.5) / SAMPLES as f32) * 24.0 / SIZE as f32
+                    };
                     if glyph_covers(glyph, at(px, sx), at(py, sy)) {
                         hits += 1;
                     }
@@ -1261,7 +1388,7 @@ fn spawn_tiny_slot(commands: &mut Commands, f: &Handle<Font>, size: f32) -> Aura
             super::hud::TipFor::Aura,
             AuraTip::default(),
         ))
-        .add_children(&[image, badge])
+        .add_children(&[image, badge, band])
         .id();
     AuraSlot {
         frame,
@@ -1372,7 +1499,11 @@ fn spawn_bar_row(commands: &mut Commands, f: &Handle<Font>) -> BarRow {
     let feet: Vec<Entity> = [b1, b2, b3, b4]
         .into_iter()
         .enumerate()
-        .map(|(i, c)| commands.spawn(band(FOOT + FOOT_BAND * i as f32, FOOT_BAND, c)).id())
+        .map(|(i, c)| {
+            commands
+                .spawn(band(FOOT + FOOT_BAND * i as f32, FOOT_BAND, c))
+                .id()
+        })
         .collect();
     let fill = commands
         .spawn((span(), BackgroundColor(body)))
@@ -1408,7 +1539,13 @@ fn spawn_bar_row(commands: &mut Commands, f: &Handle<Font>) -> BarRow {
                         ..absolute()
                     },
                     BackgroundColor(STEEL_HI),
-                    BoxShadow::new(Color::srgba(0.83, 0.85, 0.89, 0.6), Val::ZERO, Val::ZERO, Val::ZERO, Val::Px(3.0)),
+                    BoxShadow::new(
+                        Color::srgba(0.83, 0.85, 0.89, 0.6),
+                        Val::ZERO,
+                        Val::ZERO,
+                        Val::ZERO,
+                        Val::Px(3.0),
+                    ),
                 ))
                 .id()
         })
@@ -1424,7 +1561,13 @@ fn spawn_bar_row(commands: &mut Commands, f: &Handle<Font>) -> BarRow {
                 ..absolute()
             },
             BackgroundColor(Color::srgb(0.7, 0.76, 0.9)),
-            BoxShadow::new(Color::srgba(0.78, 0.84, 0.96, 0.7), Val::ZERO, Val::ZERO, Val::ZERO, Val::Px(4.0)),
+            BoxShadow::new(
+                Color::srgba(0.78, 0.84, 0.96, 0.7),
+                Val::ZERO,
+                Val::ZERO,
+                Val::ZERO,
+                Val::Px(4.0),
+            ),
         ))
         .id();
 
@@ -1468,9 +1611,15 @@ fn spawn_bar_row(commands: &mut Commands, f: &Handle<Font>) -> BarRow {
 
     // The well darkens toward its top, in flat bands like the fill.
     let shade = [
-        commands.spawn(band(0.0, 20.0, Color::srgb(0.075, 0.027, 0.047))).id(),
-        commands.spawn(band(20.0, 20.0, Color::srgb(0.09, 0.033, 0.056))).id(),
-        commands.spawn(band(70.0, 30.0, Color::srgb(0.13, 0.047, 0.08))).id(),
+        commands
+            .spawn(band(0.0, 20.0, Color::srgb(0.075, 0.027, 0.047)))
+            .id(),
+        commands
+            .spawn(band(20.0, 20.0, Color::srgb(0.09, 0.033, 0.056)))
+            .id(),
+        commands
+            .spawn(band(70.0, 30.0, Color::srgb(0.13, 0.047, 0.08)))
+            .id(),
     ];
     let mut well_children = shade.to_vec();
     well_children.extend([lag, fill]);
@@ -1494,7 +1643,9 @@ fn spawn_bar_row(commands: &mut Commands, f: &Handle<Font>) -> BarRow {
     // Positions in the bar's padding box, which starts one pixel in, past its border.
     let mid = WELL_LEFT + (BAR_W - WELL_LEFT - WELL_RIGHT) / 2.0 - 1.0;
     let crest = commands.spawn(diamond(7.0, mid, -1.0)).id();
-    let cap = commands.spawn(diamond(9.0, BAR_W - 1.0, BAR_H / 2.0 - 1.0)).id();
+    let cap = commands
+        .spawn(diamond(9.0, BAR_W - 1.0, BAR_H / 2.0 - 1.0))
+        .id();
     let (medallion, ring, skull, star) = spawn_medallion(commands);
     let bar = commands
         .spawn((
@@ -1515,13 +1666,23 @@ fn spawn_bar_row(commands: &mut Commands, f: &Handle<Font>) -> BarRow {
             BackgroundColor(FRAME_INK),
             BorderColor::all(STEEL_LO),
             Outline::new(Val::Px(1.0), Val::ZERO, Color::BLACK),
-            BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.6), Val::ZERO, Val::Px(2.0), Val::ZERO, Val::Px(6.0)),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.6),
+                Val::ZERO,
+                Val::Px(2.0),
+                Val::ZERO,
+                Val::Px(6.0),
+            ),
         ))
         .add_children(&[well, crest, cap, medallion])
         .id();
 
-    let buffs: Vec<AuraSlot> = (0..MAX_AURAS).map(|_| spawn_aura_slot(commands, f, AURA)).collect();
-    let debuffs: Vec<AuraSlot> = (0..MAX_AURAS).map(|_| spawn_aura_slot(commands, f, AURA)).collect();
+    let buffs: Vec<AuraSlot> = (0..MAX_AURAS)
+        .map(|_| spawn_aura_slot(commands, f, AURA))
+        .collect();
+    let debuffs: Vec<AuraSlot> = (0..MAX_AURAS)
+        .map(|_| spawn_aura_slot(commands, f, AURA))
+        .collect();
     let side = |commands: &mut Commands, slots: &[AuraSlot], left: bool| {
         // Buffs are laid right to left, so the first sits next to the bar.
         let mut frames: Vec<Entity> = slots.iter().map(|s| s.frame).collect();
@@ -1620,9 +1781,7 @@ fn short(n: f32) -> String {
 /// elite that has been hit.
 fn engaged(e: &Enemy) -> bool {
     !e.silver
-        && (e.boss
-            || e.home.is_some_and(|h| h.awake)
-            || (e.def.roaming_elite && e.hp < e.max_hp))
+        && (e.boss || e.home.is_some_and(|h| h.awake) || (e.def.roaming_elite && e.hp < e.max_hp))
 }
 
 fn set_text(texts: &mut Query<&mut Text>, e: Entity, s: String) {
@@ -1703,13 +1862,18 @@ fn brighter(c: Color, k: f32) -> Color {
 pub(super) fn boss_bar(
     mut commands: Commands,
     time: Res<Time>,
-    phase: Res<State<Phase>>,
+    phase: (Res<State<Phase>>, Res<super::ui_edit::UiEditor>),
     font: Option<Res<HudFont>>,
     mut run: ResMut<super::Run>,
     selection: Res<crate::target::Selection>,
     spells: Option<Res<crate::ui_action::Spells>>,
     hero: Query<&Transform, (With<super::hero::Hero>, Without<Enemy>)>,
-    enemies: Query<(Entity, &Transform, &Enemy, Option<&super::mechanics::Mechanics>)>,
+    enemies: Query<(
+        Entity,
+        &Transform,
+        &Enemy,
+        Option<&super::mechanics::Mechanics>,
+    )>,
     mut bars: Query<(&mut BossBar, &mut Visibility)>,
     mut shown: Query<&mut Visibility, Without<BossBar>>,
     mut nodes: Query<&mut Node>,
@@ -1718,6 +1882,7 @@ pub(super) fn boss_bar(
     stack: Query<Entity, With<super::hud::TopStack>>,
     mut lags: Local<Vec<f32>>,
 ) {
+    let (phase, editor) = phase;
     if let Some((_, left)) = run.yell.as_mut() {
         *left -= time.delta_secs();
         if *left <= 0.0 {
@@ -1731,7 +1896,7 @@ pub(super) fn boss_bar(
         }
         return;
     };
-    let playing = !matches!(*phase.get(), Phase::Menu | Phase::GameOver);
+    let playing = editor.active || !matches!(*phase.get(), Phase::Menu | Phase::GameOver);
     let at = hero.single().map(|h| h.translation).unwrap_or_default();
     let mut fights: Vec<_> = enemies
         .iter()
@@ -1739,6 +1904,48 @@ pub(super) fn boss_bar(
         .map(|(id, tf, e, m)| (!e.boss, tf.translation.distance(at), id, e, m))
         .collect();
     fights.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    if editor.active && fights.is_empty() {
+        vis.set_if_neq(Visibility::Inherited);
+        for (i, row) in bar.rows.iter_mut().enumerate() {
+            row.shows = None;
+            set_display(&mut nodes, row.row, i == 0);
+            if let Ok(mut v) = shown.get_mut(row.row) {
+                v.set_if_neq(if i == 0 {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                });
+            }
+            if i != 0 {
+                continue;
+            }
+            set_width(&mut nodes, row.fill, 0.75);
+            set_width(&mut nodes, row.lag, 0.8);
+            set_text(&mut texts, row.name, "Hogger".into());
+            set_text(&mut texts, row.level, "12".into());
+            set_text(&mut texts, row.pct, "75%".into());
+            set_text(&mut texts, row.small, "75k / 100k".into());
+            paint.border(row.bar, STEEL_LO);
+            paint.color(row.ring, STEEL_LO);
+            paint.tint(row.name, TEXT_HI);
+            paint.tint(row.small, TEXT_SMALL);
+            let tones = fill_tones(WINE_HI, WINE, WINE_LO);
+            paint.color(row.fill, tones[0]);
+            for (band, tone) in row.bands.iter().zip(&tones[1..]) {
+                paint.color(*band, *tone);
+            }
+            set_display(&mut nodes, row.skull, true);
+            set_display(&mut nodes, row.star, false);
+            set_display(&mut nodes, row.cast, false);
+            for &line in &row.phases {
+                set_display(&mut nodes, line, false);
+            }
+            for slot in row.buffs.iter().chain(&row.debuffs) {
+                set_display(&mut nodes, slot.frame, false);
+            }
+        }
+        return;
+    }
     // A bar keeps its row while its fight lasts, so the bars never trade places as the hero moves
     // or turns to another target; a new fight takes the first free row, bosses before elites.
     let mut seats: Vec<Option<usize>> = bar
@@ -1800,7 +2007,13 @@ pub(super) fn boss_bar(
         paint.border(row.bar, if elite { ELITE_EDGE } else { STEEL_LO });
         let drop = (Color::srgba(0.0, 0.0, 0.0, 0.6), 0.0, 2.0, 0.0, 6.0);
         let (color, x, y, spread, blur) = if raging {
-            (Color::srgba(0.75, 0.12, 0.22, 0.35 + 0.4 * beat), 0.0, 0.0, 1.0 + 2.0 * beat, 8.0 + 4.0 * beat)
+            (
+                Color::srgba(0.75, 0.12, 0.22, 0.35 + 0.4 * beat),
+                0.0,
+                0.0,
+                1.0 + 2.0 * beat,
+                8.0 + 4.0 * beat,
+            )
         } else if focus {
             (Color::srgba(0.365, 0.4, 0.475, 0.45), 0.0, 0.0, 0.0, 6.0)
         } else {
@@ -1808,7 +2021,13 @@ pub(super) fn boss_bar(
         };
         paint.shadow(
             row.bar,
-            BoxShadow::new(color, Val::Px(x), Val::Px(y), Val::Px(spread), Val::Px(blur)),
+            BoxShadow::new(
+                color,
+                Val::Px(x),
+                Val::Px(y),
+                Val::Px(spread),
+                Val::Px(blur),
+            ),
         );
         for cap in row.caps {
             paint.color(cap, if elite { ELITE_EDGE } else { STEEL_LO });
@@ -1824,7 +2043,11 @@ pub(super) fn boss_bar(
         } else {
             (WINE_HI, WINE, WINE_LO)
         };
-        let k = if share < 0.2 && !e.ward { 1.0 + 0.45 * beat } else { 1.0 };
+        let k = if share < 0.2 && !e.ward {
+            1.0 + 0.45 * beat
+        } else {
+            1.0
+        };
         let tones = fill_tones(brighter(hi, k), brighter(mid, k), brighter(lo, k));
         paint.color(row.fill, tones[0]);
         for (band, tone) in row.bands.iter().zip(&tones[1..]) {
@@ -1846,7 +2069,11 @@ pub(super) fn boss_bar(
 
         set_text(&mut texts, row.name, e.def.name.to_string());
         set_text(&mut texts, row.level, e.level.to_string());
-        set_text(&mut texts, row.pct, format!("{:.0}%", (share * 100.0).ceil()));
+        set_text(
+            &mut texts,
+            row.pct,
+            format!("{:.0}%", (share * 100.0).ceil()),
+        );
         // A wind-up takes the numbers' place, its line filling along the foot.
         let cast = mech.and_then(|m| m.casting(now));
         set_display(&mut nodes, row.cast, cast.is_some());
@@ -1862,7 +2089,11 @@ pub(super) fn boss_bar(
                 paint.tint(row.small, CAST_TEXT);
             }
             None => {
-                set_text(&mut texts, row.small, format!("{} / {}", short(e.hp), short(e.max_hp)));
+                set_text(
+                    &mut texts,
+                    row.small,
+                    format!("{} / {}", short(e.hp), short(e.max_hp)),
+                );
                 paint.tint(row.small, TEXT_SMALL);
             }
         }
@@ -1908,8 +2139,26 @@ pub(super) fn boss_auras(
         let mark = row.shows.and_then(|id| run.passives.marks.get(&id));
         let all = super::mechanics::auras(en, mech, mark, run.elapsed, name);
         let (buffs, debuffs): (Vec<_>, Vec<_>) = all.into_iter().partition(|a| a.buff);
-        fill_slots(&mut commands, &row.buffs, buffs, STEEL_LO, &mut slots, &mut icons, &mut nodes, &mut texts);
-        fill_slots(&mut commands, &row.debuffs, debuffs, WINE_HI, &mut slots, &mut icons, &mut nodes, &mut texts);
+        fill_slots(
+            &mut commands,
+            &row.buffs,
+            buffs,
+            STEEL_LO,
+            &mut slots,
+            &mut icons,
+            &mut nodes,
+            &mut texts,
+        );
+        fill_slots(
+            &mut commands,
+            &row.debuffs,
+            debuffs,
+            WINE_HI,
+            &mut slots,
+            &mut icons,
+            &mut nodes,
+            &mut texts,
+        );
     }
 }
 
@@ -1931,12 +2180,18 @@ pub(super) fn fill_slots(
         set_display(nodes, slot.frame, aura.is_some());
         let Some(mut aura) = aura else {
             if let Ok((mut tip, _)) = slots.get_mut(slot.frame) {
-                tip.aura = None;
+                if tip.aura.is_some() {
+                    tip.aura = None;
+                }
             }
             continue;
         };
         set_display(nodes, slot.band, aura.left.is_some());
-        set_text(texts, slot.timer, aura.left.map(short_time).unwrap_or_default());
+        set_text(
+            texts,
+            slot.timer,
+            aura.left.map(short_time).unwrap_or_default(),
+        );
         set_display(nodes, slot.badge, aura.stacks > 1);
         set_text(texts, slot.stacks, aura.stacks.to_string());
         if let Ok((mut icon, mut img)) = icons.get_mut(slot.image) {
@@ -1968,6 +2223,7 @@ fn spawn_plate_slots(
     edge: Color,
     size: f32,
     count: usize,
+    start: usize,
 ) -> Vec<AuraSlot> {
     let slots: Vec<AuraSlot> = (0..count)
         .map(|_| spawn_aura_slot(commands, f, size))
@@ -1976,7 +2232,7 @@ fn spawn_plate_slots(
         commands.entity(slot.frame).insert(BorderColor::all(edge));
     }
     let frames: Vec<Entity> = slots.iter().map(|s| s.frame).collect();
-    commands.entity(row).insert_children(0, &frames);
+    commands.entity(row).insert_children(start, &frames);
     slots
 }
 
@@ -2010,8 +2266,6 @@ pub(super) fn compact_plates(
         super::unit_frames::HealthText::CurrentPercent,
     );
     let layout = settings.auras;
-    // The most each side can show: all of a shared row, or all of its own.
-    let (most_debuffs, most_buffs) = (rooms(layout, usize::MAX / 2, 0).0, rooms(layout, 0, usize::MAX / 2).1);
     *since += time.delta_secs();
     let auras_due = *since >= PLATE_AURA_EVERY;
     if auras_due {
@@ -2041,10 +2295,9 @@ pub(super) fn compact_plates(
             if let Ok(mut font) = fonts.get_mut(plate.name) {
                 let (have, room) = (text.size().x, clip.size().x);
                 if have > 0.0 && room > 0.0 {
-                    let want = (font.font_size * room / have)
-                        .clamp(COMPACT_NAME_MIN, COMPACT_NAME);
+                    let want = (font.font_size * room / have).clamp(COMPACT_NAME_MIN, COMPACT_NAME);
                     let want = (want * 4.0).floor() / 4.0;
-                    if (want - font.font_size).abs() >= 0.25 && (have > room || want > font.font_size) {
+                    if have > room + 0.5 && want < font.font_size {
                         font.font_size = want;
                     }
                 }
@@ -2058,15 +2311,35 @@ pub(super) fn compact_plates(
         let mark = run.passives.marks.get(&of.0);
         let all = super::mechanics::auras(en, mech, mark, run.elapsed, name);
         let (buffs, debuffs): (Vec<_>, Vec<_>) = all.into_iter().partition(|a| a.buff);
-        // A side's first aura brings its icons; they fill on the next pass.
-        let [debuff_row, buff_row] = parts.rows;
-        if !debuffs.is_empty() && parts.debuffs.is_empty() && most_debuffs > 0 {
-            parts.debuffs = spawn_plate_slots(&mut commands, &font.0, debuff_row, WINE_HI, layout.debuff_size, most_debuffs);
-        }
-        if !buffs.is_empty() && parts.buffs.is_empty() && most_buffs > 0 {
-            parts.buffs = spawn_plate_slots(&mut commands, &font.0, buff_row, STEEL_LO, layout.buff_size, most_buffs);
-        }
+        // Grow only to the number actually displayed, rather than allocating a full row per debuff.
         let (nd, nb) = rooms(layout, debuffs.len(), buffs.len());
+        let need_debuffs = overflow(debuffs.len(), nd).0;
+        let need_buffs = overflow(buffs.len(), nb).0;
+        let [debuff_row, buff_row] = parts.rows;
+        if need_debuffs > parts.debuffs.len() {
+            let start = parts.debuffs.len();
+            parts.debuffs.extend(spawn_plate_slots(
+                &mut commands,
+                &font.0,
+                debuff_row,
+                WINE_HI,
+                layout.debuff_size,
+                need_debuffs - start,
+                start,
+            ));
+        }
+        if need_buffs > parts.buffs.len() {
+            let start = parts.buffs.len();
+            parts.buffs.extend(spawn_plate_slots(
+                &mut commands,
+                &font.0,
+                buff_row,
+                STEEL_LO,
+                layout.buff_size,
+                need_buffs - start,
+                start,
+            ));
+        }
         let [more_debuffs, more_buffs] = parts.more;
         for (list, side, room, (chip, count)) in [
             (debuffs, &parts.debuffs, nd, more_debuffs),
@@ -2078,8 +2351,26 @@ pub(super) fn compact_plates(
             let (shown, hidden) = overflow(list.len(), room);
             let mut list = list;
             list.truncate(shown);
-            fill_slots(&mut commands, &side[..shown], list, Color::BLACK, &mut slots, &mut icons, &mut nodes, &mut texts);
-            fill_slots(&mut commands, &side[shown..], Vec::new(), Color::BLACK, &mut slots, &mut icons, &mut nodes, &mut texts);
+            fill_slots(
+                &mut commands,
+                &side[..shown],
+                list,
+                Color::BLACK,
+                &mut slots,
+                &mut icons,
+                &mut nodes,
+                &mut texts,
+            );
+            fill_slots(
+                &mut commands,
+                &side[shown..],
+                Vec::new(),
+                Color::BLACK,
+                &mut slots,
+                &mut icons,
+                &mut nodes,
+                &mut texts,
+            );
             set_display(&mut nodes, chip, hidden > 0);
             if hidden > 0 {
                 set_text(&mut texts, count, format!("+{hidden}"));
@@ -2096,7 +2387,10 @@ pub(super) struct PlateOf(pub Entity);
 
 /// The hero's buffs as auras: the spells they cast on themselves, their shield, immunity, thorns
 /// and healing over time, plus encounter debuffs such as broodling venom.
-pub(super) fn hero_auras(run: &super::Run, name: impl Fn(u32, &str) -> String) -> Vec<super::mechanics::Aura> {
+pub(super) fn hero_auras(
+    run: &super::Run,
+    name: impl Fn(u32, &str) -> String,
+) -> Vec<super::mechanics::Aura> {
     let aura = |icon: u32, fallback: &str, text: String, left: f32| super::mechanics::Aura {
         icon,
         name: name(icon, fallback),
@@ -2109,21 +2403,44 @@ pub(super) fn hero_auras(run: &super::Run, name: impl Fn(u32, &str) -> String) -
         .buffs
         .iter()
         .map(|&(key, _, _, left)| {
-            let spell = super::data::ABILITIES.iter().find(|a| a.key == key).map_or(0, |a| a.spell);
+            let spell = super::data::ABILITIES
+                .iter()
+                .find(|a| a.key == key)
+                .map_or(0, |a| a.spell);
             aura(spell, key, String::new(), left)
         })
         .collect();
     if run.shield_t > 0.0 && run.shield > 0.0 {
-        out.push(aura(run.shield_spell, "Absorb Shield", format!("Absorbs {:.0} damage.", run.shield), run.shield_t));
+        out.push(aura(
+            run.shield_spell,
+            "Absorb Shield",
+            format!("Absorbs {:.0} damage.", run.shield),
+            run.shield_t,
+        ));
     }
     if run.immune_t > 0.0 {
-        out.push(aura(642, "Immune", "Immune to all damage.".into(), run.immune_t));
+        out.push(aura(
+            642,
+            "Immune",
+            "Immune to all damage.".into(),
+            run.immune_t,
+        ));
     }
     if run.thorns_t > 0.0 {
-        out.push(aura(run.thorns_spell, "Thorns", "Attackers take damage.".into(), run.thorns_t));
+        out.push(aura(
+            run.thorns_spell,
+            "Thorns",
+            "Attackers take damage.".into(),
+            run.thorns_t,
+        ));
     }
     if run.heal_t > 0.0 {
-        out.push(aura(139, "Healing", format!("Heals {:.0} health a second.", run.heal_rate), run.heal_t));
+        out.push(aura(
+            139,
+            "Healing",
+            format!("Heals {:.0} health a second.", run.heal_rate),
+            run.heal_t,
+        ));
     }
     if run.morgan_bleed.until > run.elapsed {
         out.push(super::mechanics::Aura {
@@ -2141,16 +2458,22 @@ pub(super) fn hero_auras(run: &super::Run, name: impl Fn(u32, &str) -> String) -
     }
     if run.morgan_mark_until > run.elapsed {
         out.push(super::mechanics::Aura {
-            icon: 1130, name: "Marked for Collection".into(),
+            icon: 1130,
+            name: "Marked for Collection".into(),
             text: "Morgan is aiming at you. Sidestep after the gunshot lane locks.".into(),
-            left: Some(run.morgan_mark_until - run.elapsed), buff: false, stacks: 1,
+            left: Some(run.morgan_mark_until - run.elapsed),
+            buff: false,
+            stacks: 1,
         });
     }
     if run.stunned() {
         out.push(super::mechanics::Aura {
-            icon: 853, name: "Stunned".into(),
+            icon: 853,
+            name: "Stunned".into(),
             text: "Cannot move, attack or cast spells.".into(),
-            left: Some(run.stun_until - run.elapsed), buff: false, stacks: 1,
+            left: Some(run.stun_until - run.elapsed),
+            buff: false,
+            stacks: 1,
         });
     }
     if run.healing_blocked_until > run.elapsed {

@@ -24,7 +24,7 @@ pub(super) struct Placement {
     pub design: u8,
     pub level: bool,
 }
-fn defaults(index: usize) -> Placement {
+pub(super) fn defaults(index: usize) -> Placement {
     Placement {
         pos: Vec2::new(16. + index as f32 * 248., 16.),
         scale: 1.,
@@ -55,6 +55,7 @@ impl Placement {
 
 #[derive(Resource)]
 pub(super) struct FrameSettings {
+    editing: bool,
     pub items: [Placement; 2],
     menu: Option<(usize, Vec2)>,
     drag: Option<(usize, Vec2)>,
@@ -64,6 +65,7 @@ pub(super) struct FrameSettings {
 impl Default for FrameSettings {
     fn default() -> Self {
         Self {
+            editing: false,
             items: [defaults(0), defaults(1)],
             menu: None,
             drag: None,
@@ -138,13 +140,43 @@ impl FrameSettings {
             })
             .collect()
     }
-    fn save(&self) {
+    pub(super) fn save(&self) {
+        if self.editing { return; }
         if let Some(path) = crate::local_state::home().map(|h| h.join("survivors-unit-frames.txt"))
         {
             if let Err(error) = crate::local_state::write_atomic(&path, &self.encode()) {
                 warn!("Could not save unit-frame settings: {error}");
             }
         }
+    }
+
+    pub(super) fn begin_edit(&mut self) {
+        self.editing = true;
+        for item in &mut self.items { item.locked = false; }
+    }
+
+    pub(super) fn reset_edit(&mut self) {
+        self.close_menu();
+        self.drag = None;
+        self.items = [defaults(0), defaults(1)];
+        self.begin_edit();
+    }
+
+    pub(super) fn cancel_edit(&mut self, before: [Placement; 2]) {
+        self.close_menu();
+        self.items = before;
+        self.finish_edit();
+    }
+
+    pub(super) fn finish_edit(&mut self) {
+        self.close_menu();
+        self.editing = false;
+        self.drag = None;
+        self.captured = false;
+        for item in &mut self.items {
+            item.locked = true;
+        }
+        self.save();
     }
 }
 
@@ -197,8 +229,8 @@ fn spawn_menu(
 ) {
     let Some(font) = font else { return };
     for root in &roots {
-        commands.entity(root).with_children(|parent| {
-            parent
+        let _ = root;
+        commands
                 .spawn((
                     SettingsMenu,
                     Node {
@@ -213,7 +245,7 @@ fn spawn_menu(
                     },
                     BackgroundColor(Color::srgba(0.025, 0.025, 0.035, 0.98)),
                     BorderColor::all(Color::srgb(0.7, 0.55, 0.2)),
-                    GlobalZIndex(900),
+                    GlobalZIndex(super::hud_layout::MENU_Z + 60),
                 ))
                 .with_children(|panel| {
                     for line in 0..11 {
@@ -243,7 +275,6 @@ fn spawn_menu(
                             });
                     }
                 });
-        });
     }
 }
 
@@ -349,6 +380,8 @@ pub(super) fn input(
     mut settings: ResMut<FrameSettings>,
     mut layout: ResMut<super::hud_layout::HudLayout>,
     phase: Res<State<Phase>>,
+    editor: Option<Res<super::ui_edit::UiEditor>>,
+    cvars: Option<Res<crate::cvars::Cvars>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Res<UiScale>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -366,7 +399,10 @@ pub(super) fn input(
         pointer.0 = false;
         panel.0 = false;
     }
-    if matches!(phase.get(), Phase::Menu | Phase::GameOver) {
+    if editor.as_ref().is_some_and(|e| !e.active)
+        || (editor.is_none() && matches!(phase.get(), Phase::Menu | Phase::GameOver))
+    {
+        settings.close_menu();
         settings.drag = None;
         settings.captured = false;
         return;
@@ -374,12 +410,15 @@ pub(super) fn input(
     let Ok(window) = windows.single() else { return };
     let scale = ui_scale.0.max(0.01);
     let canvas = Vec2::new(window.width(), window.height()) / scale;
+    let height = cvars.as_deref().map_or(25., |c| 12. + super::unit_frames::health_height(c));
     // A minimized window reports no size; clamping to it would pile the frames in the corner.
     if canvas.x < SIZE.x || canvas.y < SIZE.y {
         return;
     }
     for item in &mut settings.items {
         item.clamp(canvas);
+        item.pos = item.pos.clamp(Vec2::ZERO,
+            (canvas - Vec2::new(SIZE.x, height) * item.scale).max(Vec2::ZERO));
     }
     let Some(cursor) = window.cursor_position().map(|p| p / scale) else {
         if settings.drag.take().is_some() {
@@ -393,7 +432,8 @@ pub(super) fn input(
         .is_some_and(|e| !e.dead && e.hp > 0.);
     let hit = (0..2).rev().find(|&i| {
         (i == 0 || has_target || !settings.items[i].locked)
-            && settings.items[i].bounds().contains(cursor)
+            && Rect::from_corners(settings.items[i].bounds().min,
+                settings.items[i].pos + Vec2::new(SIZE.x, height) * settings.items[i].scale).contains(cursor)
     });
     let menu_hit = settings
         .menu
@@ -478,6 +518,9 @@ pub(super) fn input(
         if mouse.pressed(MouseButton::Left) {
             settings.items[index].pos = ((cursor - offset) / GRID).round() * GRID;
             settings.items[index].clamp(canvas);
+            let item = &mut settings.items[index];
+            item.pos = item.pos.clamp(Vec2::ZERO,
+                (canvas - Vec2::new(SIZE.x, height) * item.scale).max(Vec2::ZERO));
         } else {
             settings.drag = None;
             settings.save();

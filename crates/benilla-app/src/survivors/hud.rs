@@ -178,6 +178,7 @@ pub(super) struct TipBody;
 pub(super) enum UiAction {
     Resume,
     Settings,
+    EditUi,
     MainMenu,
     Quit,
     /// From the results: back through the menu and straight into the same pick.
@@ -338,7 +339,11 @@ pub(super) fn size_action_bar(
     }
 }
 
-pub(super) fn spell_name(spells: Option<&crate::ui_action::Spells>, spell: u32, fallback: &str) -> String {
+pub(super) fn spell_name(
+    spells: Option<&crate::ui_action::Spells>,
+    spell: u32,
+    fallback: &str,
+) -> String {
     // The fork's self-heals reuse vanilla visuals, with their own player-facing names.
     match fallback {
         "mending" => return "Mending".into(),
@@ -522,7 +527,10 @@ pub(super) fn setup_hud(
                                 if tip == TipFor::Character {
                                     slot.spawn((face, CharacterIcon));
                                 } else {
-                                    slot.spawn((face, UiArt::crop(TALENTS_ICON, [0.0, 1.0, 0.0, 1.0])));
+                                    slot.spawn((
+                                        face,
+                                        UiArt::crop(TALENTS_ICON, [0.0, 1.0, 0.0, 1.0]),
+                                    ));
                                 }
                             });
                         }
@@ -671,25 +679,24 @@ pub(super) fn setup_hud(
     ));
 
     // --- Level up. ---
-    commands
-        .spawn((
-            LevelUpRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            // Dims the world, the plates and the meters under the cards.
-            BackgroundColor(Color::srgba(0.02, 0.027, 0.039, 0.847)),
-            GlobalZIndex(420),
-            Visibility::Hidden,
-            // The build's icons stay hoverable under the cards.
-            bevy::ui::FocusPolicy::Pass,
-        ));
+    commands.spawn((
+        LevelUpRoot,
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        // Dims the world, the plates and the meters under the cards.
+        BackgroundColor(Color::srgba(0.02, 0.027, 0.039, 0.847)),
+        GlobalZIndex(420),
+        Visibility::Hidden,
+        // The build's icons stay hoverable under the cards.
+        bevy::ui::FocusPolicy::Pass,
+    ));
 
     // --- Pause. ---
     commands
@@ -754,6 +761,7 @@ pub(super) fn setup_hud(
                         for (label, action) in [
                             ("Resume", UiAction::Resume),
                             ("Settings", UiAction::Settings),
+                            ("Edit UI", UiAction::EditUi),
                             ("Abandon run", UiAction::MainMenu),
                             ("Quit game", UiAction::Quit),
                         ] {
@@ -998,7 +1006,10 @@ pub(super) fn menu_preview(
 }
 
 pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
-    if !data::MAPS.get(selection.map).is_some_and(super::dungeon::available) {
+    if !data::MAPS
+        .get(selection.map)
+        .is_some_and(super::dungeon::available)
+    {
         return false;
     }
     let (Some(class), Some(&(_, race, _))) = (
@@ -1007,8 +1018,10 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     ) else {
         return false;
     };
-    if !selection.race_unlocked(race) || !selection.can_visit(selection.map)
-        || !selection.raid_ready(selection.map_def().name) {
+    if !selection.race_unlocked(race)
+        || !selection.can_visit(selection.map)
+        || !selection.raid_ready(selection.map_def().name)
+    {
         return false;
     }
     // The world goes to the battleground picked; until now it stood in the last one.
@@ -1097,8 +1110,14 @@ pub(super) fn roll_offer(run: Res<Run>, mut rng: ResMut<Rng>, mut offer: ResMut<
     offer.chest = run.pending_chests > 0;
     offer.choices = choices_for(&run, &mut rng, offer.chest);
     // A hand of the upper rarities at once, to look at them all.
-    if !offer.chest && crate::webenv::var("WOW_SURVIVORS_REWARD_PREVIEW").as_deref() == Some("rarities") {
-        let new = run.class.pool.iter().filter(|key| !run.abilities.iter().any(|o| o.def.key == **key));
+    if !offer.chest
+        && crate::webenv::var("WOW_SURVIVORS_REWARD_PREVIEW").as_deref() == Some("rarities")
+    {
+        let new = run
+            .class
+            .pool
+            .iter()
+            .filter(|key| !run.abilities.iter().any(|o| o.def.key == **key));
         offer.choices = new
             .zip([Rarity::Rare, Rarity::Epic, Rarity::Legendary])
             .map(|(key, rarity)| Choice::NewAbility(data::ability(key), rarity))
@@ -1169,6 +1188,7 @@ pub(super) fn looks_for(
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub(super) fn buttons(
+    mut editor: ResMut<super::ui_edit::UiEditor>,
     mut presses: Query<
         (
             &Interaction,
@@ -1186,6 +1206,9 @@ pub(super) fn buttons(
     mut options: ResMut<super::options::Options>,
     mut replay: ResMut<Replay>,
 ) {
+    if editor.active || editor.requested || editor.closing {
+        return;
+    }
     for (interaction, action, base, mut bg, steel, mut edge) in &mut presses {
         let hot = steel.map_or(BUTTON_HOT, |s| s.hot);
         if let Some(s) = steel {
@@ -1206,6 +1229,9 @@ pub(super) fn buttons(
                     }
                     (UiAction::Settings, _) if options.open || *phase.get() == Phase::Paused => {
                         options.settings = true
+                    }
+                    (UiAction::EditUi, _) if options.open || *phase.get() == Phase::Paused => {
+                        editor.requested = true;
                     }
                     (UiAction::MainMenu, _)
                         if (*phase.get() != Phase::Menu && options.open)
@@ -1233,6 +1259,7 @@ pub(super) fn buttons(
 }
 
 pub(super) fn keys(
+    editor: Res<super::ui_edit::UiEditor>,
     inventory: Res<super::inventory::Equipment>,
     atlas: Res<super::adventure_atlas::Atlas>,
     coop: Res<super::coop::Coop>,
@@ -1247,15 +1274,22 @@ pub(super) fn keys(
     mut commands: Commands,
     mut replay: ResMut<Replay>,
 ) {
+    if editor.active || editor.requested || editor.closing {
+        return;
+    }
     // Play again: the menu is up, so start the same pick as Enter would. A co-op room starts
     // its runs from the host, so there it is only the way back to the menu.
     if *phase.get() == Phase::Menu && std::mem::take(&mut replay.0) {
-        if !coop.in_room() && selection.unlocked(selection.map) && start_run(&mut run, &mut selection) {
+        if !coop.in_room()
+            && selection.unlocked(selection.map)
+            && start_run(&mut run, &mut selection)
+        {
             next.set(Phase::Playing);
         }
         return;
     }
-    if inventory.open || atlas.open || coop.open || (*phase.get() == Phase::Menu && coop.in_room()) {
+    if inventory.open || atlas.open || coop.open || (*phase.get() == Phase::Menu && coop.in_room())
+    {
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
@@ -1433,7 +1467,10 @@ pub(super) fn refresh_hud(
 ) {
     let need = data::xp_to_next(run.level);
     if let Ok(mut n) = xp_fill.single_mut() {
-        n.width = Val::Percent((run.xp / need * 100.0).clamp(0.0, 100.0));
+        let width = Val::Percent((run.xp / need * 100.0).clamp(0.0, 100.0));
+        if n.width != width {
+            n.width = width;
+        }
     }
     if let Ok(mut t) = texts.p5().single_mut() {
         let xp = format!("{} / {}", run.xp as u32, need as u32);
@@ -1449,21 +1486,23 @@ pub(super) fn refresh_hud(
     }
     let secs = run.elapsed as u32;
     if let Ok(mut t) = texts.p1().single_mut() {
-        **t = format!("{:02}:{:02}", secs / 60, secs % 60);
+        t.set_if_neq(Text::new(format!("{:02}:{:02}", secs / 60, secs % 60)));
     }
     let kills = run.kills;
     if let Ok(mut t) = texts.p2().single_mut() {
-        **t = format!(
+        t.set_if_neq(Text::new(format!(
             "·   Kills {kills}   ·   Gold {}   ·   Cache {}",
             run.gold, run.chest_cost
-        );
+        )));
     }
     // Producers still share this short-lived signal with co-op snapshots; the new panel
     // owns the three-second display lifetime and waits through reward pickers and pauses.
     if *phase.get() == Phase::Playing {
         if let Some((_, left)) = run.banner.as_mut() {
             *left -= time.delta_secs();
-            if *left <= 0. { run.banner = None; }
+            if *left <= 0. {
+                run.banner = None;
+            }
         }
     }
     let title = if run.won {
@@ -1473,7 +1512,7 @@ pub(super) fn refresh_hud(
     }
     .to_string();
     if let Ok(mut t) = texts.p3().single_mut() {
-        **t = title;
+        t.set_if_neq(Text::new(title));
     }
     let summary = format!(
         "{} {}  ·  {}",
@@ -1682,8 +1721,10 @@ pub(super) fn update_cooldown_sweeps(
         };
         let total = o.cooldown(&stats).max(0.01);
         let f = (o.cd / total).clamp(0.0, 1.0);
-        if let Some(m) = mats.get_mut(&s.handle) {
-            m.sweep = f;
+        if mats.get(&s.handle).is_some_and(|m| m.sweep != f) {
+            if let Some(m) = mats.get_mut(&s.handle) {
+                m.sweep = f;
+            }
         }
     }
 }
@@ -2183,12 +2224,10 @@ pub(super) fn icon_tooltip(
     let Ok((mut node, mut vis, frame_size)) = frames.get_mut(frame) else {
         return;
     };
-    let hovered = slots
-        .iter()
-        .find(|(i, tip, ..)| {
-            **i != Interaction::None
-                && (matches!(tip, TipFor::Pool(_)) == (*phase.get() == Phase::Menu))
-        });
+    let hovered = slots.iter().find(|(i, tip, ..)| {
+        **i != Interaction::None
+            && (matches!(tip, TipFor::Pool(_)) == (*phase.get() == Phase::Menu))
+    });
     let Some((_, &tip, computed, at, aura)) = hovered else {
         if *vis != Visibility::Hidden {
             *vis = Visibility::Hidden;
@@ -2201,7 +2240,10 @@ pub(super) fn icon_tooltip(
     let mut x = (at.translation.x - computed.size().x / 2.0) * inv;
     let mut y = (at.translation.y + computed.size().y / 2.0) * inv + 4.0;
     if let Ok(window) = windows.single() {
-        let viewport = Vec2::new(window.physical_width() as f32, window.physical_height() as f32) * inv;
+        let viewport = Vec2::new(
+            window.physical_width() as f32,
+            window.physical_height() as f32,
+        ) * inv;
         let size = frame_size.size() * inv;
         x = x.clamp(4.0, (viewport.x - size.x - 4.0).max(4.0));
         if y + size.y > viewport.y - 4.0 {
@@ -2231,9 +2273,19 @@ pub(super) fn icon_tooltip(
             .get(i)
             .map(|o| ability_tip(o, &run, spells.as_deref())),
         TipFor::Pool(key) => selection.class_def().map(|class| {
-            let preview = Run { class, ..Run::default() };
-            let mut lines = ability_tip(&Owned::new(data::ability(key), Rarity::Common), &preview, spells.as_deref());
-            lines.push(TipLine::new("Base values before racial bonuses, talents and equipment.", DIM));
+            let preview = Run {
+                class,
+                ..Run::default()
+            };
+            let mut lines = ability_tip(
+                &Owned::new(data::ability(key), Rarity::Common),
+                &preview,
+                spells.as_deref(),
+            );
+            lines.push(TipLine::new(
+                "Base values before racial bonuses, talents and equipment.",
+                DIM,
+            ));
             lines
         }),
         TipFor::Jewelry(i) => run.jewelry.get(i).map(|j| {
@@ -2308,7 +2360,9 @@ pub(super) fn icon_tooltip(
                 ("Debuff", skin::RED)
             };
             let mut lines = vec![
-                TipLine::new(a.name.clone(), Color::WHITE).header().right(kind, color),
+                TipLine::new(a.name.clone(), Color::WHITE)
+                    .header()
+                    .right(kind, color),
                 TipLine::new(a.text.clone(), GOLD),
             ];
             if let Some(left) = a.left {
@@ -2372,6 +2426,7 @@ pub(super) fn icon_tooltip(
 
 #[allow(clippy::type_complexity)]
 pub(super) fn show_panels(
+    editor: Res<super::ui_edit::UiEditor>,
     phase: Res<State<Phase>>,
     coop: Res<super::coop::Coop>,
     inventory: Res<super::inventory::Equipment>,
@@ -2409,7 +2464,10 @@ pub(super) fn show_panels(
         );
     }
     for root in &mut roots.p1() {
-        set(root, p != Phase::Menu && p != Phase::GameOver);
+        set(
+            root,
+            editor.active || (p != Phase::Menu && p != Phase::GameOver),
+        );
     }
     for root in &mut roots.p2() {
         set(root, p == Phase::LevelUp && !options.open);
@@ -2417,7 +2475,10 @@ pub(super) fn show_panels(
     for root in &mut roots.p3() {
         set(
             root,
-            p != Phase::Menu && (p == Phase::Paused || options.open) && !options.settings,
+            !editor.active
+                && p != Phase::Menu
+                && (p == Phase::Paused || options.open)
+                && !options.settings,
         );
     }
     for root in &mut roots.p4() {
@@ -2434,6 +2495,7 @@ mod tests {
     fn a_steel_button_hovers_in_steel_and_the_rest_keep_their_brown() {
         let mut world = World::new();
         world.insert_resource(super::super::options::Options::default());
+        world.insert_resource(super::super::ui_edit::UiEditor::default());
         world.insert_resource(State::new(Phase::Paused));
         world.insert_resource(NextState::<Phase>::default());
         world.insert_resource(Replay::default());

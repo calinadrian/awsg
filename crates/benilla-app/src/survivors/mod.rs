@@ -52,8 +52,9 @@ mod hero;
 mod horde_spawning;
 mod hud;
 mod hud_layout;
-mod food;
+mod ui_edit;
 mod fps_counter;
+mod food;
 mod jewelry;
 mod journal_ui;
 mod inventory;
@@ -163,7 +164,7 @@ impl Plugin for SurvivorsPlugin {
             )
             .add_plugins(unit_frames::plugin)
             .add_plugins(hud_layout::plugin)
-            .add_plugins(fps_counter::plugin)
+            .add_plugins((ui_edit::plugin, fps_counter::plugin))
             .add_plugins(boss_cooldowns::plugin)
             .add_plugins(boss_enrage::plugin)
             .add_plugins(hogger::plugin)
@@ -290,7 +291,7 @@ impl Plugin for SurvivorsPlugin {
                 (
                     hud::apply_ui_scale,
                     hud::fill_art,
-                    hud::icon_tooltip,
+                    hud::icon_tooltip.run_if(ui_edit::inactive),
                     hud::hero_plate,
                     plates::sync_plate_auras,
                     plates::enemy_plates,
@@ -299,7 +300,7 @@ impl Plugin for SurvivorsPlugin {
                     plates::boss_auras,
                     plates::target_edge,
                     plates::fill_glyphs,
-                    minimap::map_buttons,
+                    minimap::map_buttons.run_if(ui_edit::inactive),
                     minimap::show_cluster,
                     minimap::clock,
                     minimap::zone_text,

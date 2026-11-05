@@ -1,6 +1,6 @@
 //! The column down the right edge, in the boss bars' steel and crimson: the square minimap with
 //! the zone and the local time, the run tracker (the clock, the boss schedule and the run's
-//! counts), the damage meter, then the quest tracker. Each panel is built at the size the
+//! counts), and the damage meter. Each panel is built at the size the
 //! Interface settings give it, and rebuilt when that changes.
 
 use bevy::prelude::*;
@@ -52,7 +52,7 @@ impl Default for HudSizes {
     }
 }
 
-/// A panel's place in the column, top first; the quest tracker, which has none, goes last.
+/// A panel's place in the column, top first.
 #[derive(Component)]
 pub(super) struct Slot(pub u8);
 
@@ -344,7 +344,13 @@ fn build_tracker(
                         m.spawn((
                             BossMark(i),
                             diamond(Node::default(), 5.0 * k, STEEL_LO),
-                            BoxShadow::new(Color::NONE, Val::ZERO, Val::ZERO, Val::ZERO, Val::Px(4.0)),
+                            BoxShadow::new(
+                                Color::NONE,
+                                Val::ZERO,
+                                Val::ZERO,
+                                Val::ZERO,
+                                Val::Px(4.0),
+                            ),
                         ));
                     });
                     row.spawn((
@@ -400,6 +406,7 @@ fn log_run(run: Res<Run>, mut log: ResMut<RunLog>, mut loot: MessageReader<Loot>
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn paint_tracker(
+    editor: Res<super::ui_edit::UiEditor>,
     run: Res<Run>,
     phase: Res<State<Phase>>,
     selection: Res<Selection>,
@@ -409,15 +416,28 @@ fn paint_tracker(
     mut texts: Query<(&TrackText, &mut Text, &mut TextColor)>,
     mut fills: Query<&mut Node, (With<TimerFill>, Without<Tracker>)>,
     mut marks: Query<(&TimerMark, &mut Node), (Without<TimerFill>, Without<Tracker>)>,
-    mut bars: Query<&mut Node, (With<TimerBar>, Without<TimerMark>, Without<TimerFill>, Without<Tracker>)>,
+    mut bars: Query<
+        &mut Node,
+        (
+            With<TimerBar>,
+            Without<TimerMark>,
+            Without<TimerFill>,
+            Without<Tracker>,
+        ),
+    >,
     mut rows: Query<
         (&BossRow, &mut Node, &mut BackgroundColor),
-        (Without<TimerBar>, Without<TimerMark>, Without<TimerFill>, Without<Tracker>),
+        (
+            Without<TimerBar>,
+            Without<TimerMark>,
+            Without<TimerFill>,
+            Without<Tracker>,
+        ),
     >,
     mut boss_marks: Query<(&BossMark, &mut BackgroundColor, &mut BoxShadow), Without<BossRow>>,
 ) {
     let p = *phase.get();
-    let shown = p != Phase::Menu && p != Phase::GameOver;
+    let shown = editor.active || (p != Phase::Menu && p != Phase::GameOver);
     for mut node in &mut trackers {
         let display = if shown { Display::Flex } else { Display::None };
         if node.display != display {
@@ -436,7 +456,11 @@ fn paint_tracker(
     let current = bosses.iter().position(|b| killed(b.name).is_none());
 
     for mut node in &mut bars {
-        let display = if end > 0.0 { Display::Flex } else { Display::None };
+        let display = if end > 0.0 {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if node.display != display {
             node.display = display;
         }
@@ -471,7 +495,9 @@ fn paint_tracker(
         bg.set_if_neq(BackgroundColor(want));
     }
     for (mark, mut bg, mut shadow) in &mut boss_marks {
-        let Some(b) = bosses.get(mark.0) else { continue };
+        let Some(b) = bosses.get(mark.0) else {
+            continue;
+        };
         let (color, glow) = if killed(b.name).is_some() {
             (TEXT_DONE, Color::NONE)
         } else if Some(mark.0) == current {

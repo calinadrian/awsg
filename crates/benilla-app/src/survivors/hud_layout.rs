@@ -1,10 +1,6 @@
-//! Moving the HUD: right-click a panel to unlock it, drag it on an 8px grid that shows while it
-//! moves, and lock it again from the same menu. Whatever is clicked comes to the front and stays
-//! there. Moved panels keep their place in a local file; the unit frames keep their own richer
-//! menu ([`super::frame_settings`]) and share only the stacking. Windows over the HUD (the Test
-//! Grounds) move the same way but keep their own place in the stacking. The settings draw over
-//! everything and need no unlocking: drag them by anything but a button. The pause menu, which
-//! draws over everything too, never moves.
+//! HUD placement on an 8px grid, adjustable only in Settings' Edit UI session. The real panels
+//! are moved directly; unit frames keep their richer context menu
+//! and placement file. Gameplay panels remain locked. The settings window moves by its header.
 use super::{hud::HudFont, right_column as col, Phase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -43,6 +39,9 @@ enum Layer {
 }
 
 impl Movable {
+    pub(super) fn is_settings(&self) -> bool {
+        self.layer == Layer::Settings
+    }
     pub(super) const fn new(id: &'static str, name: &'static str) -> Self {
         Self {
             id,
@@ -74,7 +73,7 @@ pub(super) struct Stacked(pub &'static str);
 
 /// A moved panel's own seat, put back when its position is reset.
 #[derive(Component, Clone)]
-struct Home {
+pub(super) struct Home {
     position_type: PositionType,
     left: Val,
     top: Val,
@@ -83,8 +82,9 @@ struct Home {
     margin: UiRect,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone)]
 pub(super) struct HudLayout {
+    editing: bool,
     /// Each moved panel's top-left, in UI units.
     moved: BTreeMap<String, Vec2>,
     /// The unlocked panels; every panel starts a session locked.
@@ -101,6 +101,60 @@ pub(super) struct HudLayout {
 }
 
 impl HudLayout {
+    pub(super) fn editor_z(&self, id: &str) -> i32 {
+        MENU_Z
+            + 6
+            + self
+                .front
+                .iter()
+                .position(|f| *f == id)
+                .map_or(0, |i| i.min(3) as i32)
+    }
+    pub(super) fn position(&self, id: &str) -> Option<Vec2> {
+        self.moved.get(id).copied()
+    }
+
+    pub(super) fn constrain_preview(
+        &mut self,
+        id: &str,
+        position: Vec2,
+        size: Vec2,
+        shift: Vec2,
+        canvas: Vec2,
+    ) -> Vec2 {
+        let previous = self.position(id).unwrap_or(position);
+        let min = -shift;
+        let max = (canvas - size - shift).max(min);
+        let next = previous.clamp(min, max);
+        if self.moved.contains_key(id) || next != previous {
+            self.moved.insert(id.to_owned(), next);
+        }
+        next
+    }
+
+    pub(super) fn edit(&mut self, ids: impl Iterator<Item = &'static str>) {
+        self.editing = true;
+        self.unlocked = ids.collect();
+        self.menu = None;
+        self.drag = None;
+        self.captured = false;
+    }
+
+    pub(super) fn finish_edit(&mut self) {
+        self.editing = false;
+        self.unlocked.clear();
+        self.menu = None;
+        self.drag = None;
+        self.hovered = None;
+        self.captured = false;
+        self.save();
+    }
+
+    pub(super) fn reset_positions(&mut self, ids: impl Iterator<Item = &'static str>) {
+        for id in ids {
+            self.moved.remove(id);
+        }
+    }
     /// Bring a panel to the front.
     pub(super) fn raise(&mut self, id: &'static str) {
         if self.front.last() != Some(&id) {
@@ -121,7 +175,7 @@ impl HudLayout {
 
     /// Whether a panel moves right now.
     fn free(&self, m: &Movable) -> bool {
-        m.layer == Layer::Settings || self.unlocked(m.id)
+        m.layer == Layer::Settings || (self.editing && !m.is_settings())
     }
 
     fn decode(text: &str) -> Self {
@@ -147,6 +201,9 @@ impl HudLayout {
     }
 
     fn save(&self) {
+        if self.editing {
+            return;
+        }
         if let Some(path) = crate::local_state::home().map(|h| h.join(FILE)) {
             if let Err(error) = crate::local_state::write_atomic(&path, &self.encode()) {
                 warn!("Could not save the HUD layout: {error}");
@@ -216,6 +273,7 @@ pub(super) fn input(
     frames: Res<super::frame_settings::FrameSettings>,
     options: Res<super::options::Options>,
     phase: Res<State<Phase>>,
+    editor: Option<Res<super::ui_edit::UiEditor>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Res<UiScale>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -228,13 +286,14 @@ pub(super) fn input(
         Entity,
     )>,
     kids: Query<&Children>,
-    buttons: Query<&Interaction, With<Button>>,
+    buttons: Query<(&Interaction, Has<super::ui_edit::EditorButton>), With<Button>>,
     mut hover: ResMut<crate::ui_script::PlayerUiHover>,
     mut pointer: ResMut<crate::ui_script::PointerOverUi>,
     mut panel: ResMut<crate::ui_script::PointerOverUiPanel>,
     mut consumed: ResMut<crate::ui_script::PlayerUiClickConsumed>,
 ) {
     const TOKEN: u32 = u32::MAX - 65;
+    let editing = editor.as_ref().is_some_and(|e| e.active);
     layout.hovered = None;
     if hover.0 == Some(TOKEN) {
         hover.0 = None;
@@ -249,12 +308,21 @@ pub(super) fn input(
         !settings && *phase.get() != Phase::Menu && (options.open || *phase.get() == Phase::Paused);
     let off = !settings
         && (paused || matches!(phase.get(), Phase::Menu | Phase::LevelUp | Phase::GameOver));
-    if off || frames.busy() {
+    if (!editing && (off || !settings)) || frames.busy() {
         if layout.drag.take().is_some() {
             layout.save();
         }
         layout.menu = None;
         layout.captured = false;
+        return;
+    }
+    if editing
+        && buttons
+            .iter()
+            .any(|(i, editor_button)| editor_button && *i != Interaction::None)
+    {
+        layout.drag = None;
+        layout.menu = None;
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -274,10 +342,19 @@ pub(super) fn input(
             .position(|f| *f == id)
             .map_or(-1, |i| i as i32)
     };
-    let live = |m: &Movable| (m.layer == Layer::Settings) == settings;
+    let live = |m: &Movable| {
+        if editing {
+            !m.is_settings()
+        } else {
+            m.layer == Layer::Settings
+        }
+    };
     // Temporary alerts may hide or despawn while unlocked or even mid-drag.
-    let visible = |id| panels.iter().any(|(m, node, _, shown, ..)|
-        m.id == id && live(m) && shown.get() && node.size().min_element() > 0.);
+    let visible = |id| {
+        panels.iter().any(|(m, node, _, shown, ..)| {
+            m.id == id && live(m) && shown.get() && node.size().min_element() > 0.
+        })
+    };
     if layout.drag.is_some_and(|(id, _)| !visible(id)) {
         layout.drag = None;
         layout.save();
@@ -297,7 +374,10 @@ pub(super) fn input(
     let menu_hit = menu_rect.is_some_and(|r| r.contains(cursor));
     // A locked panel lets clicks through to the world, except to raise it or open its menu.
     let over_free = hit.as_ref().is_some_and(|(m, ..)| layout.free(m));
-    layout.hovered = hit.as_ref().filter(|(m, ..)| layout.unlocked(m.id)).map(|(m, ..)| m.id);
+    layout.hovered = hit
+        .as_ref()
+        .filter(|(m, ..)| layout.unlocked(m.id))
+        .map(|(m, ..)| m.id);
     if over_free || menu_hit || layout.drag.is_some() || layout.captured {
         hover.0 = Some(TOKEN);
         pointer.0 = true;
@@ -309,7 +389,7 @@ pub(super) fn input(
         if let Some((m, ..)) = &hit {
             let id = m.id;
             layout.raise(id);
-            let free = m.layer == Layer::Settings;
+            let free = editing || m.is_settings();
             let room = menu_room(free);
             layout.menu = Some((id, cursor.min((canvas - room).max(Vec2::ZERO)), free));
             layout.captured = true;
@@ -360,7 +440,7 @@ pub(super) fn input(
                 let on_button = m.layer == Layer::Settings
                     && kids
                         .iter_descendants(*entity)
-                        .any(|e| buttons.get(e).is_ok_and(|i| *i != Interaction::None));
+                        .any(|e| buttons.get(e).is_ok_and(|(i, _)| *i != Interaction::None));
                 if layout.free(m) && !on_button {
                     layout.drag = Some((m.id, cursor - b.laid.min));
                     layout.captured = true;
@@ -370,16 +450,17 @@ pub(super) fn input(
     }
     if let Some((id, offset)) = layout.drag {
         if mouse.pressed(MouseButton::Left) {
-            let size = panels
-                .iter()
-                .find(|(m, ..)| m.id == id)
-                .map_or(Vec2::ZERO, |(_, node, at, _, shift, _)| {
-                    boxes(node, at, shift).laid.size()
-                });
+            let (size, shift) = panels.iter().find(|(m, ..)| live(m) && m.id == id).map_or(
+                (Vec2::ZERO, Vec2::ZERO),
+                |(_, node, at, _, shift, _)| {
+                    let b = boxes(node, at, shift);
+                    (b.drawn.size(), b.drawn.min - b.laid.min)
+                },
+            );
             let want = cursor - offset;
             let at = Vec2::new(
-                snap(want.x, size.x, canvas.x),
-                snap(want.y, size.y, canvas.y),
+                snap(want.x + shift.x, size.x, canvas.x) - shift.x,
+                snap(want.y + shift.y, size.y, canvas.y) - shift.y,
             );
             layout.moved.insert(id.to_string(), at);
         } else {
@@ -395,7 +476,7 @@ pub(super) fn input(
 /// Seat every moved panel at its place within its parent, put reset ones back, and stack the
 /// clicked ones in front.
 #[allow(clippy::type_complexity)]
-fn apply(
+pub(super) fn apply(
     mut commands: Commands,
     layout: Res<HudLayout>,
     mut panels: Query<(Entity, &Movable, &mut Node, Option<&Home>, Option<&ChildOf>)>,
@@ -634,6 +715,7 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, spawned: Query<(), 
 fn paint(
     mut commands: Commands,
     layout: Res<HudLayout>,
+    editor: Option<Res<super::ui_edit::UiEditor>>,
     font: Option<Res<HudFont>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Res<UiScale>,
@@ -673,10 +755,19 @@ fn paint(
         (Without<GridLines>, Without<Hint>, Without<Menu>),
     >,
     mut tags: Query<
-        (&mut BackgroundColor, &mut BorderColor),
-        (With<EdgeTag>, Without<Edge>, Without<MenuLine>),
+        (&mut BackgroundColor, &mut BorderColor, &mut Node),
+        (
+            With<EdgeTag>,
+            Without<Edge>,
+            Without<MenuLine>,
+            Without<GridLines>,
+            Without<Hint>,
+            Without<Menu>,
+        ),
     >,
 ) {
+    let editing = editor.as_ref().is_some_and(|e| e.active);
+    let live = |m: &Movable| !editing || !m.is_settings();
     let any = !layout.unlocked.is_empty();
     for (mut node, grid, hint) in &mut nodes {
         let on = if grid {
@@ -757,7 +848,9 @@ fn paint(
     };
     let mut seen = Vec::new();
     for (entity, edge, mut node, mut border, children) in &mut edges {
-        let Some((m, cn, at, shown, shift)) = panels.iter().find(|(m, ..)| m.id == edge.0) else {
+        let Some((m, cn, at, shown, shift)) =
+            panels.iter().find(|(m, ..)| live(m) && m.id == edge.0)
+        else {
             commands.entity(entity).despawn();
             continue;
         };
@@ -774,7 +867,26 @@ fn paint(
         let moving = layout.drag.is_some_and(|(d, _)| d == m.id);
         let tone = if moving { col::WINE_HI } else { col::STEEL };
         *border = BorderColor::all(tone);
-        if let Some(Ok((mut bg, mut tag_edge))) = children.first().map(|c| tags.get_mut(*c)) {
+        if let Some(Ok((mut bg, mut tag_edge, mut tag_node))) =
+            children.first().map(|c| tags.get_mut(*c))
+        {
+            // Keep the label on screen for panels placed against the top edge.
+            let top = if r.min.y < 18. {
+                Val::Px(0.)
+            } else {
+                Val::Auto
+            };
+            let bottom = if r.min.y < 18. {
+                Val::Auto
+            } else {
+                Val::Percent(100.)
+            };
+            if tag_node.top != top {
+                tag_node.top = top;
+            }
+            if tag_node.bottom != bottom {
+                tag_node.bottom = bottom;
+            }
             bg.0 = if moving {
                 col::WINE.with_alpha(0.6)
             } else {
@@ -784,7 +896,7 @@ fn paint(
         }
     }
     for (m, _, _, shown, _) in &panels {
-        if layout.unlocked(m.id) && shown.get() && !seen.contains(&m.id) {
+        if live(m) && layout.unlocked(m.id) && shown.get() && !seen.contains(&m.id) {
             commands.entity(overlay).with_children(|o| {
                 o.spawn((
                     Edge(m.id),

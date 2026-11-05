@@ -3,11 +3,11 @@
 //! ([`classic`]). The Interface settings pick the health text.
 mod classic;
 use super::{
-    Run,
     enemies::Enemy,
     frame_settings::{self, FrameSettings},
-    hud::{HudFont, HudRoot, compact},
-    plates::{AuraSlot, fill_slots, hero_auras, spawn_aura_slot},
+    hud::{compact, HudFont, HudRoot},
+    plates::{fill_slots, hero_auras, spawn_aura_slot, AuraSlot},
+    Run,
 };
 use bevy::prelude::*;
 
@@ -60,7 +60,10 @@ impl Default for AuraLayout {
 
 impl AuraLayout {
     fn read(cvars: &crate::cvars::Cvars, keys: [&str; 4], defaults: Self) -> Self {
-        let pos = |key: &str, default: AuraPos| match cvars.get(key).and_then(|v| v.parse::<f32>().ok()) {
+        let pos = |key: &str, default: AuraPos| match cvars
+            .get(key)
+            .and_then(|v| v.parse::<f32>().ok())
+        {
             Some(v) if v.round() == 0. => AuraPos::Above,
             Some(v) if v.round() == 1. => AuraPos::Below,
             Some(v) if v.round() == 2. => AuraPos::Hidden,
@@ -83,24 +86,42 @@ impl AuraLayout {
 
     /// The unit frames': buffs over the plate and debuffs under it, 14px, unless set otherwise.
     pub(super) fn frames(cvars: &crate::cvars::Cvars) -> Self {
-        let keys = [FRAME_BUFFS, FRAME_DEBUFFS, FRAME_BUFF_SIZE, FRAME_DEBUFF_SIZE];
-        Self::read(cvars, keys, Self {
-            buffs: AuraPos::Above,
-            debuffs: AuraPos::Below,
-            buff_size: 14.,
-            debuff_size: 14.,
-        })
+        let keys = [
+            FRAME_BUFFS,
+            FRAME_DEBUFFS,
+            FRAME_BUFF_SIZE,
+            FRAME_DEBUFF_SIZE,
+        ];
+        Self::read(
+            cvars,
+            keys,
+            Self {
+                buffs: AuraPos::Above,
+                debuffs: AuraPos::Below,
+                buff_size: 14.,
+                debuff_size: 14.,
+            },
+        )
     }
 
     /// The compact plates': both kinds sharing the row over the bar, 9px, unless set otherwise.
     pub(super) fn plates(cvars: &crate::cvars::Cvars) -> Self {
-        let keys = [PLATE_BUFFS, PLATE_DEBUFFS, PLATE_BUFF_SIZE, PLATE_DEBUFF_SIZE];
-        Self::read(cvars, keys, Self {
-            buffs: AuraPos::Above,
-            debuffs: AuraPos::Above,
-            buff_size: 9.,
-            debuff_size: 9.,
-        })
+        let keys = [
+            PLATE_BUFFS,
+            PLATE_DEBUFFS,
+            PLATE_BUFF_SIZE,
+            PLATE_DEBUFF_SIZE,
+        ];
+        Self::read(
+            cvars,
+            keys,
+            Self {
+                buffs: AuraPos::Above,
+                debuffs: AuraPos::Above,
+                buff_size: 9.,
+                debuff_size: 9.,
+            },
+        )
     }
 }
 
@@ -371,6 +392,7 @@ fn refresh_auras(
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn refresh(
+    editor: Res<super::ui_edit::UiEditor>,
     run: Res<Run>,
     coop: Res<super::coop::Coop>,
     selection: Res<crate::target::Selection>,
@@ -417,41 +439,78 @@ fn refresh(
         .and_then(|e| enemies.get(e).ok())
         .filter(|e| !e.dead && e.hp > 0.);
     let max = run.stats().max_hp;
+    let player_hp = if editor.active && run.hp <= 0. {
+        max * 0.8
+    } else {
+        run.hp
+    };
+    let target_health = target
+        .map(|e| (e.hp, e.max_hp))
+        .unwrap_or(if editor.active {
+            (75000., 100000.)
+        } else {
+            (0., 1.)
+        });
     for (frame, mut node) in &mut frames {
         let placement = settings.items[usize::from(frame.0)];
-        node.left = Val::Px(placement.pos.x);
-        node.top = Val::Px(placement.pos.y);
-        node.display = if frame.0 && target.is_none() && placement.locked {
+        let left = Val::Px(placement.pos.x);
+        let top = Val::Px(placement.pos.y);
+        let display = if frame.0 && target.is_none() && placement.locked {
             Display::None
         } else {
             Display::Flex
         };
+        if node.left != left {
+            node.left = left;
+        }
+        if node.top != top {
+            node.top = top;
+        }
+        if node.display != display {
+            node.display = display;
+        }
     }
     for (design, mut node) in &mut designs {
-        node.display = if settings.items[usize::from(design.0)].design == design.1 {
+        let display = if settings.items[usize::from(design.0)].design == design.1 {
             Display::Flex
         } else {
             Display::None
         };
+        if node.display != display {
+            node.display = display;
+        }
     }
     for (outline, mut node) in &mut outlines {
-        node.display = if settings.items[usize::from(outline.0)].locked {
+        let display = if settings.items[usize::from(outline.0)].locked {
             Display::None
         } else {
             Display::Flex
         };
+        if node.display != display {
+            node.display = display;
+        }
     }
     for (fill, mut node) in &mut fills {
         let (hp, max) = if fill.0 {
-            target.map_or((0., 1.), |e| (e.hp, e.max_hp))
+            target_health
         } else {
-            (run.hp, max)
+            (player_hp, max)
         };
-        node.width = Val::Percent((hp / max.max(1.)).clamp(0., 1.) * 100.);
+        let width = Val::Percent((hp / max.max(1.)).clamp(0., 1.) * 100.);
+        if node.width != width {
+            node.width = width;
+        }
     }
     for (name, mut text) in &mut names {
         let value = if name.0 {
-            target.map_or("Select a target", |e| e.def.name)
+            target.map_or(
+                if editor.active {
+                    "Hogger"
+                } else {
+                    "Select a target"
+                },
+                |e| e.def.name,
+            )
         } else {
             if coop.running && !coop.name.trim().is_empty() {
                 coop.name.trim()
@@ -464,15 +523,15 @@ fn refresh(
         }
     }
     for (value, mut text, mut visible) in &mut health {
-        *visible = if settings.items[usize::from(value.0)].health {
+        visible.set_if_neq(if settings.items[usize::from(value.0)].health {
             Visibility::Inherited
         } else {
             Visibility::Hidden
-        };
+        });
         let (hp, max) = if value.0 {
-            target.map_or((0., 1.), |e| (e.hp, e.max_hp))
+            target_health
         } else {
-            (run.hp, max)
+            (player_hp, max)
         };
         let want = format.format(hp, max);
         if text.0 != want {
@@ -480,16 +539,26 @@ fn refresh(
         }
     }
     for (level, mut text, mut visible) in &mut levels {
-        *visible = if settings.items[usize::from(level.0)].level {
+        visible.set_if_neq(if settings.items[usize::from(level.0)].level {
             Visibility::Inherited
         } else {
             Visibility::Hidden
-        };
-        text.0 = if level.0 {
-            target.map_or(String::new(), |e| e.level.to_string())
+        });
+        let value = if level.0 {
+            target.map_or_else(
+                || {
+                    if editor.active {
+                        "12".into()
+                    } else {
+                        String::new()
+                    }
+                },
+                |e| e.level.to_string(),
+            )
         } else {
             run.level.to_string()
         };
+        text.set_if_neq(Text::new(value));
     }
 }
 
@@ -541,13 +610,16 @@ fn refresh_power(
         match part.1 {
             1 => {}
             _ => {
-                node.width = Val::Percent(if maximum > 0 {
+                let width = Val::Percent(if maximum > 0 {
                     (value as f32 / maximum as f32).clamp(0., 1.) * 100.
                 } else {
                     0.
                 });
+                if node.width != width {
+                    node.width = width;
+                }
                 if let Some(mut color) = color {
-                    color.0 = tint;
+                    color.set_if_neq(BackgroundColor(tint));
                 }
             }
         }
@@ -597,8 +669,17 @@ mod tests {
             HealthText::from_setting(Some("3"), HealthText::All).format(131.4, 182.),
             "132"
         );
-        assert_eq!(HealthText::from_setting(Some("4"), HealthText::All).format(0.2, 182.), "1%");
-        assert_eq!(HealthText::from_setting(Some("5"), HealthText::All).format(131., 182.), "");
-        assert_eq!(HealthText::from_setting(Some("9"), HealthText::All), HealthText::All);
+        assert_eq!(
+            HealthText::from_setting(Some("4"), HealthText::All).format(0.2, 182.),
+            "1%"
+        );
+        assert_eq!(
+            HealthText::from_setting(Some("5"), HealthText::All).format(131., 182.),
+            ""
+        );
+        assert_eq!(
+            HealthText::from_setting(Some("9"), HealthText::All),
+            HealthText::All
+        );
     }
 }

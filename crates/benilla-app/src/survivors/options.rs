@@ -553,6 +553,7 @@ struct NoMatch;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Action {
+    EditUi,
     Adjust(usize, i32),
     AdjustQuality(i32),
     Topic(u8),
@@ -1166,6 +1167,17 @@ fn spawn(
                                     col::TEXT_DIM,
                                 ),
                             ));
+                            foot.spawn((
+                                Button,
+                                Action::EditUi,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(12.), Val::Px(5.)),
+                                    border: UiRect::all(Val::Px(1.)),
+                                    ..default()
+                                },
+                                BackgroundColor(col::KNOB),
+                                BorderColor::all(col::STEEL_LO),
+                            )).with_child(text(f, "Edit UI", 12., col::TEXT_HI));
                             foot.spawn(Node {
                                 flex_grow: 1.,
                                 ..default()
@@ -1244,6 +1256,7 @@ fn clicks(
     mut commands: Commands,
     buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
     mut fps: ResMut<super::fps_counter::FpsSettings>,
+    mut editor: ResMut<super::ui_edit::UiEditor>,
     msaa: Option<Res<MsaaFormats>>,
 ) {
     if !options.settings {
@@ -1255,6 +1268,7 @@ fn clicks(
         }
         options.search_active = *action == Action::Search;
         match *action {
+            Action::EditUi => editor.requested = true,
             Action::Search => {
                 let end = options.search.len();
                 let search = options.search.clone();
@@ -1427,7 +1441,7 @@ fn paint_nav(
                     EDGE_DIM
                 },
             ),
-            Action::Back => (
+            Action::Back | Action::EditUi => (
                 if hot { HOVER } else { col::KNOB },
                 if hot { col::WINE_HI } else { col::STEEL_LO },
             ),
@@ -1717,6 +1731,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<crate::cvars::Cvars>()
             .init_resource::<super::super::fps_counter::FpsSettings>()
+            .init_resource::<super::super::ui_edit::UiEditor>()
             .init_resource::<crate::sound::SoundConfig>()
             .insert_resource(crate::world_backdrop::RenderScale(1.))
             .insert_resource(Options {

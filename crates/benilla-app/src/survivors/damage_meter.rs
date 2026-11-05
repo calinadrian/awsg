@@ -5,6 +5,7 @@
 
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
+use bevy::time::Real;
 
 use super::coop::Coop;
 use super::hud::{compact, HudFont};
@@ -82,8 +83,8 @@ const TOP: f32 = 8.0;
 /// The meter, built at this scale.
 #[derive(Component)]
 struct Meter(f32);
-/// The column down the right edge: the minimap, the run tracker, this meter, then the quest
-/// tracker ([`super::right_column`]).
+/// The column down the right edge: the minimap, the run tracker, then this meter
+/// ([`super::right_column`]).
 #[derive(Component)]
 pub(super) struct RightStack;
 #[derive(Component)]
@@ -114,9 +115,23 @@ struct ModeButton(Mode);
 #[derive(Component)]
 struct MeterScroll;
 
+/// Both the labels and icons read one ranking, refreshed at most ten times a second.
+#[derive(Resource, Default)]
+struct MeterTable(Vec<Entry>);
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Mode>()
-        .add_systems(Update, (spawn, controls, paint, paint_icons).chain());
+        .init_resource::<MeterTable>()
+        .add_systems(
+            Update,
+            (
+                spawn,
+                controls.run_if(super::ui_edit::inactive),
+                paint,
+                paint_icons,
+            )
+                .chain(),
+        );
 }
 
 fn controls(
@@ -245,6 +260,7 @@ fn spawn(
                     position_type: PositionType::Absolute,
                     right: Val::Px(8.0),
                     top: Val::Px(TOP),
+                    min_width: Val::Px(WIDTH),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::FlexEnd,
                     row_gap: Val::Px(6.0),
@@ -263,7 +279,8 @@ fn spawn(
     }
     let f = &font.0;
     let px = |v: f32| Val::Px(v * k);
-    let text = |which: MeterText, size: f32, color: Color| (which, col::label(f, "", size * k, color));
+    let text =
+        |which: MeterText, size: f32, color: Color| (which, col::label(f, "", size * k, color));
     commands
         .spawn((
             Meter(k),
@@ -306,7 +323,10 @@ fn spawn(
                             BorderColor::all(Color::NONE),
                         ))
                         .with_children(|b| {
-                            b.spawn((ModeButton(mode), col::label(f, label, 10.0 * k, col::STEEL_LO)));
+                            b.spawn((
+                                ModeButton(mode),
+                                col::label(f, label, 10.0 * k, col::STEEL_LO),
+                            ));
                         });
                     }
                     tabs.spawn(Node {
@@ -360,10 +380,13 @@ fn spawn(
                                     },
                                     BackgroundColor(col::WINE),
                                 ));
-                                row.spawn((text(MeterText::Rank(i), 9.0, col::STEEL), Node {
-                                    min_width: px(9.0),
-                                    ..default()
-                                }));
+                                row.spawn((
+                                    text(MeterText::Rank(i), 9.0, col::STEEL),
+                                    Node {
+                                        min_width: px(9.0),
+                                        ..default()
+                                    },
+                                ));
                                 row.spawn((
                                     MeterIcon(i),
                                     ImageNode::default(),
@@ -429,36 +452,62 @@ fn spawn(
 
 #[allow(clippy::type_complexity)]
 fn paint(
+    editor: Res<super::ui_edit::UiEditor>,
     run: Res<Run>,
     coop: Res<Coop>,
     phase: Res<State<Phase>>,
     mode: Res<Mode>,
     spells: Option<Res<crate::ui_action::Spells>>,
-    mut buttons: Query<(&ModeButton, Option<&mut BorderColor>, Option<&mut TextColor>)>,
+    mut buttons: Query<(
+        &ModeButton,
+        Option<&mut BorderColor>,
+        Option<&mut TextColor>,
+    )>,
     mut meters: Query<&mut Visibility, With<Meter>>,
     mut rows: Query<(&MeterRow, &mut Node), Without<MeterFill>>,
     mut fills: Query<(&MeterFill, &mut Node, &mut BackgroundColor), Without<MeterRow>>,
     mut texts: Query<(&MeterText, &mut Text)>,
+    time: Res<Time<Real>>,
+    added: Query<(), Added<Meter>>,
+    mut table: ResMut<MeterTable>,
+    mut last_refresh: Local<Option<(f64, Mode)>>,
 ) {
     let Ok(mut visibility) = meters.single_mut() else {
         return;
     };
     // Not behind the pause menu or the results, which have the screen to themselves.
-    let shown = matches!(*phase.get(), Phase::Playing | Phase::LevelUp);
+    let shown = editor.active || matches!(*phase.get(), Phase::Playing | Phase::LevelUp);
     let want = if shown {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
-    visibility.set_if_neq(want);
+    let became_visible = visibility.set_if_neq(want) && shown;
     if !shown {
         return;
     }
-    let table = if *mode == Mode::Party {
+    let now = time.elapsed_secs_f64();
+    if !became_visible
+        && added.is_empty()
+        && last_refresh.is_some_and(|(at, previous)| previous == *mode && now - at < 0.1)
+    {
+        return;
+    }
+    *last_refresh = Some((now, *mode));
+    table.0 = if *mode == Mode::Party {
         entries(&run, &coop)
     } else {
         spell_entries(&run, spells.as_deref())
     };
+    if editor.active && table.0.iter().all(|e| e.damage <= 0.) {
+        table.0 = vec![Entry {
+            source: None,
+            name: "You".into(),
+            damage: 12400.,
+            own: true,
+        }];
+    }
+    let table = &table.0;
     let top = table.first().map_or(0.0, |e| e.damage);
     let sum: f64 = table.iter().map(|e| e.damage).sum();
     let secs = f64::from(run.elapsed).max(1.0);
@@ -489,7 +538,10 @@ fn paint(
             continue;
         };
         let share = if top > 0.0 { e.damage / top } else { 0.0 };
-        node.width = Val::Percent((share * 100.0) as f32);
+        let width = Val::Percent((share * 100.0) as f32);
+        if node.width != width {
+            node.width = width;
+        }
         color.set_if_neq(BackgroundColor(if e.own { col::WINE } else { col::SLATE }));
     }
     let total = if *mode == Mode::Party {
@@ -529,6 +581,7 @@ fn paint(
 }
 
 fn paint_icons(
+    editor: Res<super::ui_edit::UiEditor>,
     run: Res<Run>,
     mode: Res<Mode>,
     spells: Option<Res<crate::ui_action::Spells>>,
@@ -536,18 +589,28 @@ fn paint_icons(
     mut images: ResMut<Assets<Image>>,
     mut icons: Query<(&MeterIcon, &mut Node, &mut ImageNode)>,
     mut cache: Local<std::collections::HashMap<String, Handle<Image>>>,
+    table: Res<MeterTable>,
+    phase: Res<State<Phase>>,
+    added: Query<(), Added<MeterIcon>>,
 ) {
-    let table = if *mode == Mode::SelfDps {
-        spell_entries(&run, spells.as_deref())
-    } else {
-        Vec::new()
-    };
+    if (!editor.active && !matches!(*phase.get(), Phase::Playing | Phase::LevelUp))
+        || (!table.is_changed() && added.is_empty())
+    {
+        return;
+    }
     for (slot, mut node, mut image) in &mut icons {
-        let Some(source) = table.get(slot.0).and_then(|e| e.source) else {
-            node.display = Display::None;
+        let source = (*mode == Mode::SelfDps)
+            .then(|| table.0.get(slot.0).and_then(|e| e.source))
+            .flatten();
+        let Some(source) = source else {
+            if node.display != Display::None {
+                node.display = Display::None;
+            }
             continue;
         };
-        node.display = Display::Flex;
+        if node.display != Display::Flex {
+            node.display = Display::Flex;
+        }
         let path = source.info(run.class.id, spells.as_deref()).1;
         let handle = cache.get(&path).cloned().or_else(|| {
             let assets = assets.as_deref_mut()?;
@@ -560,7 +623,10 @@ fn paint_icons(
             cache.insert(path, handle.clone());
             Some(handle)
         });
-        image.image = handle.unwrap_or_default();
+        let handle = handle.unwrap_or_default();
+        if image.image != handle {
+            image.image = handle;
+        }
     }
 }
 

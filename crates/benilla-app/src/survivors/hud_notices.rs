@@ -1,7 +1,7 @@
 //! Brief, non-modal announcements and confirmed equipment rewards.
 use super::{
-    Phase, Run, Selection, hud::HudFont, hud_layout::Movable, inventory::Equipment,
-    inventory_ui::ItemIcon, right_column as col,
+    hud::HudFont, hud_layout::Movable, inventory::Equipment, inventory_ui::ItemIcon,
+    right_column as col, Phase, Run, Selection,
 };
 use bevy::prelude::*;
 use std::collections::VecDeque;
@@ -32,6 +32,7 @@ impl Signal {
         fresh.then(|| value.as_ref().unwrap().0.clone())
     }
 }
+#[derive(Clone)]
 struct Announcement {
     heading: String,
     text: String,
@@ -39,6 +40,7 @@ struct Announcement {
     urgent: bool,
     left: f32,
 }
+#[derive(Clone)]
 struct Drop {
     definition: String,
     source: String,
@@ -112,6 +114,7 @@ fn describe(text: String, arrival: bool, selection: &Selection) -> Announcement 
 
 #[allow(clippy::too_many_arguments)]
 fn update(
+    editor: Res<super::ui_edit::UiEditor>,
     mut commands: Commands,
     time: Res<Time>,
     phase: Res<State<Phase>>,
@@ -122,13 +125,15 @@ fn update(
     mut state: ResMut<Notices>,
     mut roots: Query<(Entity, &Root, &mut Visibility)>,
     mut progress: Query<(&Progress, &mut Node)>,
+    mut was_editing: Local<bool>,
 ) {
     let Some(font) = font else { return };
-    let menu = *phase.get() == Phase::Menu;
-    let show = matches!(*phase.get(), Phase::Playing | Phase::GameOver);
-    let mut dirty = false;
+    let menu = !editor.active && *phase.get() == Phase::Menu;
+    let show = !editor.active && matches!(*phase.get(), Phase::Playing | Phase::GameOver);
+    let mut dirty = *was_editing != editor.active;
+    *was_editing = editor.active;
     if menu {
-        dirty = state.announcement.is_some() || !state.visible.is_empty();
+        dirty |= state.announcement.is_some() || !state.visible.is_empty();
         *state = Notices::default();
         gear.loot_notices.clear();
     } else {
@@ -195,6 +200,36 @@ fn update(
             dirty = true;
         }
     }
+    let mut preview = Notices::default();
+    if editor.active {
+        preview.announcement = state.announcement.clone().or_else(|| {
+            Some(Announcement {
+                heading: "HOGGER · ARRIVAL".into(),
+                text: "Hogger approaches!".into(),
+                subtitle: String::new(),
+                urgent: false,
+                left: DURATION,
+            })
+        });
+        preview.visible = state.visible.clone();
+        if preview.visible.is_empty() {
+            if let Some(item) = gear
+                .catalog
+                .items
+                .iter()
+                .find(|i| i.quality.eq_ignore_ascii_case("rare"))
+                .or_else(|| gear.catalog.items.first())
+            {
+                preview.visible.push(Drop {
+                    definition: item.id.clone(),
+                    source: "Hogger".into(),
+                    count: 1,
+                    left: DURATION,
+                });
+            }
+        }
+    }
+    let render_state = if editor.active { &preview } else { &*state };
     if roots.is_empty() {
         for kind in [Root::Announcement, Root::Loot] {
             let announcement = matches!(kind, Root::Announcement);
@@ -240,18 +275,19 @@ fn update(
                     bevy::ui::FocusPolicy::Pass,
                 ))
                 .id();
-            render(&mut commands, entity, &kind, &state, &gear, &font.0);
+            render(&mut commands, entity, &kind, render_state, &gear, &font.0);
             commands.entity(entity).insert(kind);
         }
     }
     for (entity, kind, mut visibility) in &mut roots {
         let populated = match kind {
-            Root::Announcement => state.announcement.is_some(),
-            Root::Loot => !state.visible.is_empty(),
+            Root::Announcement => render_state.announcement.is_some(),
+            Root::Loot => !render_state.visible.is_empty(),
         };
-        let allowed = show
-            && populated
-            && (!matches!(kind, Root::Announcement) || *phase.get() == Phase::Playing);
+        let allowed = editor.active
+            || (show
+                && populated
+                && (!matches!(kind, Root::Announcement) || *phase.get() == Phase::Playing));
         *visibility = if allowed {
             Visibility::Inherited
         } else {
@@ -259,14 +295,17 @@ fn update(
         };
         if dirty {
             commands.entity(entity).despawn_related::<Children>();
-            render(&mut commands, entity, kind, &state, &gear, &font.0);
+            render(&mut commands, entity, kind, render_state, &gear, &font.0);
         }
     }
     for (bar, mut node) in &mut progress {
         let left = if bar.0 == ANNOUNCEMENT {
-            state.announcement.as_ref().map_or(0., |notice| notice.left)
+            render_state
+                .announcement
+                .as_ref()
+                .map_or(0., |notice| notice.left)
         } else {
-            state.visible.get(bar.0).map_or(0., |drop| drop.left)
+            render_state.visible.get(bar.0).map_or(0., |drop| drop.left)
         };
         node.width = Val::Percent((left / DURATION * 100.).clamp(0., 100.));
     }

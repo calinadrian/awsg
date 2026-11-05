@@ -270,7 +270,7 @@ fn create(commands: &mut Commands, root: Entity, font: &Handle<Font>) {
 fn announce(
     mut commands: Commands,
     run: Res<Run>,
-    phase: Res<State<Phase>>,
+    phase: (Res<State<Phase>>, Res<super::ui_edit::UiEditor>),
     eggs: Res<Eggs>,
     coop: Res<super::coop::Coop>,
     font: Option<Res<HudFont>>,
@@ -291,6 +291,7 @@ fn announce(
     mut edges: Query<&mut BorderColor>,
     mut notices: Local<Notices>,
 ) {
+    let (phase, editor) = phase;
     let Some(font) = font else {
         return;
     };
@@ -300,7 +301,7 @@ fn announce(
         }
         return;
     };
-    if matches!(phase.get(), Phase::Menu | Phase::GameOver) {
+    if !editor.active && matches!(phase.get(), Phase::Menu | Phase::GameOver) {
         *shown = Visibility::Hidden;
         *notices = Notices::default();
         return;
@@ -318,8 +319,11 @@ fn announce(
         }
         if enemy.timed_enraged && notices.berserk.insert(id) {
             notices.events.push(Alert {
-                boss: enemy.def.name, action: "Berserk: +500% damage, +50% speed".into(),
-                until: now + 5.0, duration: 5.0, severity: Severity::Lethal,
+                boss: enemy.def.name,
+                action: "Berserk: +500% damage, +50% speed".into(),
+                until: now + 5.0,
+                duration: 5.0,
+                severity: Severity::Lethal,
             });
         }
         if enemy.hogger_enraged && notices.enraged.insert(id) {
@@ -397,7 +401,16 @@ fn announce(
     });
     let mut bosses = HashSet::new();
     alerts.retain(|a| bosses.insert(a.boss));
-    let enabled = cvars.flag("SurvivorEncounterWarnings").unwrap_or(true);
+    if editor.active && alerts.is_empty() {
+        alerts.push(Alert {
+            boss: "Hogger",
+            action: "Move behind".into(),
+            until: now + 3.,
+            duration: 5.,
+            severity: Severity::Dangerous,
+        });
+    }
+    let enabled = editor.active || cvars.flag("SurvivorEncounterWarnings").unwrap_or(true);
     *shown = if enabled && !alerts.is_empty() {
         Visibility::Inherited
     } else {
