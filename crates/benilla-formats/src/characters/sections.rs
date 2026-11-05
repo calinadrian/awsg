@@ -523,10 +523,13 @@ pub fn equip_tex_dir(layer: usize) -> Option<&'static str> {
 /// A region texture's chain paths in the order the composite tries them: `_U`, then the gender
 /// letter. `0x476e20` probes the `_U` path (`0x648a10`) and patches in the gender letter only on a
 /// miss, so `_U` wins on the 43 shipped basenames that have both.
-pub fn equip_region_candidates(layer: usize, name: &str, sex: u8) -> [String; 2] {
+///
+/// Deviation: the other gender's art comes last, since a patch can ship one gender of a garment and
+/// painting nothing would leave that region bare. The two share a layout in the atlas.
+pub fn equip_region_candidates(layer: usize, name: &str, sex: u8) -> [String; 3] {
     let dir = EQUIP_TEX_DIRS[layer];
-    let letter = if sex == 1 { 'F' } else { 'M' };
-    ['U', letter].map(|c| format!("Item\\TextureComponents\\{dir}\\{name}_{c}.blp"))
+    let (letter, other) = if sex == 1 { ('F', 'M') } else { ('M', 'F') };
+    ['U', letter, other].map(|c| format!("Item\\TextureComponents\\{dir}\\{name}_{c}.blp"))
 }
 
 /// Source-over blit of an overlay's mip pyramid at `tile`, level by level, from the overlay's own
@@ -538,23 +541,46 @@ fn blit_over(dst: &mut BlpMipChain, src: &BlpMipChain, tile: Tile) {
         "character-skin compositing needs decoded chains on both sides"
     );
     let (tx, ty, tw, th) = tile;
-    let levels = dst.mips.len().min(src.mips.len());
+    // Deviation: the patch archives ship region art at twice its tile's size, which the reference's
+    // crop would cut to one quarter of the garment, so art larger than its tile is fitted to it. The
+    // mip of the tile's own size is used when there is one, and art that fits keeps its origin.
+    let oversized = src.width > tw || src.height > th;
+    let skip = if oversized {
+        (0..src.mips.len().saturating_sub(1))
+            .take_while(|k| (src.width >> (k + 1)) >= tw && (src.height >> (k + 1)) >= th)
+            .count()
+    } else {
+        0
+    };
+    let levels = if oversized {
+        dst.mips.len()
+    } else {
+        dst.mips.len().min(src.mips.len())
+    };
     for i in 0..levels {
+        let level = (i + skip).min(src.mips.len().saturating_sub(1));
         let dw = (dst.width >> i).max(1) as usize;
         let dh = (dst.height >> i).max(1) as usize;
-        let sw = (src.width >> i).max(1) as usize;
-        let sh = (src.height >> i).max(1) as usize;
+        let sw = (src.width >> level).max(1) as usize;
+        let sh = (src.height >> level).max(1) as usize;
         let (ox, oy) = ((tx >> i) as usize, (ty >> i) as usize);
-        let cw = ((tw >> i).max(1) as usize)
-            .min(sw)
-            .min(dw.saturating_sub(ox));
-        let ch = ((th >> i).max(1) as usize)
-            .min(sh)
-            .min(dh.saturating_sub(oy));
-        let (d, s) = (&mut dst.mips[i], &src.mips[i]);
+        let (full_w, full_h) = ((tw >> i).max(1) as usize, (th >> i).max(1) as usize);
+        let (fit_w, fit_h) = if oversized {
+            (full_w, full_h)
+        } else {
+            (full_w.min(sw), full_h.min(sh))
+        };
+        let cw = fit_w.min(dw.saturating_sub(ox));
+        let ch = fit_h.min(dh.saturating_sub(oy));
+        let (d, s) = (&mut dst.mips[i], &src.mips[level]);
         for row in 0..ch {
             for col in 0..cw {
-                let si = (row * sw + col) * 4;
+                let (sx, sy) = if oversized {
+                    (col * sw / full_w, row * sh / full_h)
+                } else {
+                    (col, row)
+                };
+                let si = (sy * sw + sx) * 4;
                 let di = ((oy + row) * dw + (ox + col)) * 4;
                 if si + 4 > s.len() || di + 4 > d.len() {
                     continue;
@@ -1183,12 +1209,45 @@ mod tests {
             [
                 "Item\\TextureComponents\\LegLowerTexture\\Leather_A_02_Pant_LL_U.blp",
                 "Item\\TextureComponents\\LegLowerTexture\\Leather_A_02_Pant_LL_F.blp",
+                "Item\\TextureComponents\\LegLowerTexture\\Leather_A_02_Pant_LL_M.blp",
             ]
         );
         let male = equip_region_candidates(6, "Leather_A_02_Pant_LL", 0);
         assert!(male[0].ends_with("_U.blp") && male[1].ends_with("_M.blp"));
-        // No third attempt: a bare name never resolves.
-        assert_eq!(male.len(), 2);
+        // The other gender is the last resort; a bare name never resolves.
+        assert!(male[2].ends_with("_F.blp"));
+        assert_eq!(male.len(), 3);
+    }
+
+    /// Patch art at twice its tile's size must cover the tile whole, not one quarter of the garment.
+    #[test]
+    fn blit_over_fits_oversized_art_to_its_tile() {
+        // A 4×2 overlay, its left half red and its right half blue, with a matching 2×1 mip.
+        let (r, b) = ([255, 0, 0, 255], [0, 0, 255, 255]);
+        let top: Vec<u8> = [r, r, b, b, r, r, b, b].concat();
+        let with_mip = BlpMipChain {
+            width: 4,
+            height: 2,
+            texels: crate::BlpTexels::Rgba8Unorm,
+            mips: vec![top.clone(), [r, b].concat()],
+        };
+        let mut dst = chain(2, 1, [128, 128, 128, 255].repeat(2));
+        blit_over(&mut dst, &with_mip, (0, 0, 2, 1));
+        assert_eq!(dst.mips[0], [r, b].concat(), "the mip of the tile's size lands");
+
+        // Without one the top level is sampled, with the same result.
+        let mut dst = chain(2, 1, [128, 128, 128, 255].repeat(2));
+        blit_over(&mut dst, &chain(4, 2, top), (0, 0, 2, 1));
+        assert_eq!(dst.mips[0], [r, b].concat(), "the whole garment reaches the tile");
+    }
+
+    /// Art that fits keeps its authored origin: it is never stretched across a larger tile.
+    #[test]
+    fn blit_over_leaves_art_smaller_than_its_tile_at_its_origin() {
+        let grey = [128, 128, 128, 255];
+        let mut dst = chain(2, 1, grey.repeat(2));
+        blit_over(&mut dst, &chain(1, 1, vec![255, 0, 0, 255]), (0, 0, 2, 1));
+        assert_eq!(dst.mips[0], [[255, 0, 0, 255], grey].concat());
     }
 
     fn chain(width: u32, height: u32, px: Vec<u8>) -> BlpMipChain {
