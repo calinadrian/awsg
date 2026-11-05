@@ -38,7 +38,9 @@ include!("food_data.rs");
 
 pub(super) const RANKS: usize = 5;
 pub const SLOTS: usize = 5;
-pub(super) const FULL_BELLY_DAMAGE_PERCENT: u32 = 5;
+pub(super) const FULL_BELLY_DAMAGE_PERCENT: u32 = 1;
+/// Internal aura icon key; this run bonus has no spell row in Spell.dbc.
+pub(super) const FULL_BELLY_ICON: u32 = u32::MAX;
 /// A bonus to every spell's targets, which is no run stat.
 const TARGETS: u8 = 255;
 

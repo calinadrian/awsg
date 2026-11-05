@@ -2410,6 +2410,18 @@ pub(super) fn hero_auras(
             aura(spell, key, String::new(), left)
         })
         .collect();
+    if run.full_belly > 0 {
+        let step = u64::from(super::food::FULL_BELLY_DAMAGE_PERCENT);
+        let total = u64::from(run.full_belly) * step;
+        out.insert(0, super::mechanics::Aura {
+            icon: super::food::FULL_BELLY_ICON,
+            name: "Full Belly".into(),
+            text: format!("+{step}% damage per stack.\nTotal damage bonus: +{total}%.\nLasts for the rest of this run."),
+            left: None,
+            buff: true,
+            stacks: run.full_belly,
+        });
+    }
     if run.shield_t > 0.0 && run.shield > 0.0 {
         out.push(aura(
             run.shield_spell,

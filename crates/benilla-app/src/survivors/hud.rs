@@ -1689,11 +1689,13 @@ pub(super) fn fill_icons(
         let handle = match cache.get(&icon.0) {
             Some(h) => Some(h.clone()),
             None => {
-                let path = spells
-                    .catalog
-                    .get(icon.0)
-                    .and_then(|d| d.icon.clone())
-                    .unwrap_or_else(|| "Interface\\Icons\\INV_Misc_QuestionMark".into());
+                let path = if icon.0 == super::food::FULL_BELLY_ICON {
+                    "Interface\\Icons\\inv_misc_food_13".into()
+                } else {
+                    spells.catalog.get(icon.0)
+                        .and_then(|d| d.icon.clone())
+                        .unwrap_or_else(|| "Interface\\Icons\\INV_Misc_QuestionMark".into())
+                };
                 let h = assets.sprite_texture(&format!("{path}.blp"), &mut images);
                 if let Some(h) = &h {
                     cache.insert(icon.0, h.clone());
