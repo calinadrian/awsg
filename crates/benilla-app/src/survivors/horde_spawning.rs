@@ -194,6 +194,7 @@ pub(super) fn spawn(
         center.velocity = motion.1;
     }
     let party = party_multiplier(centers.len());
+    let density = super::low_memory::density(run);
     // 0x5c82930: recover at most four ordinary/roaming mobs beyond 55 yd from
     // every living player. Bosses, lairs and active charges keep their positions.
     let mut relocated = 0;
@@ -218,7 +219,7 @@ pub(super) fn spawn(
     }
     let tier = super::difficulty::factors(roster.enemies.first().map_or(1, |e| e.tier));
     // The constructor calls roundf before converting its scaled hard limit.
-    let cap = (50.0 * party * roster.crowd).round() as usize;
+    let cap = (50.0 * party * roster.crowd * density).round() as usize;
     let mut alive = enemies.iter().filter(|(e, _)| !e.dead).count() + new_bosses.len();
     run.horde_spawn_slots = Some(cap.saturating_sub(alive));
     let mut ordinary = enemies
@@ -246,7 +247,7 @@ pub(super) fn spawn(
     if !state.started {
         state.started = true;
         state.silver_at = elapsed + elite_interval(elapsed) * tier.elite_every;
-        for _ in 0..4 {
+        for _ in 0..(4.0 * density).round() as usize {
             if emit(
                 commands,
                 run,
@@ -263,7 +264,7 @@ pub(super) fn spawn(
         }
     }
     state.kill_heat *= (-dt / 12.0).exp();
-    state.budget += dt * rate(elapsed, state.kill_heat, pressure) * party * tier.density;
+    state.budget += dt * rate(elapsed, state.kill_heat, pressure) * party * tier.density * density;
     // Native work limit: at most eight successful paid spawns per update.
     for _ in 0..8 {
         if state.budget < 1.0 {
@@ -284,7 +285,7 @@ pub(super) fn spawn(
         ordinary += 1;
     }
     // A separate unpriced floor tops up at most three ordinary mobs per update.
-    let fill = ((population_floor(elapsed, pressure, party) as f32 * tier.density * roster.crowd) as usize)
+    let fill = ((population_floor(elapsed, pressure, party) as f32 * tier.density * roster.crowd * density) as usize)
         .saturating_sub(ordinary)
         .min(3);
     for _ in 0..fill {

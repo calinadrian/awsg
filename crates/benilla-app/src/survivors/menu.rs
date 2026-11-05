@@ -22,6 +22,7 @@ pub(super) enum MenuAction {
     Class(usize),
     Randomize,
     Enter,
+    EnterLowMemory,
     /// Opens the talents screen ([`super::talents`]).
     Talents,
     /// Opens the settings, as Escape does.
@@ -216,12 +217,14 @@ pub(super) fn menu_clicks(
             options.open = true;
             options.settings = true;
         }
-        MenuAction::Enter => {
+        MenuAction::Enter | MenuAction::EnterLowMemory => {
+            selection.low_memory = action == MenuAction::EnterLowMemory;
             if selection.unlocked(selection.map) && start_run(&mut run, &mut selection) {
                 next.set(Phase::Playing);
             }
         }
         MenuAction::TestGrounds => {
+            selection.low_memory = false;
             if let Some(elwynn) = data::MAPS.iter().position(|m| m.name == "Elwynn Forest") {
                 selection.map = elwynn;
             }
@@ -332,6 +335,7 @@ pub(super) fn refresh_menu_ui(
             | MenuAction::Feature(..)
             | MenuAction::RandomFeatures
             | MenuAction::Enter
+            | MenuAction::EnterLowMemory
             | MenuAction::TestGrounds
             | MenuAction::Talents
             | MenuAction::Settings => false,
@@ -343,7 +347,7 @@ pub(super) fn refresh_menu_ui(
         }
         if let Some(mut disabled) = disabled {
             let off = match *action {
-                MenuAction::Enter => cur.is_none() || !selection.can_visit(selection.map) || !selection.unlocked(selection.map) || !super::dungeon::available(&data::MAPS[selection.map]),
+                MenuAction::Enter | MenuAction::EnterLowMemory => cur.is_none() || !selection.can_visit(selection.map) || !selection.unlocked(selection.map) || !super::dungeon::available(&data::MAPS[selection.map]),
                 MenuAction::Race(r) => !selection.race_unlocked(r),
                 _ => false,
             };
@@ -401,7 +405,7 @@ pub(super) fn refresh_menu_ui(
             _ => false,
         };
         let enabled = match action {
-            MenuAction::Enter => {
+            MenuAction::Enter | MenuAction::EnterLowMemory => {
                 cur.is_some() && selection.can_visit(selection.map) && selection.unlocked(selection.map) && super::dungeon::available(&data::MAPS[selection.map])
             }
             MenuAction::Race(race) => selection.race_unlocked(*race),

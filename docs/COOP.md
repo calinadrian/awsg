@@ -89,6 +89,18 @@ enemy limit: 50 solo, 67 with two, 84 with three and 100 with four. Spawn center
 rotate across living heroes. Timed roaming elites are separate from the fixed
 lair guardians.
 
+The main menu also offers **Solo - Low Memory**. This optional solo variant runs
+ordinary spawn credits and the population floor at 60%, and reduces the normal
+spawn limit from 50 to 30 (18 in compact maps). Ordinary mobs have 1.5x health,
+5/3x XP and 5/3x gold per successful gold roll. Fractional rewards use unbiased
+rounding; gold drop chance stays the same. At the same spawn-pressure level,
+60% density x 5/3 rewards preserves expected XP/gold while 60% x 1.5 HP gives
+90% aggregate health. Actual rewards per minute still depend on kill speed and
+the spawn cap. Kill-pressure credits are normalized by the same density factor.
+Bosses, fixed guardians, wave elites and their rewards retain their normal
+stats/cadence. Co-op and Test Grounds always disable this variant. This reduces
+active enemies; it does not change loaded textures or world assets.
+
 The native constructors also scale health with the living party, as
 `1 + (living - 1) * 0.7 * k`: k = 0.72 for ordinary chasers and roaming elites
 (ASR.exe 0.124.5 RVA 0x5c00785, giving 1.50/2.01/2.51x for two to four players)

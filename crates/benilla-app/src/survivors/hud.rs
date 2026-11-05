@@ -1028,6 +1028,7 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     selection.stage = selection.map;
     let next_guid = run.next_guid;
     *run = Run {
+        low_memory: selection.low_memory,
         class,
         race,
         next_guid,

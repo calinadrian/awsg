@@ -794,6 +794,9 @@ fn adventure(col: &mut ChildSpawnerCommands, f: &Handle<Font>) {
         skin::rule(p);
         let play = skin::button(p, f, "Play solo", "", MenuAction::Enter, true, false, true);
         p.commands().entity(play).insert(GlueDisabled(false));
+        let low = skin::button(p, f, "Solo - Low Memory", "", MenuAction::EnterLowMemory, false, false, true);
+        p.commands().entity(low).insert(GlueDisabled(false));
+        skin::label(p, f, "40% fewer mobs · +50% HP · +67% XP and gold", size::CAPTION, skin::MUTED);
         let target = skin::label(p, f, "", size::CAPTION, skin::MUTED);
         p.commands().entity(target).insert(PlayTarget);
         skin::button(

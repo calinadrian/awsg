@@ -817,6 +817,7 @@ fn receive(
                     coop.status = format!("Story access required: {reason}");
                     continue;
                 }
+                selection.low_memory = false;
                 if !super::hud::start_run(&mut run, &mut selection) {
                     coop.leave();
                     continue;

@@ -50,6 +50,7 @@ mod guardian_behavior;
 mod guardians;
 mod hero;
 mod horde_spawning;
+mod low_memory;
 mod hud;
 mod hud_layout;
 mod ui_edit;
@@ -362,6 +363,7 @@ pub(super) struct RunEntity;
 /// The class, look and battleground picked at the menu; the battleground holds for the run.
 #[derive(Resource, Default)]
 pub(super) struct Selection {
+    pub low_memory: bool,
     pub unlocked_races: Vec<u8>,
     pub class: Option<usize>,
     /// `(display, race, sex)`, one per race and sex the class's trainers come in.
@@ -553,6 +555,7 @@ pub(super) const BASE_MAGNET: f32 = 9.0;
 /// One run's state.
 #[derive(Resource)]
 pub(super) struct Run {
+    pub low_memory: bool,
     pub class: &'static ClassDef,
     pub race: u8,
     pub elapsed: f32,
@@ -650,6 +653,7 @@ pub(super) struct Run {
 impl Default for Run {
     fn default() -> Self {
         Self {
+            low_memory: false,
             class: &data::CLASSES[0],
             race: 0,
             elapsed: 0.0,

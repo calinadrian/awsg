@@ -464,6 +464,9 @@ fn spawn_with(
     };
     // Co-op health follows the living party at spawn; damage is not party-scaled.
     let hp = hp * run.party_factor(if boss || home.is_some() { 1.04 } else { 0.72 });
+    let hp = if role == Role::Horde && def.cost > 0.0 && super::low_memory::enabled(run) {
+        hp * super::low_memory::HEALTH
+    } else { hp };
     commands.entity(e).insert((
         Enemy {
             def,
@@ -1192,13 +1195,21 @@ pub(super) fn drop_loot(
         if let Some(name) = &d.boss_name {
             run.boss_loot.push(name.clone());
         }
-        spawner.source.killed(d.spawn_cost);
+        let low_memory_mob = !d.boss && !d.elite && !d.silver && d.spawn_cost > 0.0
+            && super::low_memory::enabled(&run);
+        // Each reduced-density mob represents more spawn credits as well as more rewards.
+        spawner.source.killed(if low_memory_mob {
+            d.spawn_cost / super::low_memory::DENSITY
+        } else { d.spawn_cost });
         // Regular mobs pay 1.65x, stochastically rounded; bosses pay their table XP
         // unchanged (RVA 0x5c03cd9..0x5c03dc3). No global 2x multiplier.
         let xp = if d.boss || d.roaming_elite {
             d.xp
         } else {
-            let scaled = d.xp as f32 * 1.65;
+            let reward = if low_memory_mob {
+                super::low_memory::REWARD
+            } else { 1.0 };
+            let scaled = d.xp as f32 * 1.65 * reward;
             (scaled as u32).saturating_add(u32::from(rng.f32() < scaled.fract()))
         };
         if xp > 0 {
@@ -1216,6 +1227,9 @@ pub(super) fn drop_loot(
             }
         }
         if let Some(amount) = super::gold::drop_amount(d.boss, rng.f32(), rng.f32()) {
+            let amount = if low_memory_mob {
+                super::low_memory::reward(amount, &mut rng)
+            } else { amount };
             spawn_gem(
                 &mut commands,
                 run.guid(),
