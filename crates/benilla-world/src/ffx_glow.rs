@@ -98,6 +98,9 @@ pub struct FfxBackdrop {
     /// The world camera drawing this frame (main-world entity). While `None` the camera's own
     /// clear is the ground; the component stays so its pipelines compile before any world exists.
     pub source: Option<Entity>,
+    /// Use edge-adaptive upsampling for a reduced-resolution world.
+    #[cfg(not(target_os = "macos"))]
+    pub fsr_easu: bool,
 }
 
 /// The glow weight `w`: the live `LightParams.glow`, synced every frame by [`sync_gain`].
@@ -399,7 +402,11 @@ impl SpecializedRenderPipeline for FfxCombinePipeline {
             fragment: Some(FragmentState {
                 shader: self.shader.clone(),
                 shader_defs: if key.gamma_out {
-                    vec!["GAMMA_OUT".into()]
+                    vec![
+                        "GAMMA_OUT".into(),
+                        #[cfg(not(target_os = "macos"))]
+                        "SURVIVORS_UPSCALE".into(),
+                    ]
                 } else {
                     vec![]
                 },
@@ -1084,6 +1091,17 @@ impl ViewNode for FfxTransparent2dNode {
                 let pipelines = world.resource::<FfxGlowPipelines>();
                 let pipeline_cache = world.resource::<PipelineCache>();
                 let (uniform, wave) = live_combine(world, glow);
+                #[cfg(not(target_os = "macos"))]
+                let uniform = {
+                    let mut uniform = uniform;
+                    if world
+                        .get::<FfxBackdrop>(view_entity)
+                        .is_some_and(|backdrop| backdrop.fsr_easu)
+                    {
+                        uniform[6] = 1.0;
+                    }
+                    uniform
+                };
                 // Still compiling: this frame has no world in it.
                 let combine = pipeline_cache.get_render_pipeline(view.pair.armed(wave))?;
                 world.resource::<RenderQueue>().write_buffer(

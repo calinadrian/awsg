@@ -583,6 +583,14 @@ pub(super) fn spawn_enemies(
     );
 }
 
+#[derive(Default)]
+pub(super) struct Separation {
+    bodies: Vec<(Entity, Vec3, f32)>,
+    grid: HashMap<(i32, i32), usize>,
+    cells: Vec<Vec<usize>>,
+    push: HashMap<Entity, Vec3>,
+}
+
 /// The chase: straight at the hero, pushed apart from each other, stopped by crowd control, and
 /// swinging when in reach.
 #[allow(clippy::type_complexity)]
@@ -600,6 +608,7 @@ pub(super) fn move_enemies(
     coop: Res<super::coop::Coop>,
     allies: Query<(Entity, &super::coop::Ally)>,
     mut bolts: ResMut<Bolts>,
+    mut separation: Local<Separation>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
@@ -640,37 +649,59 @@ pub(super) fn move_enemies(
 
     // Separation over a coarse grid: only neighbours in the same or adjacent cells push.
     const CELL: f32 = 3.0;
-    let bodies: Vec<(Entity, Vec3, f32)> = enemies
-        .iter()
-        .filter(|(_, _, e, _)| !e.dead)
-        .map(|(ent, tf, e, _)| (ent, tf.translation, e.radius))
-        .collect();
+    const COINCIDENT_SQ: f32 = 1e-4 * 1e-4;
+    let Separation {
+        bodies,
+        grid,
+        cells,
+        push,
+    } = &mut *separation;
+    bodies.clear();
+    bodies.extend(
+        enemies
+            .iter()
+            .filter(|(_, _, e, _)| !e.dead)
+            .map(|(ent, tf, e, _)| (ent, tf.translation, e.radius)),
+    );
     let key = |p: Vec3| ((p.x / CELL).floor() as i32, (p.z / CELL).floor() as i32);
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    grid.clear();
+    // Reassign buckets as the horde moves while retaining each bucket's allocation.
+    let mut used = 0;
     for (i, b) in bodies.iter().enumerate() {
-        grid.entry(key(b.1)).or_default().push(i);
+        let cell = *grid.entry(key(b.1)).or_insert_with(|| {
+            let slot = used;
+            used += 1;
+            if slot == cells.len() {
+                cells.push(Vec::new());
+            }
+            cells[slot].clear();
+            slot
+        });
+        cells[cell].push(i);
     }
-    let mut push: HashMap<Entity, Vec3> = HashMap::with_capacity(bodies.len());
+    push.clear();
     for (i, &(ent, pos, r)) in bodies.iter().enumerate() {
         let (cx, cz) = key(pos);
         let mut acc = Vec3::ZERO;
         for dx in -1..=1 {
             for dz in -1..=1 {
-                let Some(cell) = grid.get(&(cx + dx, cz + dz)) else {
+                let Some(&cell) = grid.get(&(cx + dx, cz + dz)) else {
                     continue;
                 };
-                for &j in cell {
+                for &j in &cells[cell] {
                     if j == i {
                         continue;
                     }
                     let (_, other, or) = bodies[j];
                     let d = flat(pos - other);
-                    let len = d.length();
                     let min = r + or;
-                    if len < min && len > 1e-4 {
+                    let distance_sq = d.length_squared();
+                    if distance_sq <= COINCIDENT_SQ {
+                        let (sin, cos) = (i as f32).sin_cos();
+                        acc += Vec3::new(sin, 0.0, cos) * 0.1;
+                    } else if distance_sq < min * min {
+                        let len = distance_sq.sqrt();
                         acc += d / len * (min - len);
-                    } else if len <= 1e-4 {
-                        acc += Vec3::new((i as f32).sin(), 0.0, (i as f32).cos()) * 0.1;
                     }
                 }
             }

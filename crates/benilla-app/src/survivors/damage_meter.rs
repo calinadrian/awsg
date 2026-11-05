@@ -375,16 +375,17 @@ fn spawn(
                                         ..default()
                                     },
                                 ));
-                                row.spawn((
-                                    text(MeterText::Name(i), 10.0, col::TEXT_HI),
-                                    Node {
-                                        flex_grow: 1.0,
-                                        flex_basis: Val::Px(0.0),
-                                        min_width: Val::Px(0.0),
-                                        overflow: Overflow::clip(),
-                                        ..default()
-                                    },
-                                ));
+                                // Bevy clips descendants, so the label needs its own column.
+                                row.spawn(Node {
+                                    flex_grow: 1.0,
+                                    flex_basis: Val::Px(0.0),
+                                    min_width: Val::Px(0.0),
+                                    overflow: Overflow::clip_x(),
+                                    ..default()
+                                })
+                                .with_children(|name| {
+                                    name.spawn(text(MeterText::Name(i), 10.0, col::TEXT_HI));
+                                });
                                 row.spawn(text(MeterText::Value(i), 10.0, col::TEXT_HI));
                                 row.spawn((
                                     text(MeterText::Dps(i), 8.0, col::TEXT_DIM),

@@ -22,6 +22,7 @@ const NAME_H: f32 = 0.01;
 const NEARBY_SQ: f32 = 20.0 * 20.0;
 /// At most this many ordinary plates at once, nearest first.
 const MAX_NEARBY: usize = 24;
+const MAX_ENCOUNTER_PLATES: usize = 8;
 
 /// The settings page's equivalent of the two FrameXML nameplate toggles. The Survivors world does
 /// not load FrameXML, so these are persisted alongside the client's CVars.
@@ -210,6 +211,7 @@ pub(super) struct CompactParts {
     more: [(Entity, Entity); 2],
     /// The health and format the text was last written for.
     shown: Option<(f32, f32, super::unit_frames::HealthText)>,
+    auras_dirty: bool,
 }
 
 fn absolute() -> Node {
@@ -501,6 +503,7 @@ fn spawn_compact_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy, la
                 buffs: Vec::new(),
                 more: [more_debuffs, more_buffs],
                 shown: None,
+                auras_dirty: true,
             },
         ))
         .add_children(&[above, below, bar])
@@ -579,7 +582,14 @@ fn spawn_plate(commands: &mut Commands, f: &Handle<Font>, en: &Enemy) -> Entity 
         .id()
 }
 
-/// Keep encounter plates visible and add ordinary enemy plates while the WoW-style V toggle is on.
+#[derive(Default)]
+pub(super) struct PlatePool {
+    by_unit: HashMap<Entity, Entity>,
+    spare: Vec<Entity>,
+    style: Option<(bool, AuraLayout)>,
+    shown: Vec<Entity>,
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn enemy_plates(
     mut commands: Commands,
@@ -589,10 +599,10 @@ pub(super) fn enemy_plates(
     ui_scale: Res<UiScale>,
     enemies: Query<(Entity, &Transform, &Enemy)>,
     hero: Query<&Transform, (With<super::hero::Hero>, Without<Enemy>)>,
-    cams:Query<(&Camera, &Transform), (With<WorldCamera>, Without<Enemy>)>,
-    plates: Query<(Entity, &Plate)>,
+    cams: Query<(&Camera, &Transform), (With<WorldCamera>, Without<Enemy>)>,
+    mut plates: Query<(&Plate, Option<&mut CompactParts>)>,
     mut nodes: Query<&mut Node>,
-    mut vis: Query<&mut Visibility, With<Plate>>,
+    mut vis: Query<(Entity, &mut Visibility), With<Plate>>,
     mut texts: Query<&mut TextFont>,
     anchors: (
         Query<&BoneAttach>,
@@ -601,8 +611,7 @@ pub(super) fn enemy_plates(
         Query<&GlobalTransform>,
         Query<(), With<MountChild>>,
     ),
-    // Each unit's plate, and the style and aura layout they were built in.
-    mut cache: Local<(HashMap<Entity, Entity>, Option<(bool, AuraLayout)>)>,
+    mut pool: Local<PlatePool>,
     mut bucket: Local<crate::smart_rect::SmartBucket>,
     hud: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<super::hud::TopStack>>,
 ) {
@@ -610,44 +619,44 @@ pub(super) fn enemy_plates(
         gx_px, plate_basis, text_px, BAR_H, BAR_OFF_X, BAR_OFF_Y, BAR_W, LEVEL_H, LEVEL_OFF_X,
         LEVEL_OFF_Y, PLATE_H, PLATE_W,
     };
-    let (by_unit, style) = &mut *cache;
-    // A style or aura layout switch rebuilds every plate.
-    if *style != Some((settings.compact, settings.auras)) {
-        *style = Some((settings.compact, settings.auras));
-        for (_, plate) in by_unit.drain() {
+    let PlatePool {
+        by_unit,
+        spare,
+        style,
+        shown,
+    } = &mut *pool;
+    let in_run = *phase.get() != Phase::Menu;
+    let want_style = Some((settings.compact, settings.auras));
+    if !in_run || *style != want_style {
+        *style = want_style;
+        for plate in by_unit
+            .drain()
+            .map(|(_, plate)| plate)
+            .chain(spare.drain(..))
+        {
             if let Ok(mut c) = commands.get_entity(plate) {
                 c.despawn();
             }
         }
     }
     let compact = settings.compact;
-    // Plates whose unit fell or left (or whose run ended) go.
     bucket.clear();
-    let in_run = *phase.get() != Phase::Menu;
-    by_unit.retain(|unit, plate| {
-        let live = in_run
-            && enemies
-                .get(*unit)
-                .is_ok_and(|(_, _, e)| !e.dead && (e.boss || e.home.is_some() || settings.enemies));
-        if !live {
-            if let Ok(mut c) = commands.get_entity(*plate) {
-                c.despawn();
-            }
-        }
-        live && plates.contains(*plate)
-    });
-    // Start hidden and reveal only this frame's projected candidates; otherwise an off-screen or
-    // temporarily unprojectable unit leaves its last frame's plate stranded at stale coordinates.
-    for mut visibility in &mut vis {
-        *visibility = Visibility::Hidden;
-    }
     if !in_run {
+        for (_, mut visibility) in &mut vis {
+            visibility.set_if_neq(Visibility::Hidden);
+        }
         return;
     }
     let (Some(font), Ok((cam, cam_tf))) = (font, cams.single()) else {
+        for (_, mut visibility) in &mut vis {
+            visibility.set_if_neq(Visibility::Hidden);
+        }
         return;
     };
     let Some(viewport) = cam.logical_viewport_size() else {
+        for (_, mut visibility) in &mut vis {
+            visibility.set_if_neq(Visibility::Hidden);
+        }
         return;
     };
     let cam_g = GlobalTransform::from(*cam_tf);
@@ -691,7 +700,7 @@ pub(super) fn enemy_plates(
             continue;
         };
         if encounter {
-            encounters.push((unit, en, screen));
+            encounters.push((dist_sq, (unit, en, screen)));
         } else {
             nearby.push((dist_sq, (unit, en, screen)));
         }
@@ -700,29 +709,62 @@ pub(super) fn enemy_plates(
     // pass over every plate seated before it.
     nearby.sort_by(|a, b| a.0.total_cmp(&b.0));
     nearby.truncate(MAX_NEARBY);
-    let mut nearby: Vec<_> = nearby.into_iter().map(|(_, c)| c).collect();
+    encounters.sort_by(|a, b| {
+        b.1 .1
+            .boss
+            .cmp(&a.1 .1.boss)
+            .then_with(|| a.0.total_cmp(&b.0))
+    });
+    encounters.truncate(MAX_ENCOUNTER_PLATES);
     // Entity order makes the overlap solver's priority stable; query iteration order cannot
     // reshuffle a packed group from frame to frame. Encounters claim their seats first, so the
     // horde's plates make way for them rather than the other way round.
-    encounters.sort_by_key(|(unit, _, _)| unit.index());
-    nearby.sort_by_key(|(unit, _, _)| unit.index());
-    // An ordinary unit that left the reach or the nearest few gives its plate back.
+    encounters.sort_by_key(|(_, (unit, _, _))| unit.index());
+    nearby.sort_by_key(|(_, (unit, _, _))| unit.index());
+    spare.retain(|plate| plates.contains(*plate));
     by_unit.retain(|unit, plate| {
-        let keep = enemies
-            .get(*unit)
-            .is_ok_and(|(_, _, e)| e.boss || e.home.is_some())
-            || nearby.iter().any(|(u, _, _)| u == unit);
+        if !plates.contains(*plate) {
+            return false;
+        }
+        let keep = encounters
+            .iter()
+            .chain(&nearby)
+            .any(|(_, (u, _, _))| u == unit);
         if !keep {
-            if let Ok(mut c) = commands.get_entity(*plate) {
-                c.despawn();
-            }
+            commands.entity(*plate).remove::<PlateOf>();
+            spare.push(*plate);
         }
         keep
     });
 
-    for (unit, en, screen) in encounters.into_iter().chain(nearby) {
+    shown.clear();
+    for (_, (unit, en, screen)) in encounters.into_iter().chain(nearby) {
         let Some(&plate) = by_unit.get(&unit) else {
-            let p = if compact {
+            let p = if let Some(p) = spare.pop() {
+                let (parts, compact_parts) = plates.get_mut(p).expect("live spare plate");
+                set_display(&mut nodes, p, true);
+                let name_color = if en.silver {
+                    SILVER
+                } else if compact {
+                    super::right_column::TEXT_HI
+                } else {
+                    Color::WHITE
+                };
+                commands
+                    .entity(parts.name)
+                    .insert((Text::new(en.def.name), TextColor(name_color)));
+                commands.entity(parts.level).insert(Text::new(en.level.to_string()));
+                if let Some(mut compact_parts) = compact_parts {
+                    compact_parts.auras_dirty = true;
+                    commands.entity(parts.bar).insert(BorderColor::all(compact_edge(en)));
+                    if let Ok(mut font) = texts.get_mut(parts.name) {
+                        if font.font_size != COMPACT_NAME {
+                            font.font_size = COMPACT_NAME;
+                        }
+                    }
+                }
+                p
+            } else if compact {
                 spawn_compact_plate(&mut commands, &font.0, en, settings.auras)
             } else {
                 spawn_plate(&mut commands, &font.0, en)
@@ -731,10 +773,7 @@ pub(super) fn enemy_plates(
             by_unit.insert(unit, p);
             continue;
         };
-        let Ok((_, parts)) = plates.get(plate) else {
-            continue;
-        };
-        let Ok(mut v) = vis.get_mut(plate) else {
+        let Ok((parts, _)) = plates.get_mut(plate) else {
             continue;
         };
         let desired = Rect::new(
@@ -748,36 +787,58 @@ pub(super) fn enemy_plates(
             continue;
         }
         bucket.claim(seated);
-        *v = Visibility::Inherited;
+        shown.push(plate);
         if let Ok(mut n) = nodes.get_mut(plate) {
-            n.width = Val::Px(pw);
-            n.height = Val::Px(ph);
-            n.left = Val::Px(seated.min.x);
-            n.top = Val::Px(seated.min.y);
+            let (width, height) = (Val::Px(pw), Val::Px(ph));
+            let (left, top) = (Val::Px(seated.min.x), Val::Px(seated.min.y));
+            if (n.width, n.height, n.left, n.top) != (width, height, left, top) {
+                n.width = width;
+                n.height = height;
+                n.left = left;
+                n.top = top;
+            }
         }
         if compact {
-            if let Ok(mut n) = nodes.get_mut(parts.fill) {
-                n.width = Val::Percent((en.hp / en.max_hp).clamp(0.0, 1.0) * 100.0);
-            }
+            set_width(
+                &mut nodes,
+                parts.fill,
+                (en.hp / en.max_hp.max(1.)).clamp(0., 1.),
+            );
             continue;
         }
         if let Ok(mut n) = nodes.get_mut(parts.bar) {
-            n.left = Val::Px(gx(BAR_OFF_X));
-            n.top = Val::Px(bar_top);
-            n.width = Val::Px(gx(BAR_W));
-            n.height = Val::Px(gx(BAR_H));
+            let (left, top, width, height) = (
+                Val::Px(gx(BAR_OFF_X)),
+                Val::Px(bar_top),
+                Val::Px(gx(BAR_W)),
+                Val::Px(gx(BAR_H)),
+            );
+            if (n.left, n.top, n.width, n.height) != (left, top, width, height) {
+                n.left = left;
+                n.top = top;
+                n.width = width;
+                n.height = height;
+            }
         }
-        if let Ok(mut n) = nodes.get_mut(parts.fill) {
-            n.width = Val::Percent((en.hp / en.max_hp).clamp(0.0, 1.0) * 100.0);
-        }
+        set_width(
+            &mut nodes,
+            parts.fill,
+            (en.hp / en.max_hp.max(1.)).clamp(0., 1.),
+        );
         // The name's bottom on the plate's centre; the level's centre in the border's seat.
         if let Ok(mut n) = nodes.get_mut(parts.name_seat) {
-            n.left = Val::Px(pw / 2.0);
-            n.top = Val::Px(ph / 2.0);
+            let (left, top) = (Val::Px(pw / 2.), Val::Px(ph / 2.));
+            if (n.left, n.top) != (left, top) {
+                n.left = left;
+                n.top = top;
+            }
         }
         if let Ok(mut n) = nodes.get_mut(parts.level_seat) {
-            n.left = Val::Px(pw - gx(LEVEL_OFF_X));
-            n.top = Val::Px(ph - gx(LEVEL_OFF_Y));
+            let (left, top) = (Val::Px(pw - gx(LEVEL_OFF_X)), Val::Px(ph - gx(LEVEL_OFF_Y)));
+            if (n.left, n.top) != (left, top) {
+                n.left = left;
+                n.top = top;
+            }
         }
         for (text, h) in [(parts.name, NAME_H), (parts.level, LEVEL_H)] {
             if let Ok(mut f) = texts.get_mut(text) {
@@ -787,6 +848,17 @@ pub(super) fn enemy_plates(
                 }
             }
         }
+    }
+    for &plate in spare.iter() {
+        set_display(&mut nodes, plate, false);
+    }
+    // Write visibility once, without hiding and re-showing every live plate each frame.
+    for (plate, mut visibility) in &mut vis {
+        visibility.set_if_neq(if shown.contains(&plate) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
     }
 }
 
@@ -1979,9 +2051,10 @@ pub(super) fn compact_plates(
             }
         }
 
-        if !auras_due {
+        if !auras_due && !parts.auras_dirty {
             continue;
         }
+        parts.auras_dirty = false;
         let mark = run.passives.marks.get(&of.0);
         let all = super::mechanics::auras(en, mech, mark, run.elapsed, name);
         let (buffs, debuffs): (Vec<_>, Vec<_>) = all.into_iter().partition(|a| a.buff);
@@ -2100,7 +2173,7 @@ pub(super) fn hero_auras(run: &super::Run, name: impl Fn(u32, &str) -> String) -
 /// Edge the selected unit's plate in crimson; the plate it leaves gets its own edge back.
 pub(super) fn target_edge(
     selection: Res<crate::target::Selection>,
-    plates: Query<(&PlateOf, &Plate)>,
+    plates: Query<(&PlateOf, &Plate), With<CompactParts>>,
     enemies: Query<&Enemy>,
     mut borders: Query<&mut BorderColor>,
     mut edged: Local<Option<(Entity, Entity)>>,
@@ -2113,8 +2186,10 @@ pub(super) fn target_edge(
         return;
     }
     if let Some((unit, bar)) = edged.take() {
-        if let (Ok(en), Ok(mut b)) = (enemies.get(unit), borders.get_mut(bar)) {
-            *b = BorderColor::all(compact_edge(en));
+        if plates.iter().any(|(of, plate)| of.0 == unit && plate.bar == bar) {
+            if let (Ok(en), Ok(mut b)) = (enemies.get(unit), borders.get_mut(bar)) {
+                *b = BorderColor::all(compact_edge(en));
+            }
         }
     }
     if let Some((_, bar)) = now {

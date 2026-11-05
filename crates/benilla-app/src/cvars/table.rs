@@ -313,6 +313,10 @@ pub(crate) const REGISTERED: &[Registered] = &[
     ours("SurvivorWarningStandard", "1", "Survivors standard mechanic warnings"),
     ours("SurvivorBossCooldowns", "1", "Survivors boss cooldown panel visibility"),
     ours("SurvivorHudMeter", "1", "Survivors mode's damage meter size"),
+    #[cfg(not(target_os = "macos"))]
+    ours("SurvivorUpscaler", "0", "Survivors world upsampling: bilinear or FSR 1 EASU"),
+    ours("SurvivorWorldGrade", "1", "Survivors world color grading and sharpening"),
+    ours("SurvivorFxaa", "0", "Survivors world post-process anti-aliasing"),
     ours("SurvivorHudBar", "1", "Survivors mode's action bar size"),
     ours("SurvivorHudHealthText", "0", "Survivors mode's unit frame health text format"),
     ours("SurvivorHudHealthHeight", "13", "Survivors mode's unit frame health bar height"),

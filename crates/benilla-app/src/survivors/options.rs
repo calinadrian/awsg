@@ -6,6 +6,7 @@ mod preview;
 use super::{hud::HudFont, right_column as col, Phase};
 use bevy::input::{keyboard::KeyboardInput, ButtonState};
 use bevy::prelude::*;
+use benilla_world::view::MsaaFormats;
 
 #[derive(Resource, Default)]
 pub(super) struct Options {
@@ -81,8 +82,15 @@ const SETTINGS: &[Setting] = &[
     Setting {
         label: "Render scale",
         key: "renderScale",
-        values: &["0.5", "0.75", "1", "1.25", "1.5", "2"],
-        labels: &["50%", "75%", "100%", "125%", "150%", "200%"],
+        values: &["0.5", "0.59", "0.67", "0.75", "0.77", "0.85", "1", "1.25", "1.5", "2"],
+        labels: &["50%", "59%", "67%", "75%", "77%", "85%", "100%", "125%", "150%", "200%"],
+    },
+    #[cfg(not(target_os = "macos"))]
+    Setting {
+        label: "Upscaling (<100%)",
+        key: "SurvivorUpscaler",
+        values: &["0", "1"],
+        labels: &["Bilinear", "FSR 1 (EASU)"],
     },
     Setting {
         label: "View distance",
@@ -101,6 +109,48 @@ const SETTINGS: &[Setting] = &[
         key: "ffxGlow",
         values: &["0", "1"],
         labels: &["Off", "On"],
+    },
+    Setting {
+        label: "World color grade",
+        key: "SurvivorWorldGrade",
+        values: &["0", "1"],
+        labels: &["Off", "On"],
+    },
+    Setting {
+        label: "Anti-aliasing (restart)",
+        key: "gxMultisample",
+        values: &["1", "2", "4", "8"],
+        labels: &["Off", "2×", "4×", "8×"],
+    },
+    Setting {
+        label: "Fast anti-aliasing",
+        key: "SurvivorFxaa",
+        values: &["0", "1"],
+        labels: &["Off", "FXAA"],
+    },
+    Setting {
+        label: "Spell effect detail",
+        key: "spellEffectLevel",
+        values: &["0", "1", "2"],
+        labels: &["Low", "Medium", "High"],
+    },
+    Setting {
+        label: "Weather intensity",
+        key: "weatherDensity",
+        values: &["0", "1", "2", "3"],
+        labels: &["10%", "33%", "66%", "100%"],
+    },
+    Setting {
+        label: "Mip filtering (restart)",
+        key: "trilinear",
+        values: &["0", "1"],
+        labels: &["Bilinear", "Trilinear"],
+    },
+    Setting {
+        label: "Anisotropic filtering (restart)",
+        key: "anisotropic",
+        values: &["1", "2", "4", "8", "16"],
+        labels: &["Off", "2×", "4×", "8×", "16×"],
     },
     Setting {
         label: "Sound",
@@ -268,6 +318,27 @@ const PLATE_AURA_SIZE_LABELS: &[&str] = &["7 px", "9 px", "11 px", "13 px", "16 
 const HUD_SIZES: &[&str] = &["0.8", "0.9", "1", "1.1", "1.2", "1.35", "1.5"];
 const HUD_SIZE_LABELS: &[&str] = &["80%", "90%", "100%", "110%", "120%", "135%", "150%"];
 
+const QUALITY_LEVELS: [&str; 4] = ["Low", "Medium", "High", "Ultra"];
+const QUALITY_SETTINGS: &[(&str, [&str; QUALITY_LEVELS.len()])] = &[
+    ("renderScale", ["0.67", "0.85", "1", "1"]),
+    ("farclip", ["177", "300", "500", "777"]),
+    ("WorldDetail", ["0", "1", "2", "2"]),
+    ("spellEffectLevel", ["0", "1", "2", "2"]),
+    ("weatherDensity", ["0", "1", "2", "3"]),
+    ("ffxGlow", ["0", "1", "1", "1"]),
+    ("SurvivorFxaa", ["0", "1", "1", "1"]),
+    ("trilinear", ["0", "1", "1", "1"]),
+    ("anisotropic", ["1", "2", "4", "16"]),
+];
+
+fn quality_index(cvars: &crate::cvars::Cvars) -> Option<usize> {
+    (0..QUALITY_LEVELS.len()).find(|&i| {
+        QUALITY_SETTINGS
+            .iter()
+            .all(|(key, values)| cvars.num(key) == values[i].parse::<f32>().ok())
+    })
+}
+
 /// What an unset row shows: its first value, but the health bar's default height mid-list.
 fn unset(setting: &Setting) -> &'static str {
     if setting.key == super::unit_frames::HEALTH_HEIGHT {
@@ -290,6 +361,28 @@ fn nearest(setting: &Setting, value: &str) -> usize {
         .map_or(0, |(i, _)| i)
 }
 
+fn supports_samples(formats: Option<&MsaaFormats>, samples: u32) -> bool {
+    formats.is_none_or(|formats| {
+        formats.formats.is_empty() || formats.formats.iter().any(|&(_, _, n)| n == samples)
+    })
+}
+
+fn selected_index(setting: &Setting, value: &str, formats: Option<&MsaaFormats>) -> usize {
+    if setting.key != "gxMultisample" {
+        return nearest(setting, value);
+    }
+    let requested = value.parse::<u32>().unwrap_or(1);
+    setting
+        .values
+        .iter()
+        .rposition(|value| {
+            value
+                .parse::<u32>()
+                .is_ok_and(|n| n <= requested && supports_samples(formats, n))
+        })
+        .unwrap_or(0)
+}
+
 /// The topics down the sidebar: their group, name, line under the title, icon spell and tabs.
 struct Topic {
     group: &'static str,
@@ -308,7 +401,7 @@ const TOPICS: &[Topic] = &[
         about: "How the world is drawn.",
         icon_small: include_bytes!("../../assets/settings/graphics_small.png"),
         icon: include_bytes!("../../assets/settings/graphics.png"),
-        tabs: &["Display", "World"],
+        tabs: &["Display", "World", "Textures"],
     },
     Topic {
         group: "Game",
@@ -355,6 +448,7 @@ const TOPICS: &[Topic] = &[
 /// One row of the page: a stepped value from [`SETTINGS`] or an on/off switch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Item {
+    Quality,
     Value(usize),
     Flag(InterfaceSetting),
 }
@@ -362,6 +456,7 @@ enum Item {
 impl Item {
     fn label(self) -> &'static str {
         match self {
+            Self::Quality => "Graphics quality",
             Self::Value(i) => SETTINGS[i].label,
             Self::Flag(f) => f.label(),
         }
@@ -370,9 +465,13 @@ impl Item {
     /// The topic and tab the row sits on.
     fn place(self) -> (u8, u8) {
         match self {
+            Self::Quality => (0, 0),
             Self::Value(i) => match SETTINGS[i].key {
-                "gxWindow" | "gxVSync" | "renderScale" => (0, 0),
-                "farclip" | "WorldDetail" | "ffxGlow" => (0, 1),
+                "gxWindow" | "gxVSync" | "renderScale" | "gxMultisample" | "SurvivorUpscaler"
+                | "SurvivorFxaa" => (0, 0),
+                "farclip" | "WorldDetail" | "ffxGlow" | "spellEffectLevel" | "weatherDensity"
+                | "SurvivorWorldGrade" => (0, 1),
+                "trilinear" | "anisotropic" => (0, 2),
                 "MasterSoundEffects" | "MasterVolume" | "SoundVolume" | "MusicVolume"
                 | "AmbienceVolume" => (1, 0),
                 super::unit_frames::HEALTH_TEXT | super::unit_frames::HEALTH_HEIGHT => (3, 0),
@@ -414,8 +513,8 @@ impl Item {
     }
 
     fn all() -> impl Iterator<Item = Self> {
-        (0..SETTINGS.len())
-            .map(Self::Value)
+        std::iter::once(Self::Quality)
+            .chain((0..SETTINGS.len()).map(Self::Value))
             .chain(InterfaceSetting::ALL.into_iter().map(Self::Flag))
     }
 }
@@ -428,7 +527,7 @@ struct Row(Item);
 #[derive(Component)]
 struct RowWhere;
 #[derive(Component)]
-struct ValueLabel(usize);
+struct ValueLabel(Item);
 /// A switch's knob.
 #[derive(Component)]
 struct Switch(InterfaceSetting);
@@ -455,6 +554,7 @@ struct NoMatch;
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Adjust(usize, i32),
+    AdjustQuality(i32),
     Topic(u8),
     Tab(u8, u8),
     Toggle(InterfaceSetting),
@@ -965,7 +1065,11 @@ fn spawn(
                                         ));
                                     });
                                     match item {
-                                        Item::Value(i) => {
+                                        Item::Quality | Item::Value(_) => {
+                                            let adjust = |delta| match item {
+                                                Item::Value(i) => Action::Adjust(i, delta),
+                                                _ => Action::AdjustQuality(delta),
+                                            };
                                             row.spawn((
                                                 Node {
                                                     height: Val::Px(22.),
@@ -979,7 +1083,7 @@ fn spawn(
                                                 Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
                                             ))
                                             .with_children(|pick| {
-                                                arrow(pick, f, "‹", Action::Adjust(i, -1));
+                                                arrow(pick, f, "‹", adjust(-1));
                                                 // A text node sizes to its words, so a box
                                                 // round it centres them.
                                                 pick.spawn(Node {
@@ -988,10 +1092,10 @@ fn spawn(
                                                     ..default()
                                                 })
                                                 .with_child((
-                                                    ValueLabel(i),
+                                                    ValueLabel(item),
                                                     text(f, "", 11.5, col::TEXT_HI),
                                                 ));
-                                                arrow(pick, f, "›", Action::Adjust(i, 1));
+                                                arrow(pick, f, "›", adjust(1));
                                             });
                                         }
                                         Item::Flag(setting) => {
@@ -1133,6 +1237,7 @@ fn clicks(
     mut nameplates: ResMut<super::plates::NameplateSettings>,
     mut commands: Commands,
     buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
+    msaa: Option<Res<MsaaFormats>>,
 ) {
     if !options.settings {
         return;
@@ -1160,14 +1265,48 @@ fn clicks(
             Action::Back => {
                 options.close_settings(*phase.get());
             }
+            Action::AdjustQuality(delta) => {
+                if !Item::Quality.shown(&options) {
+                    continue;
+                }
+                let index = quality_index(&cvars).map_or(usize::from(delta > 0), |at| {
+                    (at as i32 + delta).clamp(0, QUALITY_LEVELS.len() as i32 - 1) as usize
+                });
+                for (key, values) in QUALITY_SETTINGS {
+                    cvars.set(key, values[index]);
+                }
+                for event in cvars.take_events() {
+                    commands.trigger(event);
+                }
+            }
             Action::Adjust(i, delta) => {
                 if !Item::Value(i).shown(&options) {
                     continue;
                 }
                 let s = &SETTINGS[i];
-                let at = nearest(s, cvars.get(s.key).unwrap_or(unset(s)));
-                let index = (at as i32 + delta).clamp(0, s.values.len() as i32 - 1) as usize;
-                cvars.set(s.key, s.values[index]);
+                let at = selected_index(s, cvars.get(s.key).unwrap_or(unset(s)), msaa.as_deref());
+                let mut next = at as i32 + delta;
+                let value = loop {
+                    let Some(value) = s.values.get(next as usize).copied() else {
+                        break None;
+                    };
+                    if s.key != "gxMultisample"
+                        || value
+                            .parse::<u32>()
+                            .is_ok_and(|n| supports_samples(msaa.as_deref(), n))
+                    {
+                        break Some(value);
+                    }
+                    next += delta;
+                };
+                let Some(value) = value else { continue };
+                cvars.set(s.key, value);
+                if s.key == "SurvivorUpscaler"
+                    && value == "1"
+                    && cvars.num("renderScale").unwrap_or(1.0) >= 1.0
+                {
+                    cvars.set("renderScale", "0.67");
+                }
                 cvars.commit_latched();
                 for event in cvars.take_events() {
                     commands.trigger(event);
@@ -1265,7 +1404,9 @@ fn paint_nav(
                     (WELL, if hot { col::STEEL_LO } else { EDGE_DIM })
                 }
             }
-            Action::Adjust(..) => (if hot { PICKED } else { Color::NONE }, Color::NONE),
+            Action::Adjust(..) | Action::AdjustQuality(_) => {
+                (if hot { PICKED } else { Color::NONE }, Color::NONE)
+            }
             Action::Search => (
                 WELL,
                 if options.search_active || hot {
@@ -1302,6 +1443,7 @@ fn paint_nav(
 fn paint_page(
     options: Res<Options>,
     cvars: Res<crate::cvars::Cvars>,
+    msaa: Option<Res<MsaaFormats>>,
     mut nodes: Query<
         (
             &mut Node,
@@ -1381,9 +1523,17 @@ fn paint_page(
                 }
             }
         } else if let Some(value) = value {
-            let s = &SETTINGS[value.0];
-            let at = nearest(s, cvars.get(s.key).unwrap_or(unset(s)));
-            (s.labels[at].to_string(), col::TEXT_HI)
+            let label = match value.0 {
+                Item::Quality => quality_index(&cvars).map_or("Custom", |i| QUALITY_LEVELS[i]),
+                Item::Value(i) => {
+                    let s = &SETTINGS[i];
+                    let at =
+                        selected_index(s, cvars.get(s.key).unwrap_or(unset(s)), msaa.as_deref());
+                    s.labels[at]
+                }
+                Item::Flag(_) => unreachable!("toggle rows have no value label"),
+            };
+            (label.to_string(), col::TEXT_HI)
         } else if let Some(nav) = nav {
             let open = match nav.0 {
                 Action::Topic(t) => t == options.topic && !searching,
@@ -1531,7 +1681,7 @@ mod tests {
                 assert_eq!(nearest(setting, v), i);
             }
         }
-        assert_eq!(nearest(&SETTINGS[2], "1.00"), 2);
+        assert_eq!(SETTINGS[2].values[nearest(&SETTINGS[2], "1.00")], "1");
     }
 
     /// The CVar store refuses writes to a name it does not know, so an unregistered row's arrows
