@@ -61,6 +61,48 @@ pub struct Ledger {
     catalog: Catalog,
 }
 impl Ledger {
+    pub fn has_local_credential(&self, token: &str) -> bool { self.state.accounts.contains_key(token) }
+    /// Local save recovery only: restore cached credentials when the companion ledger file
+    /// is missing or older. Existing ledger inventories remain authoritative.
+    pub fn recover_local_accounts(
+        &mut self,
+        snapshots: &[(String, Inventory)],
+        shared_tokens: &[String],
+        host: &mut impl Host,
+    ) -> Result<usize, String> {
+        if snapshots.iter().all(|(token, _)| self.state.accounts.contains_key(token)) {
+            return Ok(0);
+        }
+        let mut next = self.state.clone();
+        let shared_owner = shared_tokens.iter().find_map(|token| {
+            next.accounts.get(token).map(|account| account.owner.clone().unwrap_or_else(|| token.clone()))
+        }).or_else(|| snapshots.iter().filter(|(token, _)| shared_tokens.contains(token))
+            .max_by_key(|(_, inventory)| inventory.items.len()).map(|(token, _)| token.clone()));
+        let mut recovered = 0;
+        if let Some(owner) = shared_owner.as_ref().filter(|owner| !next.accounts.contains_key(*owner)) {
+            let inventory = snapshots.iter().find(|(token, _)| token == owner)
+                .map(|(_, inventory)| inventory.clone()).ok_or("Shared inventory recovery snapshot missing")?;
+            next.accounts.insert(owner.clone(), Account { inventory, ..Account::default() });
+            recovered += 1;
+        }
+        for (token, inventory) in snapshots {
+            if token.is_empty() || next.accounts.contains_key(token) { continue; }
+            let owner = shared_owner.as_ref().filter(|_| shared_tokens.contains(token)).cloned();
+            let inventory = if owner.is_some() {
+                Inventory { class: inventory.class, name: inventory.name.clone(), ..Inventory::default() }
+            } else { inventory.clone() };
+            next.accounts.insert(token.clone(), Account { inventory, owner, ..Account::default() });
+            recovered += 1;
+        }
+        if recovered > 0 {
+            let largest = next.accounts.values().flat_map(|account| account.inventory.items.iter())
+                .map(|item| item.id).max().unwrap_or(0);
+            next.serial = next.serial.max(largest);
+            self.commit(next, host).map_err(|e| format!("Could not save recovered solo inventory: {e}"))?;
+        }
+        Ok(recovered)
+    }
+
     pub fn delivered_snapshot(&self, credential: &str, delivery: &str) -> Option<Inventory> {
         let account = self.state.accounts.get(credential)?;
         let account = account.owner.as_ref().and_then(|owner| self.state.accounts.get(owner)).unwrap_or(account);
@@ -919,6 +961,50 @@ mod tests {
             },
             host,
         )
+    }
+
+    #[test]
+    fn lost_local_ledger_recovers_a_shared_bag_once_and_accepts_new_rewards() {
+        let catalog = Catalog::load();
+        let (zone, boss) = zone(&catalog);
+        let item = catalog.zones[&zone].equipment[0].item.clone();
+        let inventory = Inventory { class: 9, name: "Recovered".into(), gold: 123,
+            items: vec![Item { id: 500, definition: item, ..Item::default() }], ..Inventory::default() };
+        let mut other = inventory.clone(); other.class = 1;
+        let snapshots = vec![("local-mage".into(), inventory), ("local-warrior".into(), other)];
+        let tokens = snapshots.iter().map(|(token, _)| token.clone()).collect::<Vec<_>>();
+        let mut ledger = Ledger::new(State::default(), catalog);
+        let mut host = Memory::default();
+        assert_eq!(ledger.recover_local_accounts(&snapshots, &tokens, &mut host).unwrap(), 2);
+        let reply = send(&mut ledger, &mut host, "refresh-recovered", &tokens[0], Action::Refresh);
+        assert!(reply.ok, "{}", reply.message);
+        let bags = reply.inventory.unwrap();
+        assert_eq!(bags.gold, 123, "shared cached gold is restored once, not once per class");
+        assert_eq!(bags.items.iter().filter(|item| item.id == 500).count(), 1);
+        let run = send(&mut ledger, &mut host, "begin-recovered", &tokens[0], Action::BeginRun { zone }).run.unwrap();
+        let paid = send(&mut ledger, &mut host, "reward-recovered", &tokens[0], Action::Reward {
+            run, normal: 0, elite: 1, boss: 1, boss_names: vec![boss], gold: 20, progress: Vec::new(),
+        });
+        assert!(paid.ok, "{}", paid.message);
+        let after = paid.inventory.unwrap();
+        assert!(after.items.len() > bags.items.len(), "new elite and boss rewards are delivered");
+        assert!(ledger.state.serial > 500, "recovered item IDs cannot collide with new drops");
+        assert_eq!(ledger.recover_local_accounts(&snapshots, &tokens, &mut host).unwrap(), 0);
+        let current = send(&mut ledger, &mut host, "refresh-again", &tokens[0], Action::Refresh).inventory.unwrap();
+        assert_eq!(current.gold, after.gold, "the stale cache cannot overwrite the live ledger");
+        assert_eq!(current.items.len(), after.items.len());
+    }
+
+    #[test]
+    fn failed_local_credential_recovery_keeps_the_original_ledger() {
+        let snapshots = vec![("local".into(), Inventory { class: 9, gold: 123, ..Inventory::default() })];
+        let mut ledger = Ledger::new(State::default(), Catalog::load());
+        let mut host = Memory { fail: true, ..Memory::default() };
+        assert!(ledger.recover_local_accounts(&snapshots, &[], &mut host).is_err());
+        assert!(!ledger.has_local_credential("local"));
+        host.fail = false;
+        assert_eq!(ledger.recover_local_accounts(&snapshots, &[], &mut host).unwrap(), 1);
+        assert_eq!(ledger.state.accounts["local"].inventory.gold, 123);
     }
 
     /// A zone with a final boss, and that boss's name.

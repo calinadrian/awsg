@@ -36,6 +36,9 @@ struct Save {
     delivery: Option<Delivery>,
     heroes: BTreeMap<String, HeroSave>,
     pending: Vec<Job>,
+    /// Rejected rewards stay available for recovery rather than disappearing from the outbox.
+    #[serde(default)]
+    failed_rewards: Vec<Job>,
     #[serde(default)]
     linked: BTreeMap<String, String>,
     /// Legacy mode preference, retained when reading and rewriting older saves.
@@ -65,6 +68,8 @@ pub(super) struct LootNotice {
 }
 #[derive(Resource)]
 pub(super) struct Equipment {
+    reward_warning: bool,
+    recovered_inventory: bool,
     pub catalog: Catalog,
     pub loot_notices: std::collections::VecDeque<LootNotice>,
     save: Save,
@@ -205,6 +210,8 @@ impl Default for Equipment {
             ),
         };
         Self {
+            reward_warning: read_only || !save.failed_rewards.is_empty(),
+            recovered_inventory: false,
             catalog: Catalog::load(),
             loot_notices: Default::default(),
             save,
@@ -329,6 +336,11 @@ impl Equipment {
                 "Inventory synchronized".into()
             };
         } else {
+            if matches!(job.request.action, Action::Reward { .. }) {
+                warn!("survivors equipment: reward delivery rejected: {}", reply.message);
+                self.save.failed_rewards.push(job.clone());
+                self.reward_warning = true;
+            }
             if matches!(job.request.action, Action::LinkInventory { .. }) {
                 self.link_failed = true;
             }
@@ -376,6 +388,41 @@ impl Equipment {
                 _ => LedgerState::default(),
             };
             self.ledger = Some(Ledger::new(state, Catalog::load()));
+            let snapshots: Vec<_> = self.save.heroes.iter()
+                .filter(|(key, hero)| key.starts_with("solo:") && !hero.token.is_empty())
+                .map(|(_, hero)| (hero.token.clone(), hero.inventory.clone())).collect();
+            let shared: Vec<_> = self.save.linked.get("solo:")
+                .map(|tokens| tokens.split('|').map(str::to_owned).collect()).unwrap_or_default();
+            if snapshots.iter().any(|(token, _)| !self.ledger.as_ref().expect("solo ledger was loaded").has_local_credential(token)) {
+                // Keep both original files before repairing a mismatched pair of saves.
+                for source in [path(), solo_path()].into_iter().flatten() {
+                    let backup = source.with_extension("before-loot-recovery.bak");
+                    if crate::local_state::read_to_string(&backup).is_ok() { continue; }
+                    if let Ok(text) = crate::local_state::read_to_string(&source) {
+                        if let Err(error) = crate::local_state::write_atomic(&backup, &text) {
+                            self.status = format!("Could not back up inventory before recovery: {error}");
+                            self.read_only = true;
+                            self.reward_warning = true;
+                            return;
+                        }
+                    }
+                }
+            }
+            let recovery = self.ledger.as_mut().expect("solo ledger was loaded")
+                .recover_local_accounts(&snapshots, &shared, &mut SoloHost::new());
+            match recovery {
+                Ok(count) if count > 0 => {
+                    info!("survivors equipment: recovered {count} local inventory credentials from the cached save");
+                    self.recovered_inventory = true;
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    self.status = error;
+                    self.read_only = true;
+                    self.reward_warning = true;
+                    return;
+                }
+            }
         }
         let remote_link_failed = self.link_failed;
         self.link_failed = false;
@@ -394,6 +441,7 @@ impl Equipment {
                 self.status = "Missing solo hero credential; restore survivors-inventory.json from backup".into();
                 break;
             };
+            self.save.pending[index].request = request.clone();
             let reply = ledger.handle(request, &mut host);
             if reply.retry {
                 self.status = reply.message;
@@ -725,8 +773,21 @@ fn settle_exit(mut exits: MessageReader<AppExit>, run: Res<Run>, coop: Res<Coop>
         gear.finished = true;
     }
 }
-fn network(time: Res<Time<Real>>, selection: Res<Selection>, coop: Res<Coop>, mut gear: ResMut<Equipment>, mut talents: ResMut<super::talents::TalentBook>, mut progress: ResMut<super::progress::Progress>) {
+fn reward_notice(gear: &mut Equipment, run: &mut Run, phase: Phase) {
+    if !matches!(phase, Phase::Playing | Phase::Paused | Phase::LevelUp | Phase::GameOver) { return; }
+    if gear.reward_warning {
+        let text = if gear.read_only { "Item rewards are unavailable. Open Inventory for recovery details." }
+            else { "Item rewards could not be delivered. Pending rewards are saved for recovery." };
+        run.banner = Some((text.into(), 10.0));
+        gear.reward_warning = false;
+    } else if gear.recovered_inventory {
+        run.banner = Some(("Inventory recovered. Item rewards are available again.".into(), 8.0));
+        gear.recovered_inventory = false;
+    }
+}
+fn network(time: Res<Time<Real>>, selection: Res<Selection>, coop: Res<Coop>, mut gear: ResMut<Equipment>, mut talents: ResMut<super::talents::TalentBook>, mut progress: ResMut<super::progress::Progress>, mut run: ResMut<Run>, phase: Res<State<Phase>>) {
     let Some(class) = selection.class_def().map(|c| c.id) else { return };
+    reward_notice(&mut gear, &mut run, *phase.get());
     if gear.read_only { return; }
     gear.ensure_hero(SOLO, class, &coop.name);
     // Finish a persisted acknowledgement before allowing further local mutations.
@@ -737,6 +798,7 @@ fn network(time: Res<Time<Real>>, selection: Res<Selection>, coop: Res<Coop>, mu
         return;
     }
     gear.solo_tick(class);
+    reward_notice(&mut gear, &mut run, *phase.get());
     if gear.read_only { return; }
     gear.sync_profile(class, &mut talents, &mut progress);
     gear.sync_network(&coop.url, &coop.name, class, time.delta_secs());
