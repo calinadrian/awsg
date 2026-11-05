@@ -302,7 +302,12 @@ pub(super) fn spawn(
         let def = (0..6)
             .map(|_| choose(roster, &pool, elapsed, rng))
             .find(|d| d.ranged.is_none());
-        if let Some(def) = def.filter(|_| alive < cap) {
+        // One wave elite for the whole co-op party; wait a full interval after a blocked roll.
+        let wave_elite_alive = coop.active()
+            && enemies.iter().any(|(e, _)| {
+                !e.dead && !e.boss && e.home.is_none() && (e.silver || e.def.roaming_elite)
+            });
+        if let Some(def) = def.filter(|_| alive < cap && !wave_elite_alive) {
             let center = centers[state.turn % centers.len()];
             state.turn = state.turn.wrapping_add(1);
             let at = point(center, rng, ground, 0.5);

@@ -61,6 +61,9 @@ struct Foe {
     dead: bool,
     #[serde(rename = "l", default, skip_serializing_if = "is_false")]
     lair: bool,
+    /// Sleeping guardians must stay untargetable on guests as well as the host.
+    #[serde(rename = "ls", default, skip_serializing_if = "is_false")]
+    lair_asleep: bool,
     /// An elite's affixes, as [`super::mechanics::affix`] bits.
     #[serde(rename = "a", default, skip_serializing_if = "is_zero_u16")]
     affixes: u16,
@@ -1176,7 +1179,7 @@ fn receive(
                                     if f.lair {
                                         e.home = Some(enemies::Home {
                                             pos: Vec3::from_array(f.pos),
-                                            awake: true,
+                                            awake: !f.lair_asleep,
                                         });
                                     }
                                     mv.speed = f.speed;
@@ -1242,7 +1245,7 @@ fn receive(
                                             if f.lair {
                                                 e.home = Some(enemies::Home {
                                                     pos: Vec3::from_array(f.pos),
-                                                    awake: true,
+                                                    awake: !f.lair_asleep,
                                                 });
                                             }
                                         }
@@ -1572,6 +1575,7 @@ fn transmit(
                 speed: if mv.speed > 0. { round_to(mv.speed, 100.) } else { 0. },
                 dead: e.dead,
                 lair: e.home.is_some(),
+                lair_asleep: e.asleep(),
                 affixes: e.affixes,
                 ward: e.ward,
                 guard: e.guard,
@@ -1851,6 +1855,7 @@ mod tests {
             speed: 0.,
             dead: false,
             lair: false,
+            lair_asleep: false,
             affixes: 0,
             ward: false,
             guard: false,
