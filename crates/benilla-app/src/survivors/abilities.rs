@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use super::data::{AbilityDef, Effect, Kind};
 use super::enemies::{self, Enemy, Loot};
 use super::hero::{self, Hero};
+use super::talents::{self, ProcTrigger};
 use super::units::{self, flat, Fx, Marks, UnitSpec, COLOR_HEAL, COLOR_MELEE, COLOR_SPELL};
 use super::{Rng, Run, RunEntity};
 use crate::net::{FieldChanged, Guid, ObjectStore};
@@ -109,12 +110,15 @@ pub(super) struct Params {
     pub radius: f32,
     pub duration: f32,
     pub cooldown: f32,
+    effect: Effect,
 }
 
 pub(super) fn parameters(o: &super::Owned, run: &Run) -> Params {
     let def = o.def;
     let stats = run.stats();
     let t = &run.talents;
+    let duration = 1.0 + t.modifier(def, 4);
+    let buff_power = 1.0 + t.stat(23);
     // An equipped rare affix multiplies only its named spell's direct and periodic damage.
     let mult = o.damage_mult()
         * if def.kind == Kind::Buff {
@@ -139,6 +143,11 @@ pub(super) fn parameters(o: &super::Owned, run: &Run) -> Params {
             1. + run.jewel_stat(17)
         } else {
             1.
+        }
+        * if matches!(def.kind, Kind::Buff | Kind::Shield | Kind::Thorns) {
+            buff_power
+        } else {
+            1.0
         };
     // Native spell damage helper: the common 1.4 scale and the area-kind factors.
     let native_scale = if def.native_kind == 255 || def.native_kind == 9 {
@@ -167,13 +176,33 @@ pub(super) fn parameters(o: &super::Owned, run: &Run) -> Params {
             .round()
             .max(1.) as usize,
         radius: o.radius(&stats) * (1. + t.modifier(def, 3)),
-        duration: o.duration() * (1. + t.modifier(def, 4)),
+        duration: o.duration() * duration,
         cooldown: (o.cooldown(&stats) * (1. - t.modifier(def, 1)).max(0.4)).max(0.2),
+        effect: match def.effect {
+            Effect::Slow(strength, seconds) => Effect::Slow(strength, seconds * duration),
+            Effect::Weaken(strength, seconds) => Effect::Weaken(strength, seconds * duration),
+            Effect::Root(seconds) => Effect::Root(seconds * duration),
+            Effect::Stun(seconds) => Effect::Stun(seconds * duration),
+            Effect::Fear(seconds) => Effect::Fear(seconds * duration),
+            Effect::Shield(share) => Effect::Shield(share * buff_power),
+            effect => effect,
+        },
     }
 }
 
-fn mark_secs(def: &AbilityDef, duration: f32) -> f32 {
-    match def.effect {
+/// Preview Full Belly here because combat applies it only when damage lands.
+pub(super) fn display_parameters(o: &super::Owned, run: &Run) -> Params {
+    let mut p = parameters(o, run);
+    let multiplier = run.full_belly_multiplier();
+    if !matches!(o.def.kind, Kind::Buff | Kind::Heal | Kind::Shield | Kind::Immune) {
+        p.dmg *= multiplier;
+    }
+    p.dot *= multiplier;
+    p
+}
+
+fn mark_secs(effect: Effect, duration: f32) -> f32 {
+    match effect {
         Effect::Slow(_, t) | Effect::Weaken(_, t) => t,
         Effect::Root(t) | Effect::Stun(t) | Effect::Fear(t) => t,
         _ if duration > 0.0 => duration,
@@ -196,9 +225,9 @@ fn hit_for(def: &AbilityDef, p: &Params, target: Entity, damage: f32, crit: bool
         damage,
         dot: p.dot,
         dot_dur: p.duration,
-        effect: def.effect,
+        effect: p.effect,
         mark: def.mark,
-        mark_dur: mark_secs(def, p.duration),
+        mark_dur: mark_secs(p.effect, p.duration),
         splash: if matches!(def.kind, Kind::Bolt | Kind::Strike) {
             p.radius
         } else {
@@ -373,16 +402,31 @@ pub(super) fn cast_abilities(
             .map_or(0.0, |d| d.speed)
     };
 
-    // The bar's spells, then the race's proc.
+    // Equipped spells, the racial, then free casts from talents. Only the first two use a slot.
     let bar = run.abilities.len();
-    for i in 0..bar + usize::from(run.racial.is_some()) {
-        slot_mut(&mut run, i).cd -= dt;
-        if slot_mut(&mut run, i).cd > 0.0 {
-            continue;
-        }
-        let o = slot(&run, i);
+    let slots = bar + usize::from(run.racial.is_some());
+    let free_casts = talents::take_casts(&mut run);
+    for i in 0..slots + free_casts.len() {
+        let free = i.checked_sub(slots).and_then(|i| free_casts.get(i));
+        let free_spell;
+        let o = if let Some(cast) = free {
+            if let Some(owned) = run.abilities.iter().find(|o| o.def.key == cast.def.key) {
+                owned
+            } else {
+                free_spell = super::Owned::new(cast.def, super::rewards::Rarity::Common);
+                &free_spell
+            }
+        } else {
+            let owned = slot_mut(&mut run, i);
+            owned.cd -= dt;
+            if owned.cd > 0.0 {
+                continue;
+            }
+            slot(&run, i)
+        };
         let def = o.def;
-        let source = o.next_source.or(o.damage_source);
+        let source = free.map(|cast| super::damage_meter::Source::Talent(cast.source))
+            .or(o.next_source).or(o.damage_source);
         if def.kind == Kind::Passive {
             continue;
         }
@@ -392,6 +436,7 @@ pub(super) fn cast_abilities(
         } else {
             speed_of(def.spell)
         };
+        let mut critical_cast = false;
         let fired = match def.kind {
             Kind::Bolt | Kind::Strike | Kind::Melee | Kind::Execute | Kind::Missiles => {
                 let reach = if def.kind == Kind::Melee {
@@ -430,6 +475,7 @@ pub(super) fn cast_abilities(
                             p.dmg
                         };
                         let (dmg, crit) = roll(&mut rng, &stats, damage);
+                        critical_cast |= crit;
                         let delay = if speed > 0.0 { f.dist / speed } else { 0.0 };
                         schedule(
                             &mut pending,
@@ -453,7 +499,7 @@ pub(super) fn cast_abilities(
                         });
                     }
                 }
-                if targets.is_empty() {
+                if targets.is_empty() && free.is_none() {
                     false
                 } else {
                     fx.cast(me, def.spell, &entities(&targets), None);
@@ -473,9 +519,8 @@ pub(super) fn cast_abilities(
             }
             Kind::Ground | Kind::GroundSelf => {
                 let center = if def.kind == Kind::GroundSelf {
-                    foes.first()
-                        .filter(|f| f.dist <= p.radius + 4.0)
-                        .map(|_| hpos)
+                    (free.is_some() || foes.first().is_some_and(|f| f.dist <= p.radius + 4.0))
+                        .then_some(hpos)
                 } else {
                     densest(&foes, def.range, p.radius)
                 };
@@ -520,7 +565,7 @@ pub(super) fn cast_abilities(
                             } else {
                                 p.duration / def.ticks.max(1) as f32
                             },
-                            effect: def.effect,
+                            effect: p.effect,
                             mark: def.mark,
                             impact: if def.overhead { def.spell } else { 0 },
                         });
@@ -719,6 +764,9 @@ pub(super) fn cast_abilities(
             }
             Kind::Passive => false,
         };
+        if free.is_some() {
+            continue;
+        }
         slot_mut(&mut run, i).cd = if fired {
             p.cooldown
                 + if def.kind == Kind::Immune {
@@ -750,8 +798,10 @@ pub(super) fn cast_abilities(
                     }
                 }
             }
-            super::talents::trigger(&mut run, &mut rng, 7, None);
-            super::talents::trigger(&mut run, &mut rng, 3, Some(def.key));
+            talents::trigger(&mut run, &mut rng, ProcTrigger::Cast, def.spell, source);
+            if critical_cast {
+                talents::trigger(&mut run, &mut rng, ProcTrigger::CastCrit, def.spell, source);
+            }
         }
     }
 }
@@ -924,6 +974,7 @@ pub(super) fn apply_hits(
 ) {
     let dt = time.delta_secs();
     let now = run.elapsed;
+    let full_belly = run.full_belly_multiplier();
     let mut due: Vec<Hit> = incoming.read().cloned().collect();
     pending.0.retain(|(t, h)| {
         if *t <= now {
@@ -953,7 +1004,18 @@ pub(super) fn apply_hits(
                 }
             }
         }
+        let follow_up = talents::follow_up(&run, h.spell).filter(|_| h.damage > 0.0).map(|(source, share)| Hit {
+            source: Some(source),
+            contributors: Vec::new(),
+            damage: h.damage * share,
+            dot: 0.0,
+            mark: 0,
+            splash: 0.0,
+            crit: false,
+            ..h.clone()
+        });
         all.push(Hit { splash: 0.0, ..h });
+        all.extend(follow_up);
     }
 
     let mut kill =
@@ -998,6 +1060,7 @@ pub(super) fn apply_hits(
         if en.dead || en.ward {
             continue;
         }
+        talents::trigger(&mut run, &mut rng, ProcTrigger::Hit, h.spell, h.source);
         let mut dmg = h.damage * super::spell_passives::marked_multiplier(&run, e);
         if dmg > 0.0 {
             // The talents that hit harder on the elite, the wounded, the afflicted and the held.
@@ -1015,10 +1078,10 @@ pub(super) fn apply_hits(
                 } + if en.dots.is_empty() { 0.0 } else { t.stat(21) }
                     + if cc { t.stat(18) } else { 0.0 };
             if h.crit {
-                super::talents::trigger(&mut run, &mut rng, 2, None);
+                talents::trigger(&mut run, &mut rng, ProcTrigger::Crit, h.spell, h.source);
             }
             // Cap after every offensive multiplier, before healing, procs and the meter.
-            dmg = super::almighty_strength::damage(en.boss, en.max_hp, dmg);
+            dmg = super::almighty_strength::damage(en.boss, en.max_hp, dmg * full_belly);
             let leech = run.talents.stat(14) + run.jewel_stat(18);
             if leech > 0.0 {
                 run.heal(dmg * leech);
@@ -1141,7 +1204,8 @@ pub(super) fn apply_hits(
         marks.flush(e, guid.0, &mut store, &mut fields);
     }
 
-    // The over-time ticks, once a second each.
+    // Each periodic tick is its own proc and damage event.
+    let talent_leech = run.talents.stat(14);
     for (e, guid, tf, mut en, mut store, mut marks) in &mut enemies {
         if en.dead || en.dots.is_empty() || en.ward {
             continue;
@@ -1157,12 +1221,15 @@ pub(super) fn apply_hits(
             d.tick -= dt.min((d.left + dt).max(0.0)) * (1.0 + run.jewel_stat(19));
             while d.tick <= 0.00001 {
                 d.tick += d.every.max(0.01);
-                let damage = super::almighty_strength::damage(boss, maximum, d.damage);
+                let damage = super::almighty_strength::damage(boss, maximum, d.damage * full_belly);
                 dealt += damage;
                 let landed = damage.min(remaining_hp);
                 run.record_damage(d.source, d.spell, landed);
                 remaining_hp -= landed;
-                drained += damage * d.drain;
+                drained += damage * (d.drain + talent_leech);
+                if landed > 0.0 {
+                    talents::trigger(&mut run, &mut rng, ProcTrigger::DotTick, d.spell, d.source);
+                }
                 // Send each tick separately so the host's per-hit cap never merges skills.
                 if let Some(id) = guest_id { coop.submit(id, damage, Effect::None); }
             }

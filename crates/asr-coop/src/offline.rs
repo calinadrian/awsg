@@ -129,55 +129,11 @@ pub fn merge(
     out.starter_classes.extend(local.starter_classes.iter().copied());
     out.cleared_zones
         .extend(local.cleared_zones.iter().cloned());
-    for (quest, n) in &local.quests_done {
-        let value = delta(
-            server.quests_done.get(quest).copied().unwrap_or(0).into(),
-            base.quests_done.get(quest).copied().unwrap_or(0).into(),
-            (*n).into(),
-        )?;
-        let value = u32::try_from(value).map_err(|_| "Quest count exceeds limit")?;
-        out.quests_done.insert(
-            quest.clone(),
-            if catalog.quests.quest(quest).is_some_and(|q| !q.repeatable) {
-                value.min(1)
-            } else {
-                value
-            },
-        );
+    for (id, times) in &local.quests_done {
+        let count = out.quests_done.entry(id.clone()).or_default();
+        *count = (*count).max(*times);
     }
-    for quest in &base.quests {
-        if !local.quests.iter().any(|q| q.id == quest.id) {
-            out.quests.retain(|q| q.id != quest.id);
-        }
-    }
-    for quest in &local.quests {
-        if let Some(remote) = out.quests.iter_mut().find(|q| q.id == quest.id) {
-            for (i, n) in quest.progress.iter().enumerate() {
-                if let Some(count) = remote.progress.get_mut(i) {
-                    let before = base
-                        .quests
-                        .iter()
-                        .find(|q| q.id == quest.id)
-                        .and_then(|q| q.progress.get(i))
-                        .copied()
-                        .unwrap_or(0);
-                    let objective = catalog
-                        .quests
-                        .quest(&quest.id)
-                        .and_then(|q| q.objectives.get(i));
-                    *count = if objective.is_some_and(|o| o.kind.adds()) {
-                        delta((*count).into(), before.into(), (*n).into())?
-                            .min(objective.map_or(u32::MAX, |o| o.count).into())
-                            as u32
-                    } else {
-                        (*count).max(*n)
-                    };
-                }
-            }
-        } else if !base.quests.iter().any(|q| q.id == quest.id) {
-            out.quests.push(quest.clone());
-        }
-    }
+    out.quests.clear();
     let fresh: BTreeMap<_, _> = local
         .achievements
         .iter()

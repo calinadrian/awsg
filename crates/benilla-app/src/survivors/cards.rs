@@ -11,6 +11,7 @@ use bevy::ui::RelativeCursorPosition;
 pub(super) enum RewardKey {
     Spell(&'static str),
     Food(FoodId),
+    FullBelly,
     Gold,
 }
 
@@ -19,6 +20,7 @@ pub(super) fn reward_key(choice: hud::Choice, run: &Run) -> RewardKey {
         hud::Choice::NewAbility(def, _) => RewardKey::Spell(def.key),
         hud::Choice::Upgrade(i, _, _) => RewardKey::Spell(run.abilities[i].def.key),
         hud::Choice::Food(id) => RewardKey::Food(id),
+        hud::Choice::FullBelly => RewardKey::FullBelly,
         hud::Choice::Gold => RewardKey::Gold,
     }
 }
@@ -171,9 +173,15 @@ fn spawn_banish(column: &mut ChildSpawnerCommands, art: &CardArt, index: usize, 
 
 /// What the screen says the offer is.
 fn heading(offer: &Offer, run: &Run) -> (String, &'static str) {
+    if matches!(offer.choices().first(), Some(hud::Choice::FullBelly)) {
+        return (
+            "BATTLEGROUND CACHE · ALL FOOD AT ITS LIMIT".into(),
+            "Claim Full Belly",
+        );
+    }
     if matches!(offer.choices().first(), Some(hud::Choice::Gold)) {
         let kicker = if offer.chest {
-            "BATTLEGROUND CACHE · ALL FOOD AT ITS LIMIT".to_owned()
+            "BATTLEGROUND CACHE · NO FOOD AVAILABLE".to_owned()
         } else {
             format!("LEVEL {} · SPELL REWARD", run.level)
         };
@@ -430,16 +438,17 @@ pub(super) fn hand_controls(
     }
     // S is also a movement key, so a tap as the hand arrives must not throw the reward away.
     let settled = cards.iter().all(|card| card.t >= DEAL_SECS);
+    let full_belly = matches!(offer.choices().first(), Some(hud::Choice::FullBelly));
     let mut pressed = None;
     for (action, interaction, children, mut fill, mut edge) in &mut buttons {
         let enabled = match action {
-            HandAction::Reroll => run.gold >= run.hand.reroll_cost(),
+            HandAction::Reroll => !full_belly && run.gold >= run.hand.reroll_cost(),
             HandAction::Banish(i) => {
                 run.hand.banishes > 0
                     && offer
                         .choices()
                         .get(*i)
-                        .is_some_and(|c| !matches!(c, hud::Choice::Gold))
+                        .is_some_and(|c| !matches!(c, hud::Choice::Gold | hud::Choice::FullBelly))
             }
             HandAction::Skip => true,
         };

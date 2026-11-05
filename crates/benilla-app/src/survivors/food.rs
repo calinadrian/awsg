@@ -1,7 +1,7 @@
 //! Chest food: five kinds, one slot each, three builds per kind, and five ranks per build.
 //! An empty slot takes the Common of any build, and that pick sets the slot's build. A filled slot
 //! only takes the next rank of its build, so a food's numbers only climb, up to Legendary. When
-//! every slot holds its Legendary the chest falls back to gold. Food never gives move speed.
+//! every slot holds its Legendary the chest offers Full Belly. Food never gives move speed.
 use super::rewards::Rarity;
 use super::Rng;
 
@@ -38,6 +38,7 @@ include!("food_data.rs");
 
 pub(super) const RANKS: usize = 5;
 pub const SLOTS: usize = 5;
+pub(super) const FULL_BELLY_DAMAGE_PERCENT: u32 = 5;
 /// A bonus to every spell's targets, which is no run stat.
 const TARGETS: u8 = 255;
 

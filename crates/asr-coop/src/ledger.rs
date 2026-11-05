@@ -323,7 +323,6 @@ impl Ledger {
                         let points = std::mem::take(&mut old.inventory.achievement_points);
                         let total = std::mem::take(&mut old.inventory.achievement_total);
                         let cleared = std::mem::take(&mut old.inventory.cleared_zones);
-                        let quests = std::mem::take(&mut old.inventory.quests);
                         let done = std::mem::take(&mut old.inventory.quests_done);
                         let achievements = std::mem::take(&mut old.inventory.achievements);
                         let progress = std::mem::take(&mut old.inventory.achievement_progress);
@@ -375,17 +374,6 @@ impl Ledger {
                         for (id, times) in done {
                             let entry = shared.inventory.quests_done.entry(id).or_default();
                             *entry = (*entry).max(times);
-                        }
-                        for quest in quests {
-                            match shared.inventory.quests.iter_mut().find(|q| q.id == quest.id) {
-                                Some(mine) => {
-                                    mine.progress.resize(mine.progress.len().max(quest.progress.len()), 0);
-                                    for (a, b) in mine.progress.iter_mut().zip(quest.progress) {
-                                        *a = (*a).max(b);
-                                    }
-                                }
-                                None => shared.inventory.quests.push(quest),
-                            }
                         }
                         for (material, count) in materials {
                             let value = shared.inventory.materials.entry(material).or_default();
@@ -519,60 +507,8 @@ impl Ledger {
                     account.session_won = false;
                     run = Some(id);
                 }
-                Action::AcceptQuest { quest } => {
-                    let account = next.accounts.get_mut(&token).ok_or("Hero unavailable")?;
-                    let def = self.catalog.quests.offer(&account.inventory, quest)?;
-                    account.inventory.quests.push(crate::quests::QuestState {
-                        id: def.id.clone(),
-                        progress: vec![0; def.objectives.len()],
-                    });
-                }
-                Action::AbandonQuest { quest } => {
-                    let account = next.accounts.get_mut(&token).ok_or("Hero unavailable")?;
-                    let index = account
-                        .inventory
-                        .quests
-                        .iter()
-                        .position(|q| q.id == *quest)
-                        .ok_or("That quest is not in your log")?;
-                    account.inventory.quests.remove(index);
-                }
-                Action::TurnInQuest { quest } => {
-                    let account = next.accounts.get_mut(&token).ok_or("Hero unavailable")?;
-                    let index = account
-                        .inventory
-                        .quests
-                        .iter()
-                        .position(|q| q.id == *quest)
-                        .ok_or("That quest is not in your log")?;
-                    let def = self.catalog.quests.quest(quest).ok_or("That quest is no longer offered")?;
-                    if !self.catalog.quests.complete(&account.inventory.quests[index]) {
-                        return Err("Finish every objective first".into());
-                    }
-                    let item = if def.reward.item {
-                        if account.inventory.items.len() >= 5000 {
-                            return Err("Your bags are full".into());
-                        }
-                        self.best_item(std::iter::once(&def.zone), class, host)
-                    } else {
-                        None
-                    };
-                    let inventory = &mut account.inventory;
-                    inventory.quests.remove(index);
-                    *inventory.quests_done.entry(def.id.clone()).or_default() += 1;
-                    inventory.gold = inventory.gold.saturating_add(def.reward.gold).min(MAX_GOLD);
-                    inventory.achievement_points = inventory.achievement_points.saturating_add(def.reward.points);
-                    inventory.achievement_total = inventory.achievement_total.saturating_add(def.reward.points);
-                    if def.reward.materials > 0 {
-                        for material in self.catalog.zones.get(&def.zone).map_or(&[][..], |z| &z.material_pool[..]) {
-                            let amount = inventory.materials.entry(material.clone()).or_default();
-                            *amount = amount.saturating_add(def.reward.materials);
-                        }
-                    }
-                    if let Some(item) = item {
-                        next.serial += 1;
-                        inventory.items.push(Item { id: next.serial, definition: item.id.clone(), ..Item::default() });
-                    }
+                Action::AcceptQuest { .. } | Action::AbandonQuest { .. } | Action::TurnInQuest { .. } => {
+                    return Err("Quests have been retired".into());
                 }
                 Action::Reward {
                     run,
@@ -1099,84 +1035,6 @@ mod tests {
                 Action::Reward { run: run.into(), normal, elite, boss, boss_names, gold, progress }
             }
             other => other,
-        }
-    }
-
-    #[test]
-    fn quests_are_accepted_advanced_and_turned_in() {
-        use crate::quests::Kind;
-        let catalog = Catalog::load();
-        let story = catalog.quests.quest("elwynn.story").expect("the Elwynn story").clone();
-        let first = story.objectives[0].target.clone();
-        let mut ledger = Ledger::new(State::default(), catalog);
-        let mut host = Memory::default();
-        let token = hero(&mut ledger, &mut host, 1);
-
-        let finale = send(&mut ledger, &mut host, "a0", &token, Action::AcceptQuest { quest: "elwynn.finale".into() });
-        assert!(!finale.ok && finale.message.contains(&story.title), "{}", finale.message);
-        let accepted = send(&mut ledger, &mut host, "a1", &token, Action::AcceptQuest { quest: "elwynn.story".into() });
-        assert!(accepted.ok, "{}", accepted.message);
-        let twice = send(&mut ledger, &mut host, "a2", &token, Action::AcceptQuest { quest: "elwynn.story".into() });
-        assert!(!twice.ok);
-
-        // Progress needs a run in the quest's zone; other zones' kills do not count.
-        let run = begin(&mut ledger, &mut host, &token, "b0", "westfall");
-        let elsewhere = send(&mut ledger, &mut host, "p0", &token, with_run(reward(200, 0, vec![], vec![tick(Kind::Kill, "Coyote", 200)]), &run));
-        assert!(elsewhere.ok, "{}", elsewhere.message);
-        assert_eq!(elsewhere.inventory.expect("bags").quests[0].progress, vec![0, 0]);
-
-        let run = begin(&mut ledger, &mut host, &token, "b1", "elwynn");
-        // Claims beyond the batch's own kill count are cut to it.
-        let paid = send(&mut ledger, &mut host, "p1", &token, with_run(reward(100, 0, vec![first.clone()], vec![tick(Kind::Kill, "Kobold Vermin", 500)]), &run));
-        assert!(paid.ok, "{}", paid.message);
-        assert_eq!(paid.inventory.expect("bags").quests[0].progress, vec![1, 100]);
-        let early = send(&mut ledger, &mut host, "t0", &token, Action::TurnInQuest { quest: "elwynn.story".into() });
-        assert!(!early.ok);
-        send(&mut ledger, &mut host, "p2", &token, with_run(reward(80, 0, vec![], vec![tick(Kind::Kill, "", 80)]), &run));
-        let done = send(&mut ledger, &mut host, "t1", &token, Action::TurnInQuest { quest: "elwynn.story".into() });
-        assert!(done.ok, "{}", done.message);
-        let bags = done.inventory.expect("bags");
-        assert!(bags.quests.is_empty());
-        assert_eq!(bags.quests_done.get("elwynn.story"), Some(&1));
-        assert_eq!(bags.gold, story.reward.gold);
-        let again = send(&mut ledger, &mut host, "a3", &token, Action::AcceptQuest { quest: "elwynn.story".into() });
-        assert!(!again.ok, "not repeatable");
-        let finale = send(&mut ledger, &mut host, "a4", &token, Action::AcceptQuest { quest: "elwynn.finale".into() });
-        assert!(finale.ok, "{}", finale.message);
-        let dropped = send(&mut ledger, &mut host, "d0", &token, Action::AbandonQuest { quest: "elwynn.finale".into() });
-        assert!(dropped.ok && dropped.inventory.expect("bags").quests.is_empty());
-    }
-
-    #[test]
-    fn the_log_holds_five_and_bounties_repeat() {
-        use crate::quests::{Kind, MAX_ACTIVE};
-        let catalog = Catalog::load();
-        let offered: Vec<_> = catalog.quests.quests.iter().filter(|q| q.requires.is_empty()).map(|q| q.id.clone()).collect();
-        let bounty = catalog.quests.quest("elwynn.bounty").expect("a bounty").clone();
-        let mut ledger = Ledger::new(State::default(), catalog);
-        let mut host = Memory::default();
-        let token = hero(&mut ledger, &mut host, 9);
-        let mut taken = vec![bounty.id.clone()];
-        assert!(send(&mut ledger, &mut host, "a", &token, Action::AcceptQuest { quest: bounty.id.clone() }).ok);
-        for quest in offered.iter().filter(|q| **q != bounty.id).take(MAX_ACTIVE - 1) {
-            assert!(send(&mut ledger, &mut host, &format!("a{quest}"), &token, Action::AcceptQuest { quest: quest.clone() }).ok);
-            taken.push(quest.clone());
-        }
-        let extra = offered.iter().find(|q| !taken.contains(q)).expect("more quests").clone();
-        let full = send(&mut ledger, &mut host, "full", &token, Action::AcceptQuest { quest: extra });
-        assert!(!full.ok && full.message.contains("full"), "{}", full.message);
-
-        let target = bounty.objectives[0].target.clone();
-        let count = bounty.objectives[0].count;
-        for round in 0..2u32 {
-            let run = begin(&mut ledger, &mut host, &token, &format!("b{round}"), "elwynn");
-            send(&mut ledger, &mut host, &format!("p{round}"), &token, with_run(reward(count, 0, vec![], vec![tick(Kind::Kill, &target, count)]), &run));
-            let paid = send(&mut ledger, &mut host, &format!("t{round}"), &token, Action::TurnInQuest { quest: bounty.id.clone() });
-            assert!(paid.ok, "{}", paid.message);
-            assert_eq!(paid.inventory.expect("bags").quests_done.get(&bounty.id), Some(&(round + 1)));
-            if round == 0 {
-                assert!(send(&mut ledger, &mut host, "again", &token, Action::AcceptQuest { quest: bounty.id.clone() }).ok);
-            }
         }
     }
 

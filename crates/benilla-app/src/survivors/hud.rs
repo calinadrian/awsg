@@ -211,6 +211,7 @@ pub(super) enum Choice {
     NewAbility(&'static AbilityDef, Rarity),
     Upgrade(usize, Rarity, [Option<Upgrade>; 2]),
     Food(super::food::FoodId),
+    FullBelly,
     Gold,
 }
 impl Choice {
@@ -218,6 +219,7 @@ impl Choice {
         match self {
             Self::NewAbility(_, r) | Self::Upgrade(_, r, _) => r,
             Self::Food(id) => id.rarity(),
+            Self::FullBelly => Rarity::Legendary,
             Self::Gold => Rarity::Common,
         }
     }
@@ -893,12 +895,10 @@ pub(super) fn setup_hud(
                     .commands()
                     .entity(level)
                     .insert(super::talents::ResultsLevel);
-                skin::heading(panel, f, "QUESTS");
                 panel.spawn((
-                    super::quests::ResultsQuests,
+                    super::quests::ResultsAchievements,
                     Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(gap::XS),
+                        display: Display::None,
                         ..default()
                     },
                 ));
@@ -1030,6 +1030,9 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
 fn choices_for(run: &Run, rng: &mut Rng, chest: bool) -> Vec<Choice> {
     if chest {
         let mut pool = super::food::eligible(&run.food);
+        if pool.is_empty() {
+            return vec![Choice::FullBelly];
+        }
         pool.retain(|id| {
             !run.hand
                 .banned
@@ -1134,6 +1137,7 @@ pub(super) fn pick(
             }
         }
         Choice::Food(id) => run.food[id.kind as usize] = Some(id),
+        Choice::FullBelly => run.full_belly = run.full_belly.saturating_add(1),
         Choice::Gold => run.gold = run.gold.saturating_add(25),
     }
     run.version += 1;
@@ -1387,6 +1391,13 @@ pub(super) fn describe_card(
             name: id.food().name.into(),
             tag: String::new(),
             desc: id.build().desc.into(),
+        },
+        Choice::FullBelly => CardText {
+            spell: 0,
+            icon: Some("Interface\\Icons\\inv_misc_food_13"),
+            name: "Full Belly".into(),
+            tag: "RUN BONUS".into(),
+            desc: "Every food slot is at Legendary rank.".into(),
         },
         Choice::Gold => CardText {
             spell: 0,
@@ -1894,7 +1905,7 @@ struct Cast {
 }
 
 fn cast_run(o: &Owned, run: &Run) -> Cast {
-    let p = super::abilities::parameters(o, run);
+    let p = super::abilities::display_parameters(o, run);
     Cast {
         dmg: p.dmg,
         dot: p.dot,

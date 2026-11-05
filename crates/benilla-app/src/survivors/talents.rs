@@ -4,14 +4,14 @@
 //! prerequisite needs it maxed; respecs are free.
 //!
 //! In a run the talents count through [`Build`]: stat bonuses, spell and school modifiers, the
-//! spells a run starts with and the procs that ready a spell again. The milestones and capstones
-//! whose mechanics the mode has no counterpart for yet (`Eff::Other`) are shown, not applied.
+//! starting spells and triggered casts. The talent tooltip identifies effects still being ported.
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
 
 use super::data::{AbilityDef, Kind};
+use super::damage_meter::Source;
 use super::menu_skin as skin;
 use super::hud::{rgb, HudFont, MenuRoot};
 use super::menu::MenuAction;
@@ -52,26 +52,43 @@ pub(super) enum Eff {
     /// chance, 4 critical damage, 5 damage taken, 6 health a second, 7 movement speed, 13 a
     /// spell striking twice, 14 leech, 15 health a kill, 18-21 damage against the crowd
     /// controlled, elites and bosses, the wounded and the afflicted, 22 melee thorns, 24 health
-    /// a second as a share of the maximum. Others (pets, buffs, luck) have no counterpart yet.
+    /// a second as a share of the maximum. Stat 12 is luck and 23 strengthens buffs.
     Stat(u32, f32),
     /// A modifier on the spells `target` picks: `what` 0 damage, 1 cooldown, 2 targets, 3 area,
     /// 4 duration, 5 extra damage as a share of the hero's maximum health.
     Mod { target: Target, what: u32, per: f32 },
     /// The run starts with this spell.
     Grant(&'static str),
-    /// A `chance` (per `every` seconds at most) to ready `cast` again when `trigger` happens:
-    /// 2 a critical strike, 3 or 4 a cast of a spell `on`, 7 any cast, 8 a melee blow taken,
-    /// 9 health falling below `arg`.
+    /// Replace the class's normal starting spell.
+    Starter(&'static str),
+    /// A free cast, at most once per cooldown. With an empty `cast`, repeat the triggering spell.
     Proc {
         chance: f32,
         every: f32,
         cast: &'static str,
-        trigger: u32,
+        trigger: ProcTrigger,
         on: &'static [&'static str],
         arg: f32,
     },
+    CastEvery { cast: &'static str, seconds: f32 },
+    CastOnKills { cast: &'static str, count: u32 },
+    FollowUp { on: &'static [&'static str], share: f32 },
     /// A milestone mechanic of the old game's, by its tag: not ported.
     Other(u32),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProcTrigger {
+    Hit,
+    Crit,
+    CastCrit,
+    DotTick,
+    Cast,
+    MeleeTaken,
+    LowHealth,
+    ShieldBreak,
+    PetHit,
+    FatalHit,
 }
 
 pub(super) enum Target {
@@ -90,12 +107,34 @@ pub(super) const MAX_POINTS: u32 = 51;
 
 /// Talent experience the `n`th point costs.
 fn point_cost(n: u32) -> f32 {
-    100.0 + 25.0 * n as f32
+    // Move 4,650 XP from the first 31 points to the last 20. The 51-point total stays 36,975.
+    if n < 31 {
+        100.0 + 15.0 * n as f32
+    } else {
+        332.5 + 25.0 * n as f32
+    }
 }
 
 /// The class's three trees.
 pub(super) fn trees(class: u8) -> Option<&'static [TreeDef; 3]> {
     TREES.iter().find(|(c, _)| *c == class).map(|(_, t)| t)
+}
+
+const EXCLUSIVE_PAIRS: [(&str, &str); 2] = [
+    ("pact_of_the_annihilan", "butcher"),
+    ("leader_of_pack", "cat_form"),
+];
+
+fn exclusive_with(key: &str) -> Option<&'static str> {
+    EXCLUSIVE_PAIRS.iter().find_map(|&(first, second)| {
+        if key == first {
+            Some(second)
+        } else if key == second {
+            Some(first)
+        } else {
+            None
+        }
+    })
 }
 
 /// The old game's spell keys where the mode names the spell otherwise.
@@ -105,6 +144,30 @@ fn canonical(key: &str) -> &str {
         "pw_shield" => "power_word_shield",
         "demo_shout" => "demoralizing_shout",
         k => k,
+    }
+}
+
+fn spell(key: &str) -> Option<&'static AbilityDef> {
+    super::data::ABILITIES.iter().find(|def| def.key == canonical(key))
+}
+
+impl Eff {
+    fn implemented(&self) -> bool {
+        match self {
+            Self::Stat(stat, _) => matches!(*stat, 0..=7 | 12..=15 | 18..=24),
+            Self::Mod { target, what, .. } => {
+                *what <= 5 && super::data::ABILITIES.iter().any(|def| target.picks(def))
+            }
+            Self::Grant(key) | Self::Starter(key) => spell(key).is_some(),
+            Self::Proc { cast, trigger, on, .. } => {
+                !matches!(*trigger, ProcTrigger::PetHit | ProcTrigger::FatalHit)
+                    && (cast.is_empty() || spell(cast).is_some())
+                    && (on.is_empty() && !cast.is_empty() || on.iter().any(|key| spell(key).is_some()))
+            }
+            Self::CastEvery { cast, .. } | Self::CastOnKills { cast, .. } => spell(cast).is_some(),
+            Self::FollowUp { on, .. } => on.iter().any(|key| spell(key).is_some()),
+            Self::Other(_) => false,
+        }
     }
 }
 
@@ -252,12 +315,13 @@ impl ClassBook {
             .sum()
     }
 
-    /// Whether every bought rank stands: its row open and its prerequisite maxed.
+    /// Whether every bought rank satisfies its row, prerequisite and exclusivity rules.
     fn valid(&self, trees: &[TreeDef; 3]) -> bool {
         trees.iter().all(|tree| {
             tree.talents.iter().all(|t| {
                 self.rank(t.key) == 0
-                    || (self.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5
+                    || (exclusive_with(t.key).is_none_or(|other| self.rank(other) == 0)
+                        && self.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5
                         && t.prereq.is_none_or(|p| {
                             tree.talents
                                 .iter()
@@ -266,6 +330,20 @@ impl ClassBook {
                         }))
             })
         }) && self.spent() <= self.earned()
+    }
+
+    /// Old builds could buy both capstones. Refund both so the player can pick again.
+    fn refund_conflicting_picks(&mut self) {
+        for spec in &mut self.specs {
+            for (first, second) in EXCLUSIVE_PAIRS {
+                if spec.get(first).copied().unwrap_or(0) > 0
+                    && spec.get(second).copied().unwrap_or(0) > 0
+                {
+                    spec.remove(first);
+                    spec.remove(second);
+                }
+            }
+        }
     }
 
     /// Buy a rank if the rules allow it.
@@ -358,6 +436,7 @@ impl TalentBook {
                     }
                 }
             }
+            candidate.refund_conflicting_picks();
             let active = values.get(&format!("active:{class}")).copied().unwrap_or(book.active_spec as u64).min(2) as usize;
             if (0..3).all(|spec| { candidate.active_spec = spec; candidate.valid(trees) }) {
                 candidate.active_spec = active;
@@ -419,6 +498,7 @@ impl TalentBook {
                     }
                 }
             }
+            book.refund_conflicting_picks();
             self.classes.insert(class, book);
         }
     }
@@ -450,15 +530,31 @@ impl TalentBook {
 }
 
 /// A proc in a run, with the run second it may fire again.
-pub(super) struct ProcState {
+struct ProcState {
+    source: &'static str,
+    chance: f32,
+    every: f32,
+    cast: Option<&'static AbilityDef>,
+    trigger: ProcTrigger,
+    on: Vec<&'static AbilityDef>,
+    arg: f32,
+    ready_at: f32,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct FreeCast {
+    pub def: &'static AbilityDef,
     pub source: &'static str,
-    pub chance: f32,
-    pub every: f32,
-    pub cast: &'static str,
-    pub trigger: u32,
-    pub on: &'static [&'static str],
-    pub arg: f32,
-    pub ready_at: f32,
+}
+
+struct ScheduledCast {
+    cast: FreeCast,
+    when: CastSchedule,
+}
+
+enum CastSchedule {
+    Time { every: f32, next: f32 },
+    Kills { every: u32, paid: u32 },
 }
 
 /// The hero's talents as a run counts them.
@@ -469,8 +565,14 @@ pub(super) struct Build {
     /// [`Eff::Stat`] totals, by the old game's stat number.
     pub stats: HashMap<u32, f32>,
     mods: Vec<(&'static Target, u32, f32)>,
+    starter: Option<FreeCast>,
     pub grants: Vec<&'static str>,
-    pub procs: Vec<ProcState>,
+    procs: Vec<ProcState>,
+    scheduled: Vec<ScheduledCast>,
+    follow_ups: Vec<(&'static str, Vec<u32>, f32)>,
+    pending: Vec<FreeCast>,
+    health_share: Option<f32>,
+    pub broken_shield: Option<u32>,
 }
 
 impl Build {
@@ -494,6 +596,32 @@ impl Build {
                         b.grants.push(canonical(k));
                         b.granted_by.insert(canonical(k), t.key);
                     }
+                    Eff::Starter(key) => {
+                        if let Some(def) = spell(key) {
+                            b.starter = Some(FreeCast { def, source: t.key });
+                        }
+                    }
+                    Eff::CastEvery { cast, seconds } => {
+                        if let Some(def) = spell(cast) {
+                            b.scheduled.push(ScheduledCast {
+                                cast: FreeCast { def, source: t.key },
+                                when: CastSchedule::Time { every: *seconds, next: *seconds },
+                            });
+                        }
+                    }
+                    Eff::CastOnKills { cast, count } => {
+                        if let Some(def) = spell(cast) {
+                            b.scheduled.push(ScheduledCast {
+                                cast: FreeCast { def, source: t.key },
+                                when: CastSchedule::Kills { every: *count, paid: 0 },
+                            });
+                        }
+                    }
+                    Eff::FollowUp { on, share } => b.follow_ups.push((
+                        t.key,
+                        on.iter().filter_map(|key| spell(key).map(|def| def.spell)).collect(),
+                        *share,
+                    )),
                     Eff::Proc {
                         chance,
                         every,
@@ -501,17 +629,17 @@ impl Build {
                         trigger,
                         on,
                         arg,
-                    } => b.procs.push(ProcState {
+                    } if e.implemented() => b.procs.push(ProcState {
                         source: t.key,
                         chance: chance * if t.ranks > 1 { r } else { 1.0 },
                         every: *every,
-                        cast: canonical(cast),
+                        cast: spell(cast),
                         trigger: *trigger,
-                        on,
+                        on: on.iter().filter_map(|key| spell(key)).collect(),
                         arg: *arg,
                         ready_at: 0.0,
                     }),
-                    Eff::Other(_) => {}
+                    Eff::Proc { .. } | Eff::Other(_) => {}
                 }
             }
         }
@@ -532,40 +660,77 @@ impl Build {
     }
 }
 
-/// Fire the procs a `trigger` sets off (`spell` the key cast, for the cast trigger 3, which also
-/// answers the old game's 4): each that rolls readies its spell again, if the hero has it.
-pub(super) fn trigger(run: &mut Run, rng: &mut super::Rng, trigger: u32, spell: Option<&str>) {
-    let now = run.elapsed;
-    let mut ready = Vec::new();
-    for p in &mut run.talents.procs {
-        let hit = match p.trigger {
-            3 | 4 => trigger == 3 && spell.is_some_and(|k| p.on.iter().any(|o| canonical(o) == k)),
-            t => t == trigger,
+const MAX_PENDING_CASTS: usize = 32;
+
+/// Collect talent casts without touching the equipped spell's cooldown or reserving a bar slot.
+pub(super) fn take_casts(run: &mut Run) -> Vec<FreeCast> {
+    let mut ready = std::mem::take(&mut run.talents.pending);
+    for entry in &mut run.talents.scheduled {
+        let count = match &mut entry.when {
+            CastSchedule::Time { every, next } if run.elapsed >= *next => {
+                *next += ((run.elapsed - *next) / *every).floor() * *every + *every;
+                1
+            }
+            CastSchedule::Time { .. } => 0,
+            CastSchedule::Kills { every, paid } => {
+                let groups = run.kills / *every;
+                let count = groups.saturating_sub(*paid);
+                *paid = (*paid).max(groups);
+                count as usize
+            }
         };
-        if !hit || now < p.ready_at || rng.f32() >= p.chance {
-            continue;
-        }
-        p.ready_at = now + p.every;
-        ready.push((p.cast, p.source));
+        ready.extend(std::iter::repeat_n(entry.cast, count.min(MAX_PENDING_CASTS - ready.len())));
     }
-    for (key, source) in ready {
-        if let Some(o) = run.abilities.iter_mut().find(|o| o.def.key == key) {
-            o.cd = o.cd.min(0.0);
-            o.next_source = Some(super::damage_meter::Source::Talent(source));
-        }
-    }
+    ready
 }
 
-/// The health-share trigger (9): fired once the hero's health falls below a proc's `arg`.
-pub(super) fn low_health(run: &mut Run, rng: &mut super::Rng) {
-    let share = run.hp / run.stats().max_hp;
-    let due = run
-        .talents
-        .procs
-        .iter()
-        .any(|p| p.trigger == 9 && share < p.arg && run.elapsed >= p.ready_at);
-    if due {
-        trigger(run, rng, 9, None);
+pub(super) fn follow_up(run: &Run, spell: u32) -> Option<(Source, f32)> {
+    run.talents.follow_ups.iter().find_map(|(source, on, share)| {
+        on.contains(&spell).then_some((Source::Talent(source), *share))
+    })
+}
+
+pub(super) fn trigger(
+    run: &mut Run,
+    rng: &mut super::Rng,
+    trigger: ProcTrigger,
+    spell: u32,
+    source: Option<Source>,
+) {
+    if run.talents.procs.is_empty() {
+        return;
+    }
+    let now = run.elapsed;
+    let health = if trigger == ProcTrigger::LowHealth {
+        if !run.talents.procs.iter().any(|proc| proc.trigger == trigger) {
+            return;
+        }
+        let current = run.hp / run.stats().max_hp;
+        let previous = run.talents.health_share.replace(current).unwrap_or(1.0);
+        (previous, current)
+    } else {
+        (1.0, 1.0)
+    };
+    let build = &mut run.talents;
+    for proc in &mut build.procs {
+        if build.pending.len() == MAX_PENDING_CASTS {
+            break;
+        }
+        if proc.trigger != trigger || now < proc.ready_at || source == Some(Source::Talent(proc.source)) {
+            continue;
+        }
+        if trigger == ProcTrigger::LowHealth && (health.0 < proc.arg || health.1 >= proc.arg) {
+            continue;
+        }
+        let matched = proc.on.iter().copied().find(|def| def.spell == spell);
+        if !proc.on.is_empty() && matched.is_none() {
+            continue;
+        }
+        let Some(def) = proc.cast.or(matched) else { continue };
+        if rng.f32() < proc.chance {
+            proc.ready_at = now + proc.every;
+            build.pending.push(FreeCast { def, source: proc.source });
+        }
     }
 }
 
@@ -697,6 +862,12 @@ pub(super) fn refresh_progress(
 pub(super) fn begin_run(mut run: ResMut<Run>, mut book: ResMut<TalentBook>) {
     let class = run.class.id;
     run.talents = Build::of(class, book.class(class));
+    if let Some(starter) = run.talents.starter {
+        if let Some(first) = run.abilities.first_mut() {
+            *first = super::Owned::new(starter.def, super::rewards::Rarity::Common);
+            first.damage_source = Some(Source::Talent(starter.source));
+        }
+    }
     let grants = run.talents.grants.clone();
     for key in grants {
         let Some(def) = super::data::ABILITIES.iter().find(|a| a.key == key) else {
@@ -1173,7 +1344,27 @@ fn info(
                 Color::srgb(0.9, 0.45, 0.35),
             );
         }
+        if let Some(other) = exclusive_with(t.key)
+            .and_then(|key| tree.talents.iter().find(|talent| talent.key == key))
+        {
+            let blocked = page.rank(other.key) > 0;
+            let label = if blocked {
+                format!("Unlearn {} first", other.name)
+            } else {
+                format!("Exclusive with {}", other.name)
+            };
+            text(b, f, label, 11.0, if blocked { LEARNING } else { skin::MUTED });
+        }
         text(b, f, text_at(t, rank.max(1)), 12.0, skin::TEXT);
+        let active = t.effects.iter().filter(|effect| effect.implemented()).count();
+        if active < t.effects.len() {
+            let status = if active == 0 {
+                "Inactive in this version"
+            } else {
+                "Some effects are inactive in this version"
+            };
+            text(b, f, status, 11.0, LEARNING);
+        }
         if rank > 0 && rank < t.ranks {
             text(b, f, format!("Next rank: {}", text_at(t, rank + 1)), 12.0, LEARNING);
         }
@@ -1225,42 +1416,6 @@ fn tree_column(
             BackgroundColor(Color::srgb(0.018, 0.023, 0.028)),
         ))
         .with_children(|grid| {
-            // Prerequisite links first, so the icons draw over them.
-            for t in tree.talents {
-                let Some(q) = t
-                    .prereq
-                    .and_then(|p| tree.talents.iter().find(|q| q.key == p))
-                else {
-                    continue;
-                };
-                let lit = page.rank(q.key) >= q.ranks;
-                let (x0, y0) = (f32::from(q.col), f32::from(q.tier));
-                let (x1, y1) = (f32::from(t.col), f32::from(t.tier));
-                let centre = CELL / 2.0;
-                let node = if q.col == t.col {
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(x0 * CELL + centre - 1.0),
-                        top: Val::Px(y0 * CELL + centre),
-                        width: Val::Px(2.0),
-                        height: Val::Px((y1 - y0) * CELL),
-                        ..default()
-                    }
-                } else {
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(x0.min(x1) * CELL + centre),
-                        top: Val::Px(y0 * CELL + centre - 1.0),
-                        width: Val::Px((x1 - x0).abs() * CELL),
-                        height: Val::Px(2.0),
-                        ..default()
-                    }
-                };
-                grid.spawn((
-                    node,
-                    BackgroundColor(if lit { skin::GOLD } else { skin::EDGE }),
-                ));
-            }
             for (i, t) in tree.talents.iter().enumerate() {
                 cell(grid, f, ti, i, t, tree, page);
             }
@@ -1278,7 +1433,8 @@ fn cell(
     page: &ClassBook,
 ) {
     let rank = page.rank(t.key);
-    let open = page.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5;
+    let open = page.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5
+        && exclusive_with(t.key).is_none_or(|other| page.rank(other) == 0);
     let tint = if rank > 0 {
         Color::WHITE
     } else if open {
@@ -1326,6 +1482,20 @@ fn cell(
                 ..default()
             },
         ));
+        if t.effects.iter().any(|effect| !effect.implemented()) {
+            let badge = text(b, f, "!", 11.0, LEARNING);
+            b.commands().entity(badge).insert((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    padding: UiRect::horizontal(Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(skin::INK),
+                Pickable::IGNORE,
+            ));
+        }
         // The rank sits inside the icon's corner, clear of its neighbours.
         b.spawn((
             Node {

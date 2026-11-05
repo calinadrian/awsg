@@ -141,7 +141,7 @@ when the results open, when leaving to the menu, or on a graceful exit. Spending
 run gold on caches reduces that payout. Pending requests are saved before sending
 and retried with the same transaction ID after connection loss or a server write
 failure. Solo and co-op use one inventory: normal rewards, equipment actions,
-quests, talent experience, builds and completion records commit to the local ledger
+achievements, talent experience, builds and completion records commit to the local ledger
 even without a server. Reconnecting reconciles changes against the last acknowledged
 snapshot, imports server changes, and retains local changes made during the request.
 Auctions require a connection and wait for inventory synchronization before trading.

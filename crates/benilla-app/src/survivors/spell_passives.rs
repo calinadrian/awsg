@@ -162,10 +162,12 @@ pub(super) fn on_hit(
             .is_some_and(|m| m.faerie && run.elapsed >= m.arc_at)
     {
         if let Some(p) = numbers(run, "faerie_fire") {
+            // The arc gets Full Belly when it lands, like the hit that triggered it.
+            let damage = (damage / run.full_belly_multiplier() * 0.8).min(p.dmg);
             run.passives.bursts.push(Burst {
                 center: pos,
                 radius: p.radius,
-                damage: (damage * 0.8).min(p.dmg),
+                damage,
                 spell: 770,
                 depth: 1,
                 exclude: Some(target),

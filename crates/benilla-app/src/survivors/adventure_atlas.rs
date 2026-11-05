@@ -163,9 +163,9 @@ static PLACES: &[Place] = &[
     place("Tanaris", Both, Plain, "The desert road",
         "Beyond the Scarlet cathedral, the desert road splits toward Un'Goro and the Sandfury dungeon of Zul'Farrak."),
     place("Burning Steppes", Both, Plain, "The road to the Core",
-        "Blackrock's armies guard the volcanic wastes. Complete Attunement to the Core here to open the raid at class level 50."),
+        "Clear the Burning Steppes to open Molten Core at permanent class level 50."),
     place("Swamp of Sorrows", Both, Plain, "The brood mother's trail",
-        "Follow the trail through the swamp. Complete The Brood Mother's Trail here to open Onyxia's Lair at class level 50."),
+        "Clear the Swamp of Sorrows to open Onyxia's Lair at permanent class level 50."),
     place("Zul'Farrak", Both, Screen(209), "The Sandfury stronghold",
         "A dungeon branch from Tanaris: break the Sandfury's hold on their desert city."),
 ];

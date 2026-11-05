@@ -349,6 +349,9 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
         let absorbed = dmg.min(run.shield);
         run.shield -= absorbed;
         dmg -= absorbed;
+        if run.shield <= 0.0 {
+            run.talents.broken_shield = Some(run.shield_spell);
+        }
     }
     run.hp -= dmg;
     dmg
@@ -367,11 +370,17 @@ pub(super) fn hero_vitals(
 ) {
     let dt = time.delta_secs();
     let stats = run.stats();
-    if std::mem::take(&mut run.struck) && run.hp > 0.0 && run.dead_t.is_none() {
-        super::talents::trigger(&mut run, &mut rng, 8, None);
-    }
+    let struck = std::mem::take(&mut run.struck);
+    let broken_shield = run.talents.broken_shield.take();
     if run.hp > 0.0 && run.dead_t.is_none() {
-        super::talents::low_health(&mut run, &mut rng);
+        use super::talents::{trigger, ProcTrigger};
+        if struck {
+            trigger(&mut run, &mut rng, ProcTrigger::MeleeTaken, 0, None);
+        }
+        if let Some(spell) = broken_shield {
+            trigger(&mut run, &mut rng, ProcTrigger::ShieldBreak, spell, None);
+        }
+        trigger(&mut run, &mut rng, ProcTrigger::LowHealth, 0, None);
     }
     let Ok((entity, guid, mut store, mut marks)) = hero.single_mut() else {
         return;

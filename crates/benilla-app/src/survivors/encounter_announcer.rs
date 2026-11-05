@@ -121,7 +121,7 @@ fn words(font: &Handle<Font>, size: f32, color: Color) -> impl Bundle {
             font_size: size,
             ..default()
         },
-        TextLayout::new(Justify::Left, LineBreak::NoWrap),
+        TextLayout::new(Justify::Left, LineBreak::WordBoundary),
         TextColor(color),
         TextShadow {
             offset: Vec2::ONE,
@@ -152,12 +152,11 @@ fn create(commands: &mut Commands, root: Entity, font: &Handle<Font>) {
         let seat = commands
             .spawn((
                 Node {
-                    height: Val::Px(20.0),
                     width: Val::Percent(100.0),
                     flex_shrink: 0.0,
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(4.0),
-                    padding: UiRect::axes(Val::Px(2.0), Val::Px(1.0)),
+                    padding: UiRect::axes(Val::Px(2.0), Val::Px(3.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     overflow: Overflow::clip(),
                     ..default()
@@ -200,28 +199,20 @@ fn create(commands: &mut Commands, root: Entity, font: &Handle<Font>) {
             ))
             .id();
         commands.entity(symbol).add_children(&[icon, diamond]);
-        let boss = commands
-            .spawn((
-                words(font, 8.0, col::TEXT_DIM),
-                Node {
-                    max_width: Val::Px(69.0),
-                    flex_shrink: 0.0,
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-            ))
+        let labels = commands
+            .spawn(Node {
+                flex_grow: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_width: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
+                row_gap: Val::Px(1.0),
+                ..default()
+            })
             .id();
-        let action = commands
-            .spawn((
-                words(font, 9.0, col::TEXT_HI),
-                Node {
-                    flex_grow: 1.0,
-                    min_width: Val::Px(0.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-            ))
-            .id();
+        let boss = commands.spawn(words(font, 8.0, col::TEXT_DIM)).id();
+        let action = commands.spawn(words(font, 9.0, col::TEXT_HI)).id();
+        commands.entity(labels).add_children(&[boss, action]);
         let timer = commands
             .spawn((
                 words(font, 9.0, col::TEXT_HI),
@@ -259,7 +250,7 @@ fn create(commands: &mut Commands, root: Entity, font: &Handle<Font>) {
         commands.entity(track).add_child(fill);
         commands
             .entity(seat)
-            .add_children(&[symbol, boss, action, timer, track]);
+            .add_children(&[symbol, labels, timer, track]);
         commands.entity(panel).add_child(seat);
         rows.push(Row {
             seat,

@@ -28,25 +28,23 @@ Both raids require permanent **class level 50**, independent of a run's level.
 This threshold is the initial implementation choice for the graph's "very high level" gate;
 the class level cap is 52.
 
-| Raid | Required zone clear | Quest to accept and turn in |
-|---|---|---|
-| Onyxia's Lair | Swamp of Sorrows | The Brood Mother's Trail |
-| Molten Core | Burning Steppes | Attunement to the Core |
+| Raid | Required zone clear |
+|---|---|
+| Onyxia's Lair | Swamp of Sorrows |
+| Molten Core | Burning Steppes |
 
-Accept the attunement in the quest log before clearing its zone, then turn it in.
-The quest is stored in the hero's offline-capable inventory and synchronized with the realm.
-Co-op hosts need the story route unlocked; every raid participant needs their own
-class level and attunement. Co-op guests can follow the host through ordinary zones.
+Co-op hosts need the story route unlocked. Every raid participant needs their own
+permanent class level 50. Co-op guests can follow the host through ordinary zones.
 
-The co-op relay needs the updated arena and quest catalogs for the new zones.
+The co-op relay needs the updated arena and achievement catalogs for the new zones.
 Its arena list is shared with the client in `crates/asr-coop/src/story.rs`.
 
 ## Decisions still needed
 
 - Armor selections per zone. Import only the armor the user selects for that zone.
 - New-zone equipment rewards. Their tables are empty pending those selections;
-  materials, quest rewards, and clear records work independently of equipment drops.
-- Further tuning of encounter rosters, difficulty, and quest details.
+  materials and clear records work independently of equipment drops.
+- Further tuning of encounter rosters and difficulty.
 
 ## Source diagram
 

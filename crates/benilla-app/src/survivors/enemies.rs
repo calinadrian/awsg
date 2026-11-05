@@ -253,7 +253,7 @@ pub(super) struct Loot {
     pub xp: u32,
     pub boss: bool,
     pub boss_name: Option<String>,
-    /// The creature's roster name, for quest and achievement counts.
+    /// The creature's roster name, for achievement counts.
     pub name: &'static str,
     pub spawn_cost: f32,
     pub roaming_elite: bool,

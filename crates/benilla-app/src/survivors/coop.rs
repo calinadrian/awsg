@@ -156,7 +156,7 @@ enum Packet {
         equipment_kills: [u32; 3],
         #[serde(default)]
         boss_loot: Vec<String>,
-        /// Kills by creature name, `[normal, elite]`, for every player's quests.
+        /// Kills by creature name, `[normal, elite]`, for every player's achievements.
         #[serde(default)]
         tally: Vec<(String, [u32; 2])>,
         /// Each guest's last applied `seq`, so guests can drop acknowledged hits.
@@ -688,7 +688,7 @@ fn receive(
     mut commands: Commands,
     mut coop: ResMut<Coop>,
     mut selection: ResMut<Selection>,
-    (gear, mut talents): (Res<super::inventory::Equipment>, ResMut<super::talents::TalentBook>),
+    mut talents: ResMut<super::talents::TalentBook>,
     mut run: ResMut<Run>,
     phase: Res<State<Phase>>,
     mut next: ResMut<NextState<Phase>>,
@@ -787,7 +787,7 @@ fn receive(
                 selection.look = Some(0);
                 selection.map = room.map;
                 selection.version += 1;
-                super::progress::refresh_story(&mut selection, &gear, &coop, &mut talents);
+                super::progress::refresh_story(&mut selection, &mut talents);
                 if !selection.raid_ready(selection.map_def().name)
                     || (coop.peer == 0 && !selection.unlocked(room.map)) {
                     let reason = selection.unlock_hint(selection.map_def().name);

@@ -1,12 +1,8 @@
-//! Quests and achievements: what the realm offers, and the rules that move a hero's progress
-//! along. Pure data and arithmetic, so the realm service, a solo game and the menus share it;
-//! the [`crate::ledger`] decides which progress it believes.
+//! Achievement definitions and progress shared by the realm and the solo game.
 use crate::economy::Inventory;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// How many quests a hero may carry at once.
-pub const MAX_ACTIVE: usize = 5;
 /// The most progress lines one reward batch may carry.
 pub const MAX_TICKS: usize = 64;
 
@@ -82,40 +78,6 @@ impl Objective {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct QuestReward {
-    #[serde(default)]
-    pub gold: u64,
-    /// This many of each material the quest's zone drops.
-    #[serde(default)]
-    pub materials: u32,
-    /// Achievement points.
-    #[serde(default)]
-    pub points: u32,
-    /// One of the best items the quest's zone drops that the hero's class can use.
-    #[serde(default)]
-    pub item: bool,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct QuestDef {
-    /// Never changes once shipped: heroes' logs refer to it.
-    pub id: String,
-    /// The economy zone the quest is given in; its objectives count there.
-    pub zone: String,
-    pub title: String,
-    pub giver: String,
-    pub text: String,
-    /// Quests that must be turned in before this one is offered.
-    #[serde(default)]
-    pub requires: Vec<String>,
-    /// A bounty: offered again once turned in.
-    #[serde(default)]
-    pub repeatable: bool,
-    pub objectives: Vec<Objective>,
-    pub reward: QuestReward,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AchievementDef {
     /// Never changes once shipped.
@@ -133,14 +95,13 @@ pub struct AchievementDef {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct QuestCatalog {
-    /// Raised whenever quests or achievements change; heroes saved under an older one are
+    /// Raised whenever achievement definitions change; heroes saved under an older one are
     /// brought forward on their next transaction.
     pub revision: u32,
-    pub quests: Vec<QuestDef>,
     pub achievements: Vec<AchievementDef>,
 }
 
-/// A quest in a hero's log, with one count per objective.
+/// An entry in a legacy quest log.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestState {
     pub id: String,
@@ -152,9 +113,6 @@ impl QuestCatalog {
         serde_json::from_str(include_str!("../assets/quest_catalog.json"))
             .expect("valid quest catalog")
     }
-    pub fn quest(&self, id: &str) -> Option<&QuestDef> {
-        self.quests.iter().find(|q| q.id == id)
-    }
     pub fn achievement(&self, id: &str) -> Option<&AchievementDef> {
         self.achievements.iter().find(|a| a.id == id)
     }
@@ -162,46 +120,9 @@ impl QuestCatalog {
     pub fn conquest(&self, zone: &str) -> Option<&AchievementDef> {
         self.achievement(&format!("conquer.{zone}"))
     }
-    /// Whether every objective of a quest in the log is done.
-    pub fn complete(&self, state: &QuestState) -> bool {
-        self.quest(&state.id).is_some_and(|def| {
-            def.objectives
-                .iter()
-                .enumerate()
-                .all(|(i, o)| state.progress.get(i).copied().unwrap_or(0) >= o.count)
-        })
-    }
-    /// Whether a hero may take this quest now: `Err` says why not.
-    pub fn offer(&self, inventory: &Inventory, id: &str) -> Result<&QuestDef, String> {
-        let def = self.quest(id).ok_or("That quest is no longer offered")?;
-        if inventory.quests.iter().any(|q| q.id == id) {
-            return Err("That quest is already in your log".into());
-        }
-        if !def.repeatable && inventory.quests_done.contains_key(id) {
-            return Err("You have already completed that quest".into());
-        }
-        if let Some(missing) = def.requires.iter().find(|r| !inventory.quests_done.contains_key(*r)) {
-            let title = self.quest(missing).map_or(missing.as_str(), |q| q.title.as_str());
-            return Err(format!("Complete \u{201c}{title}\u{201d} first"));
-        }
-        if inventory.quests.len() >= MAX_ACTIVE {
-            return Err(format!("Your quest log is full ({MAX_ACTIVE} quests)"));
-        }
-        Ok(def)
-    }
-
-    /// Apply a run's ticks to the hero's active quests and unearned achievements. Earned
+    /// Apply a run's ticks to unearned achievements. Earned
     /// achievements pay their points; returns their ids.
     pub fn progress(&self, inventory: &mut Inventory, zone: &str, class: u8, ticks: &[Tick], now: u64) -> Vec<String> {
-        for state in &mut inventory.quests {
-            let Some(def) = self.quest(&state.id) else { continue };
-            state.progress.resize(def.objectives.len(), 0);
-            for tick in ticks {
-                for (objective, value) in def.objectives.iter().zip(state.progress.iter_mut()) {
-                    objective.advance(zone, class, tick, value);
-                }
-            }
-        }
         for def in &self.achievements {
             if def.criteria.is_empty() || inventory.achievements.contains_key(&def.id) {
                 continue;
@@ -263,7 +184,7 @@ impl QuestCatalog {
                 }
             }
         }
-        inventory.quests.retain(|state| self.quest(&state.id).is_some());
+        inventory.quests.clear();
         inventory.achievement_progress.retain(|id, _| self.achievement(id).is_some());
         // Meta-achievements over migrated conquests; paid like any other.
         self.earn(inventory, now);
@@ -293,18 +214,6 @@ mod tests {
         let catalog = QuestCatalog::load();
         let zones = crate::economy::Catalog::load().zones;
         let mut ids = std::collections::BTreeSet::new();
-        for quest in &catalog.quests {
-            assert!(ids.insert(&quest.id), "duplicate quest {}", quest.id);
-            assert!(zones.contains_key(&quest.zone), "{} has unknown zone {}", quest.id, quest.zone);
-            assert!(!quest.objectives.is_empty(), "{}", quest.id);
-            for objective in &quest.objectives {
-                assert_eq!(objective.zone, quest.zone, "{} counts outside its zone", quest.id);
-                assert!(objective.count > 0);
-            }
-            for r in &quest.requires {
-                assert!(catalog.quest(r).is_some(), "{} requires unknown {r}", quest.id);
-            }
-        }
         for def in &catalog.achievements {
             assert!(ids.insert(&def.id), "duplicate achievement {}", def.id);
             assert!(!def.criteria.is_empty() || !def.requires.is_empty(), "{} can never be earned", def.id);

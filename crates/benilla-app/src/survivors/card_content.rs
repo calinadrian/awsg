@@ -98,7 +98,7 @@ pub(super) fn describe(choice: Choice, run: &Run, card: &CardText) -> Content {
     match choice {
         Choice::NewAbility(def, rarity) => {
             let owned = Owned::new(def, rarity);
-            let p = abilities::parameters(&owned, run);
+            let p = abilities::display_parameters(&owned, run);
             let (label, value) = if def.kind == Kind::Buff {
                 (buff_label(def), format!("+{}%", number(p.dmg * 100.)))
             } else if p.dmg > 0.0 {
@@ -138,8 +138,8 @@ pub(super) fn describe(choice: Choice, run: &Run, card: &CardText) -> Content {
             next.upgrade(rarity, axes);
             result.tag = Some(Tag::Rank(format!("RANK {} → {}", owned.level, next.level)));
             result.rows = spell_rows(
-                &abilities::parameters(owned, run),
-                &abilities::parameters(&next, run),
+                &abilities::display_parameters(owned, run),
+                &abilities::display_parameters(&next, run),
                 owned.def,
             );
             // The prose reads at the rank the card grants, as the rows end on.
@@ -179,6 +179,17 @@ pub(super) fn describe(choice: Choice, run: &Run, card: &CardText) -> Content {
                     result.pips = Some((held, 1, super::food::SLOTS));
                 }
             }
+        }
+        Choice::FullBelly => {
+            let step = u64::from(super::food::FULL_BELLY_DAMAGE_PERCENT);
+            let bonus = u64::from(run.full_belly) * step;
+            result.kind = "FOOD BONUS".into();
+            result.rows.push(StatRow {
+                label: "DAMAGE".into(),
+                before: (bonus > 0).then(|| format!("+{bonus}%")),
+                after: format!("+{}%", bonus + step),
+            });
+            result.footer = "Lasts for the rest of this run".into();
         }
         Choice::Gold => {
             result.kind = "TREASURE".into();

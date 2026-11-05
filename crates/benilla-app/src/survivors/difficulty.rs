@@ -43,18 +43,11 @@ pub(super) fn requires(zone: &str) -> &'static [&'static str] {
     }
 }
 
-/// Raid attunements use permanent class level (the current cap is 52), never a run's level.
+/// Raid access uses permanent class level, separate from the zone clear requirements.
 pub(super) const RAID_LEVEL: u32 = 50;
-pub(super) fn attunement(zone: &str) -> Option<(&'static str, &'static str)> {
-    match zone {
-        "Onyxia's Lair" => Some(("story.onyxia_attunement", "The Brood Mother's Trail")),
-        "Molten Core" => Some(("story.molten_attunement", "Attunement to the Core")),
-        _ => None,
-    }
-}
 
-pub(super) fn raid_ready(zone: &str, level: u32, quests: &std::collections::BTreeSet<String>) -> bool {
-    attunement(zone).is_none_or(|(id, _)| level >= RAID_LEVEL && quests.contains(id))
+pub(super) fn is_raid(zone: &str) -> bool {
+    matches!(zone, "Onyxia's Lair" | "Molten Core")
 }
 
 /// Whether the account has cleared the way to `zone`.
@@ -208,13 +201,20 @@ mod tests {
     }
 
     #[test]
-    fn raids_need_both_permanent_level_and_their_own_turned_in_quest() {
+    fn raids_require_permanent_class_level() {
+        let class = super::super::data::CLASSES[0].id;
+        let mut selection = super::super::Selection {
+            class: Some(0),
+            story_class: Some(class),
+            class_level: super::RAID_LEVEL - 1,
+            ..Default::default()
+        };
         for raid in ["Onyxia's Lair", "Molten Core"] {
-            let (id, _) = super::attunement(raid).unwrap();
-            let done = std::iter::once(id.to_string()).collect();
-            assert!(!super::raid_ready(raid, super::RAID_LEVEL - 1, &done));
-            assert!(!super::raid_ready(raid, 52, &Default::default()));
-            assert!(super::raid_ready(raid, super::RAID_LEVEL, &done));
+            assert!(!selection.raid_ready(raid), "{raid}");
+        }
+        selection.class_level = super::RAID_LEVEL;
+        for raid in ["Onyxia's Lair", "Molten Core"] {
+            assert!(selection.raid_ready(raid), "{raid}");
         }
     }
 }

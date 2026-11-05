@@ -434,6 +434,8 @@ def build():
         objects = package.table('GameObjectDisplayInfo')
         for display in (114, 259, 2614):  # Healing food, caches, gold.
             package.add(objects.text(objects.by_id[display][1]), f'loot object {display}')
+        # Morgan's landmine is spawned at runtime and has no arena placement to pull it in.
+        package.add(objects.text(objects.by_id[5791][1]), 'Morgan landmine')
 
         for table_name in ('SpellVisualEffectName', 'SpellChainEffects', 'LightSkybox'):
             for name in package.table(table_name).strings.split(b'\0'):

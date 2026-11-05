@@ -22,6 +22,7 @@ pub(super) enum Action {
     Select(u64),
     Listing(u64),
     Filter(usize),
+    BagClassOnly,
     SlotFilter(Option<usize>),
     Equip(String),
     Unequip,
@@ -56,13 +57,6 @@ pub(super) enum Action {
     LootSource,
     Search,
     ClearSearch,
-    /// Open a quest in the quest log.
-    QuestPick(String),
-    /// Offer quests from one economy zone, or from all the hero's zones.
-    QuestZone(Option<String>),
-    Accept(String),
-    Abandon(String),
-    TurnIn(String),
     /// Show an achievement category; 0 is the summary.
     Category(usize),
 }
@@ -84,9 +78,10 @@ struct ItemTipRoot;
 struct ScrollMemory {
     positions: [Vec2; 8],
     #[allow(clippy::type_complexity)]
-    query: Option<(Option<usize>, Pane, usize, Option<usize>, String, (Option<u8>, Option<usize>, usize, usize), (Option<String>, usize), (Option<u8>, u8, Option<String>, Option<usize>, usize, bool))>,
+    query: Option<(Option<usize>, Pane, (usize, bool), Option<usize>, String, (Option<u8>, Option<usize>, usize, usize), usize, (Option<u8>, u8, Option<String>, Option<usize>, usize, bool))>,
 }
 const BAG_MIN_SLOTS: usize = 50;
+const INVENTORY_EXTRA_ROWS: usize = 3;
 /// A bag slot's target size and the gap between slots, in canvas units.
 const BAG_CELL: f32 = 46.;
 const BAG_GAP: f32 = 5.;
@@ -452,7 +447,9 @@ fn input(
             if pane == Pane::Drops {
                 gear.loot_class = Some(class);
             }
-            open_journal(&mut gear, &selection, pane);
+            if pane == Pane::Achievements {
+                gear.category = 0;
+            }
         }
         Action::Close => {
             gear.open = false;
@@ -468,19 +465,10 @@ fn input(
             if pane == Pane::Drops {
                 gear.loot_class = Some(class);
             }
-            open_journal(&mut gear, &selection, pane);
+            if pane == Pane::Achievements {
+                gear.category = 0;
+            }
         }
-        Action::QuestPick(id) => gear.quest = Some(id),
-        Action::QuestZone(zone) => {
-            gear.quest_zone = zone;
-            gear.quest = None;
-        }
-        Action::Accept(quest) => {
-            gear.quest = Some(quest.clone());
-            trade = Some(Trade::AcceptQuest { quest });
-        }
-        Action::Abandon(quest) => trade = Some(Trade::AbandonQuest { quest }),
-        Action::TurnIn(quest) => trade = Some(Trade::TurnInQuest { quest }),
         Action::Category(category) => gear.category = category,
         Action::Select(id) => {
             gear.selected = Some(id);
@@ -592,6 +580,20 @@ fn input(
         Action::Filter(filter) => {
             gear.filter = filter;
         }
+        Action::BagClassOnly => {
+            gear.bag_class_only = !gear.bag_class_only;
+            if gear.bag_class_only
+                && item.as_ref().is_some_and(|item| {
+                    gear.catalog
+                        .definition(&item.definition)
+                        .is_none_or(|definition| !definition.can_use(class))
+                })
+            {
+                gear.selected = None;
+                gear.confirm = None;
+                *last_pick = None;
+            }
+        }
         Action::SlotFilter(slot) => {
             gear.slot_filter = slot;
         }
@@ -694,10 +696,9 @@ fn input(
     }
     gear.revision += 1;
 }
-/// `WOW_SURVIVORS_ACCOUNT_PREVIEW=quests,achievements` opens the account window on each named
+/// `WOW_SURVIVORS_ACCOUNT_PREVIEW=inventory,achievements` opens the account window on each named
 /// tab in turn once the menu has settled, for layout checks, and closes it after the last; with
-/// `WOW_SURVIVORS_SHOTS=<dir>` each tab is saved there. It takes a few of the zone's quests
-/// first so the log has something in it: point `BENILLA_HOME` at a scratch folder.
+/// `WOW_SURVIVORS_SHOTS=<dir>` each tab is saved there.
 #[derive(Resource)]
 struct Preview {
     panes: Vec<(Pane, String)>,
@@ -705,7 +706,6 @@ struct Preview {
     t: f32,
     shots: Option<std::path::PathBuf>,
     opened: bool,
-    accepted: bool,
 }
 impl Preview {
     fn from_env() -> Option<Self> {
@@ -719,7 +719,6 @@ impl Preview {
                     "auction" => Pane::Auction,
                     "drops" => Pane::Drops,
                     "items" | "viewer" => Pane::Items,
-                    "quests" => Pane::Quests,
                     "achievements" => Pane::Achievements,
                     _ => return None,
                 };
@@ -732,7 +731,6 @@ impl Preview {
             t: -3.,
             shots: std::env::var_os("WOW_SURVIVORS_SHOTS").map(std::path::PathBuf::from),
             opened: false,
-            accepted: false,
         })
     }
 }
@@ -743,14 +741,15 @@ fn preview(
     phase: Res<State<Phase>>,
     font: Option<Res<HudFont>>,
     selection: Res<Selection>,
-    coop: Res<Coop>,
     mut gear: ResMut<Equipment>,
     mut preview: ResMut<Preview>,
 ) {
     if *phase.get() != Phase::Menu || font.is_none() || preview.index > preview.panes.len() {
         return;
     }
-    let Some(class) = selection.class_def().map(|c| c.id) else { return };
+    if selection.class_def().is_none() {
+        return;
+    }
     preview.t += time.delta_secs();
     if preview.t < 0. {
         return;
@@ -765,25 +764,10 @@ fn preview(
         preview.opened = true;
         gear.open = true;
         gear.pane = pane;
-        open_journal(&mut gear, &selection, pane);
-        gear.revision += 1;
-    }
-    if !preview.accepted && gear.view(&gear.realm(&coop), class).is_some() {
-        preview.accepted = true;
-        let url = gear.realm(&coop);
-        let zone = super::quests::zone_id(&gear.catalog, selection.stage_def().name).map(str::to_owned);
-        let quests: Vec<_> = gear
-            .catalog
-            .quests
-            .quests
-            .iter()
-            .filter(|q| Some(&q.zone) == zone.as_ref() && q.requires.is_empty())
-            .take(3)
-            .map(|q| q.id.clone())
-            .collect();
-        for quest in quests {
-            gear.action(&url, class, Trade::AcceptQuest { quest });
+        if pane == Pane::Achievements {
+            gear.category = 0;
         }
+        gear.revision += 1;
     }
     if preview.t >= 4. {
         if let Some(dir) = &preview.shots {
@@ -795,20 +779,6 @@ fn preview(
         preview.index += 1;
         preview.t = 0.;
         preview.opened = false;
-    }
-}
-/// Opening the quest log starts on the zone the hero is set to play; achievements on the
-/// summary.
-fn open_journal(gear: &mut Equipment, selection: &Selection, pane: Pane) {
-    match pane {
-        Pane::Quests => {
-            gear.quest = None;
-            gear.quest_zone = super::quests::zone_id(&gear.catalog, selection.map_def().name)
-                .filter(|zone| journal_zones(gear, selection).any(|(id, _)| id == zone))
-                .map(str::to_owned);
-        }
-        Pane::Achievements => gear.category = 0,
-        _ => {}
     }
 }
 fn search_input(
@@ -1369,7 +1339,7 @@ fn zone_loot(
             p.spawn(scroller(4)).with_children(|p| {
                 if items.is_empty() {
                     let message = if zone.equipment.is_empty() && zone.boss_drops.is_empty() {
-                        "Equipment rewards have not been assigned to this zone yet. Materials and quest rewards are available."
+                        "Equipment rewards have not been assigned to this zone yet. Materials are available."
                     } else { "No drops match these filters." };
                     skin::label(p, f, message, size::BODY, skin::TEXT);
                     return;
@@ -1442,20 +1412,6 @@ fn zone_loot(
     });
 }
 
-// The zones the shown race may enter, with their economy id and table.
-pub(super) fn journal_zones<'a>(
-    gear: &'a Equipment,
-    selection: &Selection,
-) -> impl Iterator<Item = (&'a String, &'a asr_coop::economy::Zone)> {
-    let race = selection
-        .look
-        .and_then(|i| selection.looks.get(i))
-        .map_or(1, |look| look.1);
-    super::data::MAPS
-        .iter()
-        .filter(move |map| super::races::can_enter(race, map.name))
-        .filter_map(move |map| gear.catalog.zones.iter().find(|(_, zone)| zone.name == map.name))
-}
 pub(super) fn pane_node(weight: f32) -> Node {
     Node {
         flex_grow: weight,
@@ -1495,6 +1451,7 @@ fn bag_grid(
     columns: usize,
 ) {
     let query = gear.search.to_lowercase();
+    let class = hero.map_or(0, |h| h.inventory.class);
     let items: Vec<_> = hero
         .into_iter()
         .flat_map(|h| &h.inventory.items)
@@ -1507,16 +1464,21 @@ fn bag_grid(
                 4 => d.armor.as_deref() == Some("plate"),
                 _ => true,
             };
-            (!i.equipped_for(hero.map_or(0, |h| h.inventory.class))
+            (!i.equipped_for(class)
                 && (market
                     || (category
+                        && (!gear.bag_class_only || d.can_use(class))
                         && slot_matches(gear.slot_filter, &d.slot)
                         && d.name.to_lowercase().contains(&query))))
             .then_some((i, d))
         })
         .collect();
-    // Always show 50 slots; additional owned items extend the grid without a storage cap.
-    let slots = items.len().max(BAG_MIN_SLOTS);
+    let min_slots = if market {
+        BAG_MIN_SLOTS
+    } else {
+        BAG_MIN_SLOTS + INVENTORY_EXTRA_ROWS * columns
+    };
+    let slots = items.len().max(min_slots);
     p.spawn(scroller(1)).with_children(|p| {
         p.spawn(Node {
             width: Val::Percent(100.),
@@ -1874,12 +1836,11 @@ fn search_box(p: &mut ChildSpawnerCommands, f: &Handle<Font>, gear: &Equipment) 
     });
 }
 /// The account window's tabs, in bar order.
-const PANES: [(Pane, &str); 6] = [
+const PANES: [(Pane, &str); 5] = [
     (Pane::Inventory, "Inventory"),
     (Pane::Auction, "Auction House"),
     (Pane::Drops, "Zone Drops"),
     (Pane::Items, "Item Viewer"),
-    (Pane::Quests, "Quests"),
     (Pane::Achievements, "Achievements"),
 ];
 /// The window's frame inside the canvas: 94% wide up to this, padded by [`WINDOW_PAD`].
@@ -2038,9 +1999,6 @@ fn draw(
                             zone_loot(p, f, &gear, selection.map_def().name);
                         });
                     }
-                    Pane::Quests => {
-                        super::journal_ui::quests(body, f, &gear, &selection, hero.map(|hero| &hero.inventory));
-                    }
                     Pane::Achievements => {
                         super::journal_ui::achievements(body, f, &gear, hero.map(|hero| &hero.inventory), inner);
                     }
@@ -2080,6 +2038,13 @@ fn draw(
                                         {
                                             choice(p, f, name, Action::Filter(i), gear.filter == i);
                                         }
+                                        choice(
+                                            p,
+                                            f,
+                                            "My class only",
+                                            Action::BagClassOnly,
+                                            gear.bag_class_only,
+                                        );
                                     });
                                     search_box(p, f, &gear);
                                 }
@@ -2226,11 +2191,11 @@ fn scroll(
     let query = (
         selection.class,
         gear.pane,
-        gear.filter,
+        (gear.filter, gear.bag_class_only),
         gear.slot_filter,
         gear.search.clone(),
         (gear.loot_class, gear.loot_slot, gear.loot_quality, gear.loot_source),
-        (gear.quest_zone.clone(), gear.category),
+        gear.category,
         (gear.viewer_race, gear.viewer_class, gear.viewer_zone.clone(), gear.viewer_slot, gear.viewer_quality, gear.viewer_sort_zone),
     );
     let reset = memory.query.as_ref() != Some(&query);

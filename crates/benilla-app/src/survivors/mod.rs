@@ -374,10 +374,9 @@ pub(super) struct Selection {
     pub features: std::collections::HashMap<(usize, u8, u8), appearance::Features>,
     /// The zones whose final boss this player has beaten, kept by [`progress`].
     pub cleared: std::collections::BTreeSet<String>,
-    /// Current class/realm's raid eligibility, refreshed from talents and the quest ledger.
+    /// The selected class and permanent level used for raid eligibility.
     pub story_class: Option<u8>,
     pub class_level: u32,
-    pub story_quests: std::collections::BTreeSet<String>,
 }
 
 impl Selection {
@@ -396,9 +395,9 @@ impl Selection {
     }
 
     pub fn raid_ready(&self, zone: &str) -> bool {
-        difficulty::attunement(zone).is_none() || (
+        !difficulty::is_raid(zone) || (
             self.class_def().is_some_and(|class| self.story_class == Some(class.id))
-                && difficulty::raid_ready(zone, self.class_level, &self.story_quests)
+                && self.class_level >= difficulty::RAID_LEVEL
         )
     }
 
@@ -407,13 +406,8 @@ impl Selection {
         if !difficulty::unlocked(zone, &self.cleared) {
             needs.push(difficulty::unlock_hint(zone));
         }
-        if let Some((id, title)) = difficulty::attunement(zone) {
-            if self.class_level < difficulty::RAID_LEVEL {
-                needs.push(format!("Class level {} (current {})", difficulty::RAID_LEVEL, self.class_level));
-            }
-            if !self.story_quests.contains(id) {
-                needs.push(format!("Complete {title}"));
-            }
+        if difficulty::is_raid(zone) && self.class_level < difficulty::RAID_LEVEL {
+            needs.push(format!("Class level {} (current {})", difficulty::RAID_LEVEL, self.class_level));
         }
         needs.join(" · ")
     }
@@ -577,7 +571,7 @@ pub(super) struct Run {
     pub equipment_kills: [u32; 3],
     /// Boss names whose kills are ready to resolve through the zone's named loot table.
     pub boss_loot: Vec<String>,
-    /// Kills by creature name, `[normal, elite]`, toward quests and achievements.
+    /// Kills by creature name, `[normal, elite]`, toward achievements.
     pub tally: std::collections::BTreeMap<String, [u32; 2]>,
     pub thorns: f32,
     pub thorns_t: f32,
@@ -596,6 +590,7 @@ pub(super) struct Run {
     pub jewelry: Vec<jewelry::Jewel>,
     /// The chest food carried, one slot per kind.
     pub food: food::Slots,
+    pub full_belly: u32,
     pub gold: u32,
     pub chest_cost: u32,
     pub revives_used: u32,
@@ -684,6 +679,7 @@ impl Default for Run {
             test_immortal: false,
             jewelry: Vec::new(),
             food: [None; food::SLOTS],
+            full_belly: 0,
             gold: 0,
             chest_cost: 20,
             revives_used: 0,
@@ -848,14 +844,18 @@ impl Run {
         s
     }
 
+    pub fn full_belly_multiplier(&self) -> f32 {
+        1.0 + self.full_belly as f32 * (food::FULL_BELLY_DAMAGE_PERCENT as f32 / 100.0)
+    }
+
     /// Gold find: jewelry and the race.
     pub fn gold_find(&self) -> f32 {
         self.jewel_stat(13) + races::bonus(self.race, Bonus::Gold)
     }
 
-    /// Luck, which lifts reward rarity: jewelry and the race.
+    /// Luck, which lifts reward rarity.
     pub fn luck(&self) -> f32 {
-        self.jewel_stat(14) + races::bonus(self.race, Bonus::Luck)
+        self.jewel_stat(14) + races::bonus(self.race, Bonus::Luck) + self.talents.stat(12)
     }
 
     pub fn jewel_stat(&self, stat: u8) -> f32 {

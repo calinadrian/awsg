@@ -56,7 +56,6 @@ pub(super) enum Pane {
     Auction,
     Drops,
     Items,
-    Quests,
     Achievements,
 }
 /// A newly credited item, never a refresh or a replay of the saved inventory.
@@ -95,14 +94,11 @@ pub(super) struct Equipment {
     pub selected: Option<u64>,
     pub listing: Option<u64>,
     pub filter: usize,
+    pub bag_class_only: bool,
     /// An index into `SLOTS`: the bags and the market show only items for that slot.
     pub slot_filter: Option<usize>,
     pub price: u64,
     pub confirm: Option<Action>,
-    /// The quest open in the quest log.
-    pub quest: Option<String>,
-    /// The economy zone the quest log offers quests from; all the hero's zones when `None`.
-    pub quest_zone: Option<String>,
     /// The achievement category shown: 0 for the summary, then one per category.
     pub category: usize,
     #[cfg(not(target_arch = "wasm32"))]
@@ -238,11 +234,10 @@ impl Default for Equipment {
             selected: None,
             listing: None,
             filter: 0,
+            bag_class_only: false,
             slot_filter: None,
             price: 10,
             confirm: None,
-            quest: None,
-            quest_zone: None,
             category: 0,
             #[cfg(not(target_arch = "wasm32"))]
             connection: None,
@@ -431,33 +426,11 @@ impl Equipment {
         hero.inventory.class = class;
         Some(hero)
     }
-    /// The hero's active quests in `zone` as the in-run tracker shows them, with this run's
-    /// unsent kills folded in, and the achievements the hero holds.
-    pub fn journal(
-        &self,
-        coop: &Coop,
-        run: &Run,
-        zone: &str,
-    ) -> Option<(Vec<super::quests::Line>, &std::collections::BTreeMap<String, u64>)> {
-        let hero = self.hero(&self.realm(coop), run.class.id)?;
-        let lines = super::quests::live(&self.catalog, &hero.inventory, zone, run.class.id, run, &self.tallied, self.boss_counted);
-        Some((lines, &hero.inventory.achievements))
-    }
     pub fn busy(&self) -> bool {
         self.read_only
     }
     pub fn online(&self) -> bool {
         self.ledger.is_some() && !self.read_only
-    }
-    /// Whether an accept, abandon or turn-in for this quest is still waiting on the ledger.
-    pub fn quest_busy(&self, quest: &str) -> bool {
-        self.read_only
-            || self.save.pending.iter().any(|job| match &job.request.action {
-                Action::AcceptQuest { quest: pending }
-                | Action::AbandonQuest { quest: pending }
-                | Action::TurnInQuest { quest: pending } => pending == quest,
-                _ => false,
-            })
     }
     pub fn item_busy(&self, item: u64) -> bool {
         self.read_only

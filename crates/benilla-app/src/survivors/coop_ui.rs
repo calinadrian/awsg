@@ -106,7 +106,6 @@ fn controls(
     mut coop: ResMut<Coop>,
     mut editor: ResMut<Editor>,
     mut selection: ResMut<Selection>,
-    gear: Res<super::inventory::Equipment>,
     mut talents: ResMut<super::talents::TalentBook>,
     buttons: Query<(Entity, &Action, &skin::Control)>,
     clicks: Res<GlueClicks>,
@@ -118,7 +117,7 @@ fn controls(
     fields: super::text_edit::FieldQuery,
     real: Res<Time<Real>>,
 ) {
-    super::progress::refresh_story(&mut selection, &gear, &coop, &mut talents);
+    super::progress::refresh_story(&mut selection, &mut talents);
     // Deferred actions survive the asynchronous connection handshake.
     if coop.connected {
         if let Some(pending) = editor.pending.take() {

@@ -114,7 +114,6 @@ fn header(ui: &mut ChildSpawnerCommands, f: &Handle<Font>) {
             use super::inventory_ui::Action;
             skin::tab(p, f, "Inventory", Action::Open(Pane::Inventory));
             skin::tab(p, f, "Items", Action::Open(Pane::Items));
-            skin::tab(p, f, "Quests", Action::Open(Pane::Quests));
             skin::tab(p, f, "Achievements", Action::Open(Pane::Achievements));
             skin::tab(p, f, "Auction House", Action::Open(Pane::Auction));
             skin::tab(p, f, "Test Grounds", MenuAction::TestGrounds);

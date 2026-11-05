@@ -11,7 +11,7 @@ pub struct Catalog {
     pub zones: BTreeMap<String, Zone>,
     #[serde(default)]
     pub sets: BTreeMap<String, SetBonus>,
-    /// Quests and achievements, from their own catalog file.
+    /// Achievements, from their own catalog file.
     #[serde(skip)]
     pub quests: crate::quests::QuestCatalog,
 }
@@ -255,10 +255,10 @@ pub struct Inventory {
     pub gold: u64,
     pub materials: Amounts,
     pub items: Vec<Item>,
-    /// The quest log: accepted quests and their progress.
+    /// Legacy quest log, cleared when the ledger migrates the inventory.
     #[serde(default)]
     pub quests: Vec<crate::quests::QuestState>,
-    /// Quests turned in, and how many times.
+    /// Historical quest turn-ins.
     #[serde(default)]
     pub quests_done: BTreeMap<String, u32>,
     /// Achievements earned, and when (seconds since the Unix epoch).
@@ -270,7 +270,7 @@ pub struct Inventory {
     /// Every achievement point ever earned; `achievement_points` is what is left to spend.
     #[serde(default)]
     pub achievement_total: u32,
-    /// The quest catalog revision this hero was last brought forward to.
+    /// The catalog revision this hero was last brought forward to.
     #[serde(default)]
     pub quest_rev: u32,
     /// The classes already given their starter set, so a piece taken off is not handed back.
@@ -402,11 +402,12 @@ pub enum Action {
         #[serde(default)]
         boss_names: Vec<String>,
         gold: u32,
-        /// Quest and achievement progress this batch; bosses and the clear the ledger counts
+        /// Achievement progress this batch; bosses and the clear the ledger counts
         /// itself.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         progress: Vec<crate::quests::Tick>,
     },
+    // Legacy actions remain readable in saved requests and from older clients.
     AcceptQuest {
         quest: String,
     },
