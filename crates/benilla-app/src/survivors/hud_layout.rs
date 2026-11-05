@@ -2,8 +2,9 @@
 //! moves, and lock it again from the same menu. Whatever is clicked comes to the front and stays
 //! there. Moved panels keep their place in a local file; the unit frames keep their own richer
 //! menu ([`super::frame_settings`]) and share only the stacking. Windows over the HUD (the Test
-//! Grounds) move the same way but keep their own place in the stacking. The menus (pause and
-//! settings) draw over everything and need no unlocking: drag them by anything but a button.
+//! Grounds) move the same way but keep their own place in the stacking. The settings draw over
+//! everything and need no unlocking: drag them by anything but a button. The pause menu, which
+//! draws over everything too, never moves.
 use super::{hud::HudFont, right_column as col, Phase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -32,21 +33,13 @@ pub(super) struct Movable {
     layer: Layer,
 }
 
-/// Where a movable sits: in the HUD, stacked by clicks; a window over the HUD; or one of the two
-/// menus, each the one thing that moves while it is open.
+/// Where a movable sits: in the HUD, stacked by clicks; a window over the HUD; or the settings
+/// window, the one thing that moves while they are open.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Layer {
     Hud,
     Window,
     Settings,
-    Pause,
-}
-
-impl Layer {
-    /// The menus are never locked.
-    fn is_menu(self) -> bool {
-        matches!(self, Self::Settings | Self::Pause)
-    }
 }
 
 impl Movable {
@@ -71,14 +64,6 @@ impl Movable {
             id,
             name,
             layer: Layer::Settings,
-        }
-    }
-
-    pub(super) const fn pause(id: &'static str, name: &'static str) -> Self {
-        Self {
-            id,
-            name,
-            layer: Layer::Pause,
         }
     }
 }
@@ -110,6 +95,8 @@ pub(super) struct HudLayout {
     menu: Option<(&'static str, Vec2, bool)>,
     /// The dragged panel and the cursor's offset from its top-left.
     drag: Option<(&'static str, Vec2)>,
+    /// An unlocked, visible panel currently under the pointer; never a hidden alert's stale id.
+    hovered: Option<&'static str>,
     captured: bool,
 }
 
@@ -134,7 +121,7 @@ impl HudLayout {
 
     /// Whether a panel moves right now.
     fn free(&self, m: &Movable) -> bool {
-        m.layer.is_menu() || self.unlocked(m.id)
+        m.layer == Layer::Settings || self.unlocked(m.id)
     }
 
     fn decode(text: &str) -> Self {
@@ -248,19 +235,20 @@ pub(super) fn input(
     mut consumed: ResMut<crate::ui_script::PlayerUiClickConsumed>,
 ) {
     const TOKEN: u32 = u32::MAX - 65;
+    layout.hovered = None;
     if hover.0 == Some(TOKEN) {
         hover.0 = None;
         pointer.0 = false;
         panel.0 = false;
     }
-    // An open menu is the only thing that moves, on the front end too; otherwise the HUD and its
-    // windows in a run, but not under the reward cards, nor while a unit frame has the pointer.
+    // With the settings open only their window moves, on the front end too; otherwise the HUD
+    // and its windows in a run, but not under the reward cards or the pause menu, nor while a
+    // unit frame has the pointer.
     let settings = options.open && options.settings;
     let paused =
         !settings && *phase.get() != Phase::Menu && (options.open || *phase.get() == Phase::Paused);
     let off = !settings
-        && !paused
-        && matches!(phase.get(), Phase::Menu | Phase::LevelUp | Phase::GameOver);
+        && (paused || matches!(phase.get(), Phase::Menu | Phase::LevelUp | Phase::GameOver));
     if off || frames.busy() {
         if layout.drag.take().is_some() {
             layout.save();
@@ -286,11 +274,17 @@ pub(super) fn input(
             .position(|f| *f == id)
             .map_or(-1, |i| i as i32)
     };
-    let live = |m: &Movable| match m.layer {
-        Layer::Settings => settings,
-        Layer::Pause => paused,
-        Layer::Hud | Layer::Window => !settings && !paused,
-    };
+    let live = |m: &Movable| (m.layer == Layer::Settings) == settings;
+    // Temporary alerts may hide or despawn while unlocked or even mid-drag.
+    let visible = |id| panels.iter().any(|(m, node, _, shown, ..)|
+        m.id == id && live(m) && shown.get() && node.size().min_element() > 0.);
+    if layout.drag.is_some_and(|(id, _)| !visible(id)) {
+        layout.drag = None;
+        layout.save();
+    }
+    if layout.menu.is_some_and(|(id, _, _)| !visible(id)) {
+        layout.menu = None;
+    }
     let hit = panels
         .iter()
         .filter(|(m, node, _, shown, ..)| live(m) && shown.get() && node.size().x > 0.)
@@ -303,6 +297,7 @@ pub(super) fn input(
     let menu_hit = menu_rect.is_some_and(|r| r.contains(cursor));
     // A locked panel lets clicks through to the world, except to raise it or open its menu.
     let over_free = hit.as_ref().is_some_and(|(m, ..)| layout.free(m));
+    layout.hovered = hit.as_ref().filter(|(m, ..)| layout.unlocked(m.id)).map(|(m, ..)| m.id);
     if over_free || menu_hit || layout.drag.is_some() || layout.captured {
         hover.0 = Some(TOKEN);
         pointer.0 = true;
@@ -314,7 +309,7 @@ pub(super) fn input(
         if let Some((m, ..)) = &hit {
             let id = m.id;
             layout.raise(id);
-            let free = m.layer.is_menu();
+            let free = m.layer == Layer::Settings;
             let room = menu_room(free);
             layout.menu = Some((id, cursor.min((canvas - room).max(Vec2::ZERO)), free));
             layout.captured = true;
@@ -361,8 +356,8 @@ pub(super) fn input(
             layout.menu = None;
             if let Some((m, b, entity)) = &hit {
                 layout.raise(m.id);
-                // A menu's buttons stay buttons; the rest of it is the handle.
-                let on_button = m.layer.is_menu()
+                // The settings' buttons stay buttons; the rest of the window is the handle.
+                let on_button = m.layer == Layer::Settings
                     && kids
                         .iter_descendants(*entity)
                         .any(|e| buttons.get(e).is_ok_and(|i| *i != Interaction::None));
@@ -687,7 +682,7 @@ fn paint(
         let on = if grid {
             layout.drag.is_some()
         } else if hint {
-            any
+            layout.hovered.is_some_and(|id| layout.unlocked(id)) || layout.drag.is_some()
         } else {
             if let Some((_, at, _)) = layout.menu {
                 node.left = Val::Px(at.x);
@@ -911,23 +906,17 @@ mod tests {
     }
 
     #[test]
-    fn the_menus_drag_without_unlocking_and_their_buttons_stay_buttons() {
+    fn the_settings_drag_without_unlocking_and_their_buttons_stay_buttons() {
         let settings = Movable::settings("settings", "Settings");
-        let pause = Movable::pause("pause", "Pause menu");
         assert_eq!(
             press_on(Phase::Menu, Some(true), settings, None),
             Some("settings"),
             "the front end's settings"
         );
         assert_eq!(
-            press_on(Phase::Paused, None, pause, None),
-            Some("pause"),
-            "the pause menu"
-        );
-        assert_eq!(
-            press_on(Phase::LevelUp, Some(false), pause, None),
-            Some("pause"),
-            "the pause menu over the reward cards"
+            press_on(Phase::LevelUp, Some(true), settings, None),
+            Some("settings"),
+            "the settings over the reward cards"
         );
         assert_eq!(
             press_on(
@@ -942,11 +931,10 @@ mod tests {
     }
 
     #[test]
-    fn locked_panels_stay_put_and_only_the_open_menu_moves() {
+    fn locked_panels_stay_put_and_nothing_moves_under_the_pause_menu() {
         let hud = Movable::new("minimap", "Minimap");
         let window = Movable::window("test_grounds", "Test Grounds");
         let settings = Movable::settings("settings", "Settings");
-        let pause = Movable::pause("pause", "Pause menu");
         assert_eq!(press_on(Phase::Playing, None, hud, None), None, "locked");
         assert_eq!(press_on(Phase::Playing, None, window, None), None, "locked");
         assert_eq!(
@@ -960,14 +948,9 @@ mod tests {
             "the settings are closed"
         );
         assert_eq!(
-            press_on(Phase::Paused, Some(true), pause, None),
+            press_on(Phase::Paused, Some(false), window, None),
             None,
-            "behind the settings"
-        );
-        assert_eq!(
-            press_on(Phase::Playing, None, pause, None),
-            None,
-            "not paused"
+            "the pause menu holds everything still"
         );
     }
 

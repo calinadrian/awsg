@@ -118,9 +118,9 @@ pub(super) fn take_reins(
         commands.insert_resource(SelfDriven);
     }
     for (input, pair) in HELD {
-        binds.set_held(input, keys.any_pressed(pair));
+        binds.set_held(input, !run.stunned() && keys.any_pressed(pair));
     }
-    if keys.just_pressed(KeyCode::Space) {
+    if !run.stunned() && keys.just_pressed(KeyCode::Space) {
         binds.fire(Input::Jump, 1.0);
     }
     let notches: f32 = wheel

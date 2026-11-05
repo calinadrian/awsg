@@ -78,8 +78,6 @@ pub(super) struct HpFill;
 #[derive(Component)]
 pub(super) struct ShieldFill;
 #[derive(Component)]
-pub(super) struct BannerText;
-#[derive(Component)]
 pub(super) struct ActionBar;
 /// The character button's portrait, set to the run's race and sex.
 #[derive(Component)]
@@ -272,10 +270,6 @@ fn centered(font: &Handle<Font>, s: impl Into<String>, size: f32, color: Color) 
     )
 }
 
-fn button(action: UiAction, base: Color) -> impl Bundle {
-    edged_button(action, base, EDGE)
-}
-
 fn edged_button(action: UiAction, base: Color, edge: Color) -> impl Bundle {
     (
         Button,
@@ -343,6 +337,12 @@ pub(super) fn size_action_bar(
 }
 
 pub(super) fn spell_name(spells: Option<&crate::ui_action::Spells>, spell: u32, fallback: &str) -> String {
+    // The fork's self-heals reuse vanilla visuals, with their own player-facing names.
+    match fallback {
+        "mending" => return "Mending".into(),
+        "recuperate" => return "Recuperate".into(),
+        _ => {}
+    }
     spells
         .and_then(|s| s.catalog.get(spell))
         .map(|d| d.name.clone())
@@ -568,16 +568,7 @@ pub(super) fn setup_hud(
                     ..default()
                 });
             });
-            root.spawn(Node {
-                position_type: PositionType::Absolute,
-                top: Val::Percent(22.0),
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                ..default()
-            })
-            .with_children(|n| {
-                n.spawn((BannerText, centered(f, "", 30.0, GOLD)));
-            });
+            // Compact announcements are drawn by hud_notices.
             // The hero's health under their feet, in the boss bars' frame: a black line, the grey
             // edge, a green fill with the shield over it, and the level just past the end.
             let absolute = || Node {
@@ -721,7 +712,6 @@ pub(super) fn setup_hud(
             use super::options::{EDGE_DIM, PICKED, ROW};
             use super::right_column as col;
             root.spawn((
-                super::hud_layout::Movable::pause("pause", "Pause menu"),
                 col::plate(Node {
                     width: Val::Px(280.0),
                     flex_direction: FlexDirection::Column,
@@ -1420,7 +1410,6 @@ pub(super) fn refresh_hud(
         Query<&mut Text, With<LevelText>>,
         Query<&mut Text, With<TimerText>>,
         Query<&mut Text, With<KillText>>,
-        Query<&mut Text, With<BannerText>>,
         Query<&mut Text, With<OverTitle>>,
         Query<&mut Text, With<OverStats>>,
         Query<&mut Text, With<XpText>>,
@@ -1435,7 +1424,7 @@ pub(super) fn refresh_hud(
     if let Ok(mut n) = xp_fill.single_mut() {
         n.width = Val::Percent((run.xp / need * 100.0).clamp(0.0, 100.0));
     }
-    if let Ok(mut t) = texts.p6().single_mut() {
+    if let Ok(mut t) = texts.p5().single_mut() {
         let xp = format!("{} / {}", run.xp as u32, need as u32);
         if **t != xp {
             **t = xp;
@@ -1458,29 +1447,12 @@ pub(super) fn refresh_hud(
             run.gold, run.chest_cost
         );
     }
-    let banner = match run.banner.as_mut() {
-        Some((msg, t)) => {
-            *t -= time.delta_secs();
-            if *t > 0.0 {
-                msg.clone()
-            } else {
-                String::new()
-            }
-        }
-        None => String::new(),
-    };
-    if banner.is_empty() {
-        run.banner = None;
-    }
-    // The picker owns the screen: an announcement waits until it closes.
-    let banner = if *phase.get() == Phase::LevelUp {
-        String::new()
-    } else {
-        banner
-    };
-    if let Ok(mut t) = texts.p3().single_mut() {
-        if **t != banner {
-            **t = banner;
+    // Producers still share this short-lived signal with co-op snapshots; the new panel
+    // owns the three-second display lifetime and waits through reward pickers and pauses.
+    if *phase.get() == Phase::Playing {
+        if let Some((_, left)) = run.banner.as_mut() {
+            *left -= time.delta_secs();
+            if *left <= 0. { run.banner = None; }
         }
     }
     let title = if run.won {
@@ -1489,7 +1461,7 @@ pub(super) fn refresh_hud(
         "You have fallen"
     }
     .to_string();
-    if let Ok(mut t) = texts.p4().single_mut() {
+    if let Ok(mut t) = texts.p3().single_mut() {
         **t = title;
     }
     let summary = format!(
@@ -1498,7 +1470,7 @@ pub(super) fn refresh_hud(
         run.class.name,
         selection.map_def().name,
     );
-    if let Ok(mut t) = texts.p5().single_mut() {
+    if let Ok(mut t) = texts.p4().single_mut() {
         if **t != summary {
             **t = summary;
         }

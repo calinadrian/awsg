@@ -286,7 +286,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
             "multi_shot",
             "serpent_sting",
             "volley",
-            "explosive_trap",
+            "mending",
             "concussive_shot",
             "aimed_shot",
             "immolation_trap",
@@ -314,7 +314,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
             "blade_flurry",
             "rupture",
             "kidney_shot",
-            "gouge",
+            "recuperate",
             "ghostly_strike",
             "adrenaline_rush",
             "backstab",
@@ -399,7 +399,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
             "flamestrike",
             "fire_blast",
             "cone_of_cold",
-            "blast_wave",
+            "evocation",
             "pyroblast",
             "ice_barrier",
             "polymorph",
@@ -529,6 +529,8 @@ pub(crate) struct BossPhase {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BossAction {
+    /// Eggs must be crushed by a player before their thirty-second hatch deadline.
+    Eggs { count: u32, every: f32 },
     /// Every `every` seconds, strikes everything within `radius` for `damage` (scaled with the run).
     Stomp {
         spell: u32,

@@ -69,6 +69,21 @@ struct Foe {
     /// Holds up a master's ward, so guests' spells go for it first too.
     #[serde(rename = "k", default, skip_serializing_if = "is_false")]
     guard: bool,
+    /// Boss clocks use the same absolute run time on host and guests.
+    #[serde(rename = "c", default, skip_serializing_if = "Vec::is_empty")]
+    cooldowns: Vec<super::boss_cooldowns::Timer>,
+    #[serde(rename = "r", default, skip_serializing_if = "is_false")]
+    hogger_enraged: bool,
+    #[serde(rename = "z", default, skip_serializing_if = "is_zero_f32")]
+    enrage_at: f32,
+    #[serde(rename = "e", default, skip_serializing_if = "is_false")]
+    timed_enraged: bool,
+    #[serde(rename = "b", default, skip_serializing_if = "is_false")]
+    boss_minion: bool,
+    #[serde(rename = "v", default, skip_serializing_if = "is_false")]
+    hidden: bool,
+    #[serde(rename = "q", default, skip_serializing_if = "Vec::is_empty")]
+    bombs: Vec<super::morgan::Bomb>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Pickup {
@@ -155,8 +170,16 @@ enum Packet {
         gold: u64,
         caches: Vec<[f32; 3]>,
         damage: Vec<(u32, f32)>,
+        #[serde(default)]
+        poisons: Vec<(u32, f32)>,
+        #[serde(default)]
+        boar_impacts: Vec<(u32, f32, f32)>,
+        #[serde(default)]
+        morgan_debuffs: Vec<(u32, super::morgan::Debuff)>,
         visuals: Vec<Visual>,
         warnings: Vec<[f32; 14]>,
+        #[serde(default)]
+        eggs: Vec<super::mother_fang::Egg>,
         /// The latest boss line, for every player's screen.
         #[serde(default)]
         yell: Option<(String, f32)>,
@@ -523,6 +546,12 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 fn resurrect(run: &mut Run) {
+    run.brood_poison = Default::default();
+    run.morgan_bleed = Default::default();
+    run.morgan_mark_until = 0.0;
+    run.morgan_bomb_slow_until = 0.0;
+    run.stun_until = 0.0;
+    run.healing_blocked_until = 0.0;
     run.dead_t = None;
     run.hp = (run.stats().max_hp * 0.5).max(1.0);
     run.heal_t = 0.0;
@@ -682,7 +711,7 @@ fn receive(
         Without<Replica>,
     >,
     emitters: Query<(Entity, &benilla_world::particles::ParticleEmitter)>,
-    mut telegraphs: ResMut<super::telegraphs::Telegraphs>,
+    (mut telegraphs, mut eggs): (ResMut<super::telegraphs::Telegraphs>, ResMut<super::mother_fang::Eggs>),
 ) {
     if coop.running {
         coop.since_host += real.delta_secs();
@@ -895,8 +924,12 @@ fn receive(
                         gold,
                         caches,
                         damage,
+                        poisons,
+                        boar_impacts,
+                        morgan_debuffs,
                         visuals,
                         warnings,
+                        eggs: egg_state,
                         yell,
                         pushes,
                         paused,
@@ -916,6 +949,7 @@ fn receive(
                         run.boss_loot = boss_loot;
                         run.tally = tally.into_iter().take(super::quests::MAX_TALLY).collect();
                         telegraphs.restore(warnings);
+                        eggs.0 = egg_state;
                         let me = coop.peer;
                         if yell.as_ref().map(|y| &y.0) != run.yell.as_ref().map(|y| &y.0) {
                             run.yell = yell;
@@ -940,6 +974,19 @@ fn receive(
                             }
                         }
                         run.elapsed = elapsed;
+                        for (peer, power) in poisons {
+                            if peer == coop.peer && power.is_finite() && power > 0.0 {
+                                super::mother_fang::poison(&mut run, power);
+                            }
+                        }
+                        for (peer, stun, healing) in boar_impacts {
+                            if peer == coop.peer && stun.is_finite() && healing.is_finite() {
+                                super::princess::receive_impact(&mut run, stun, healing);
+                            }
+                        }
+                        for (peer, effect) in morgan_debuffs {
+                            if peer == coop.peer { super::morgan::receive(&mut run, effect); }
+                        }
                         run.kills = kills;
                         run.bosses = bosses;
                         lairs.slain = guardians;
@@ -1055,6 +1102,7 @@ fn receive(
                             }
                             for f in state {
                                 let moving = f.speed > 0.;
+                                let visibility = if f.hidden { Visibility::Hidden } else { Visibility::Inherited };
                                 if let Some((entity, _, mut e, _tf, mut store, mut mv, pose)) =
                                     foe_entities
                                         .get(&f.id)
@@ -1062,7 +1110,14 @@ fn receive(
                                 {
                                     match pose {
                                         Some(mut pose) => {
-                                            pose.push(Vec3::from_array(f.pos), Some(f.yaw))
+                                            let pos = Vec3::from_array(f.pos);
+                                            if e.def.name == "Morgan the Collector"
+                                                && pose.to.distance_squared(pos) > 36.0
+                                            {
+                                                *pose = ReplicaPose::new(pos, Some(f.yaw), HOST_TICK);
+                                            } else {
+                                                pose.push(pos, Some(f.yaw));
+                                            }
                                         }
                                         None => {
                                             commands.entity(entity).insert(ReplicaPose::new(
@@ -1072,6 +1127,7 @@ fn receive(
                                             ));
                                         }
                                     }
+                                    commands.entity(entity).insert((visibility, super::morgan::ReplicaBombs(f.bombs.clone())));
                                     // Keep this guest's hits the host has not applied yet,
                                     // instead of letting each snapshot undo them.
                                     e.hp = if f.dead {
@@ -1084,6 +1140,17 @@ fn receive(
                                     e.affixes = f.affixes;
                                     e.ward = f.ward;
                                     e.guard = f.guard;
+                                    e.hogger_enraged = f.hogger_enraged;
+                                    e.enrage_at = f.enrage_at;
+                                    e.timed_enraged = f.timed_enraged;
+                                    e.boss_minion = f.boss_minion;
+                                    if e.boss {
+                                        commands.entity(entity).insert(
+                                            super::boss_cooldowns::ReplicaTimers(
+                                                f.cooldowns.clone(),
+                                            ),
+                                        );
+                                    }
                                     if f.lair {
                                         e.home = Some(enemies::Home {
                                             pos: Vec3::from_array(f.pos),
@@ -1104,9 +1171,14 @@ fn receive(
                                     let defs = match f.group {
                                         1 => &roster.bosses,
                                         2 => &roster.guardians,
+                                        3 => std::slice::from_ref(&super::mother_fang::BROODLING),
+                                        4 => std::slice::from_ref(&super::princess::STAMPEDE_BOAR),
+                                        5 if f.index == 0 => std::slice::from_ref(&super::morgan::THUG),
+                                        5 => std::slice::from_ref(&super::morgan::MARKSMAN),
                                         _ => &roster.enemies,
                                     };
-                                    let Some(def) = defs.get(f.index) else {
+                                    let index = if f.group == 5 { 0 } else { f.index };
+                                    let Some(def) = defs.get(index) else {
                                         continue;
                                     };
                                     let entity = enemies::spawn_enemy(
@@ -1119,6 +1191,9 @@ fn receive(
                                     );
                                     commands.entity(entity).insert((
                                         Replica(f.id),
+                                        visibility,
+                                        super::morgan::ReplicaBombs(f.bombs.clone()),
+                                        super::boss_cooldowns::ReplicaTimers(f.cooldowns.clone()),
                                         ReplicaPose::new(
                                             Vec3::from_array(f.pos),
                                             Some(f.yaw),
@@ -1132,6 +1207,10 @@ fn receive(
                                             e.affixes = f.affixes;
                                             e.ward = f.ward;
                                             e.guard = f.guard;
+                                            e.hogger_enraged = f.hogger_enraged;
+                                            e.enrage_at = f.enrage_at;
+                                            e.timed_enraged = f.timed_enraged;
+                                            e.boss_minion = f.boss_minion;
                                             if f.lair {
                                                 e.home = Some(enemies::Home {
                                                     pos: Vec3::from_array(f.pos),
@@ -1144,6 +1223,9 @@ fn receive(
                             }
                         }
                         if ended {
+                            run.morgan_bleed = Default::default();
+                            run.morgan_mark_until = 0.0;
+                            run.morgan_bomb_slow_until = 0.0;
                             run.won = won;
                             next.set(Phase::GameOver);
                         }
@@ -1375,10 +1457,12 @@ fn transmit(
         &Enemy,
         &crate::creature_anim::MovementState,
         Has<Replica>,
+        Option<&enemies::Script>,
+        Option<&super::mechanics::Mechanics>,
     )>,
     lairs: Res<super::guardians::Lairs>,
     pickups: Query<(&Guid, &Transform, &enemies::Gem, &Visibility)>,
-    telegraphs: Res<super::telegraphs::Telegraphs>,
+    (telegraphs, eggs): (Res<super::telegraphs::Telegraphs>, Res<super::mother_fang::Eggs>),
 ) {
     let dt = real.delta_secs();
     if !coop.running {
@@ -1430,7 +1514,7 @@ fn transmit(
     } else {
         let roster = data::roster(selection.stage);
         let mut state = Vec::new();
-        for (entity, guid, tf, e, mv, replica) in &foes {
+        for (entity, guid, tf, e, mv, replica, script, mechanics) in &foes {
             let definition = [&roster.enemies, &roster.bosses, &roster.guardians]
                 .iter()
                 .enumerate()
@@ -1438,7 +1522,11 @@ fn transmit(
                     defs.iter()
                         .position(|d| std::ptr::eq(d, e.def))
                         .map(|i| (group as u8, i))
-                });
+                })
+                .or_else(|| std::ptr::eq(e.def, &super::mother_fang::BROODLING).then_some((3, 0)))
+                .or_else(|| std::ptr::eq(e.def, &super::princess::STAMPEDE_BOAR).then_some((4, 0)))
+                .or_else(|| std::ptr::eq(e.def, &super::morgan::THUG).then_some((5, 0)))
+                .or_else(|| std::ptr::eq(e.def, &super::morgan::MARKSMAN).then_some((5, 1)));
             let Some((group, index)) = definition else {
                 continue;
             };
@@ -1453,12 +1541,23 @@ fn transmit(
                 yaw: round_to(tf.rotation.to_euler(EulerRot::YXZ).0, 100.),
                 hp: round_to(e.hp, 10.).max(if e.dead { 0. } else { 0.1 }),
                 maximum: round_to(e.max_hp, 10.),
-                speed: if mv.speed > 0. { round_to(e.speed, 100.) } else { 0. },
+                speed: if mv.speed > 0. { round_to(mv.speed, 100.) } else { 0. },
                 dead: e.dead,
                 lair: e.home.is_some(),
                 affixes: e.affixes,
                 ward: e.ward,
                 guard: e.guard,
+                hogger_enraged: e.hogger_enraged,
+                enrage_at: e.enrage_at,
+                timed_enraged: e.timed_enraged,
+                boss_minion: e.boss_minion,
+                hidden: !e.dead && script.is_some_and(|s| s.morgan.hidden()),
+                bombs: if e.dead { Vec::new() } else { script.map(|s| s.morgan.bombs.clone()).unwrap_or_default() },
+                cooldowns: if e.boss && !e.dead {
+                    super::boss_cooldowns::snapshot(script, mechanics, run.elapsed, e)
+                } else {
+                    Vec::new()
+                },
             });
         }
         let paused = coop.room.as_ref().is_some_and(|r| {
@@ -1501,8 +1600,12 @@ fn transmit(
             gold: coop.gold,
             caches: coop.caches.clone(),
             damage: std::mem::take(&mut run.coop_damage),
+            poisons: std::mem::take(&mut run.coop_poison),
+            boar_impacts: std::mem::take(&mut run.coop_boar_impacts),
+            morgan_debuffs: std::mem::take(&mut run.coop_morgan_debuffs),
             visuals: std::mem::take(&mut coop.visuals),
             warnings: telegraphs.snapshot(),
+            eggs: eggs.0.clone(),
             yell: run.yell.clone(),
             pushes: std::mem::take(&mut run.coop_push)
                 .into_iter()
@@ -1619,17 +1722,18 @@ pub(super) fn apply_guest_hits(
         if enemy.ward {
             continue;
         }
-        enemy.hp -= hit.damage;
-        fx.number(entity, hit.damage, false, units::COLOR_SPELL);
+        let damage = super::almighty_strength::damage(enemy.boss, enemy.max_hp, hit.damage);
+        enemy.hp -= damage;
+        fx.number(entity, damage, false, units::COLOR_SPELL);
         let boss = enemy.boss || enemy.home.is_some();
         let seconds = hit.seconds.clamp(0., 30.) * if boss { 0.25 } else { 1. };
         match hit.effect {
-            1 => {
+            1 if !enemy.boss => {
                 enemy.slow = hit.strength.clamp(if boss { 0.75 } else { 0.1 }, 1.);
                 enemy.slow_t = enemy.slow_t.max(seconds);
             }
-            2 => enemy.root_t = enemy.root_t.max(seconds),
-            3 => enemy.stun_t = enemy.stun_t.max(seconds),
+            2 if !enemy.boss => enemy.root_t = enemy.root_t.max(seconds),
+            3 if !enemy.boss => enemy.stun_t = enemy.stun_t.max(seconds),
             4 if !boss => enemy.fear_t = enemy.fear_t.max(seconds),
             5 => {
                 enemy.weaken = hit.strength.clamp(0.3, 1.);
@@ -1709,6 +1813,13 @@ mod tests {
             affixes: 0,
             ward: false,
             guard: false,
+            cooldowns: Vec::new(),
+            hogger_enraged: false,
+            enrage_at: 0.0,
+            timed_enraged: false,
+            boss_minion: false,
+            hidden: false,
+            bombs: Vec::new(),
         };
         let text = serde_json::to_string(&foe).unwrap();
         assert_eq!(
@@ -1740,8 +1851,12 @@ mod tests {
             gold: 0,
             caches: Vec::new(),
             damage: Vec::new(),
+            poisons: Vec::new(),
+            boar_impacts: Vec::new(),
+            morgan_debuffs: Vec::new(),
             visuals: Vec::new(),
             warnings: Vec::new(),
+            eggs: Vec::new(),
             yell: None,
             pushes: Vec::new(),
             paused: false,

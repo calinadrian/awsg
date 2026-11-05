@@ -116,6 +116,7 @@ impl Catalog {
         let mut catalog: Self = serde_json::from_str(include_str!("../assets/economy_catalog.json"))
             .expect("bundled ASR item catalog");
         catalog.quests = crate::quests::QuestCatalog::load();
+        catalog.items.extend(crate::starter::definitions());
         catalog
     }
     pub fn definition(&self, id: &str) -> Option<&Definition> {
@@ -155,12 +156,22 @@ impl Definition {
             kind == armor || (matches!(class, 1 | 2) && kind == "mail")
         })
     }
+    /// Whether this is a class's basic gear ([`crate::starter`]), which cannot be traded or upgraded.
+    pub fn is_starter(&self) -> bool {
+        self.zone == crate::starter::ZONE
+    }
     /// Item level: its zone's tier, then its quality and upgrades.
     pub fn item_level(&self, catalog: &Catalog, upgrade: u8) -> u32 {
+        if self.is_starter() {
+            return 1;
+        }
         item_level(catalog.tier(&self.zone), quality_rank(&self.quality), upgrade)
     }
     /// Its share of a hero's gear score: item level by how much of a set its slot carries.
     pub fn score(&self, catalog: &Catalog, upgrade: u8) -> u32 {
+        if self.is_starter() {
+            return 0;
+        }
         let weight = match self.slot.as_str() {
             "main_hand" if self.two_handed => 2.2,
             "main_hand" => 1.6,
@@ -232,6 +243,9 @@ impl Item {
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Inventory {
+    /// Offline-capable class experience and personal completion records.
+    #[serde(default)]
+    pub offline_progress: BTreeMap<String, u64>,
     #[serde(default)]
     pub achievement_points: u32,
     #[serde(default)]
@@ -259,6 +273,9 @@ pub struct Inventory {
     /// The quest catalog revision this hero was last brought forward to.
     #[serde(default)]
     pub quest_rev: u32,
+    /// The classes already given their starter set, so a piece taken off is not handed back.
+    #[serde(default)]
+    pub starter_classes: std::collections::BTreeSet<u8>,
 }
 impl Inventory {
     /// The summed score of what this hero wears as `class`.
@@ -335,6 +352,10 @@ pub struct Request {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Action {
+    /// Server-only trading/refresh, updating this device's checkpoint with the reply.
+    Online { device: String, action: Box<Action> },
+    /// Reconcile offline changes against the last server acknowledgement for this device.
+    SyncOffline { device: String, base: Box<Inventory>, inventory: Box<Inventory> },
     RedeemAchievement { gear: bool },
     LinkInventory {
         tokens: Vec<String>,
@@ -459,7 +480,7 @@ mod tests {
             }
             assert!(recommended_score(tier) > recommended_score(tier - 1));
         }
-        for item in &catalog.items {
+        for item in catalog.items.iter().filter(|item| !item.is_starter()) {
             let mut last = &item.base_bonuses;
             assert_eq!(item.upgrades.len(), 5, "{}", item.id);
             for upgrade in &item.upgrades {

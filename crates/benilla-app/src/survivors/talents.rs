@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use super::data::{AbilityDef, Kind};
-use super::front_end as skin;
+use super::menu_skin as skin;
 use super::hud::{rgb, HudFont, MenuRoot};
 use super::menu::MenuAction;
 use super::{Phase, Run, Selection};
@@ -111,8 +111,8 @@ fn canonical(key: &str) -> &str {
 /// A spell's school, by the mode's key.
 fn school(key: &str) -> u8 {
     match key {
-        "fireball" | "flamestrike" | "fire_blast" | "blast_wave" | "pyroblast" | "immolate"
-        | "rain_of_fire" | "hellfire" | "searing_pain" | "explosive_trap" | "flame_shock"
+        "fireball" | "flamestrike" | "fire_blast" | "pyroblast" | "immolate"
+        | "rain_of_fire" | "hellfire" | "searing_pain" | "flame_shock"
         | "searing_totem" | "magma_totem" => 2,
         "frostbolt" | "frost_nova" | "blizzard" | "cone_of_cold" | "frost_shock" => 4,
         "arcane_missiles" | "arcane_explosion" | "arcane_shot" | "volley" | "moonfire"
@@ -329,6 +329,44 @@ fn key_of(class: u8, key: &str) -> Option<&'static str> {
 }
 
 impl TalentBook {
+    pub(super) fn export_offline(&mut self, values: &mut std::collections::BTreeMap<String, u64>) {
+        self.load();
+        for (class, book) in &self.classes {
+            values.insert(format!("xp:{class}"), (book.exp.max(0.) as f64 * 1000.).round() as u64);
+            values.insert(format!("active:{class}"), book.active_spec as u64);
+            if let Some(trees) = trees(*class) {
+                for spec in 0..3 {
+                    for talent in trees.iter().flat_map(|tree| tree.talents) {
+                        values.insert(format!("spec:{class}:{spec}:{}", talent.key), u64::from(book.specs[spec].get(talent.key).copied().unwrap_or(0)));
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn import_offline(&mut self, values: &std::collections::BTreeMap<String, u64>) {
+        self.load();
+        for (class, trees) in &TREES {
+            let Some(exp) = values.get(&format!("xp:{class}")) else { continue };
+            let book = self.classes.entry(*class).or_default();
+            book.exp = book.exp.max((*exp as f64 / 1000.).min(1_000_000.) as f32);
+            let mut candidate = book.clone();
+            for spec in 0..3 {
+                for talent in trees.iter().flat_map(|tree| tree.talents) {
+                    if let Some(rank) = values.get(&format!("spec:{class}:{spec}:{}", talent.key)) {
+                        candidate.specs[spec].insert(talent.key, (*rank).min(u64::from(talent.ranks)) as u8);
+                    }
+                }
+            }
+            let active = values.get(&format!("active:{class}")).copied().unwrap_or(book.active_spec as u64).min(2) as usize;
+            if (0..3).all(|spec| { candidate.active_spec = spec; candidate.valid(trees) }) {
+                candidate.active_spec = active;
+                *book = candidate;
+            }
+        }
+        self.save();
+    }
+
     pub fn class(&mut self, class: u8) -> &mut ClassBook {
         self.load();
         self.classes.entry(class).or_default()
@@ -677,6 +715,9 @@ pub(super) fn begin_run(mut run: ResMut<Run>, mut book: ResMut<TalentBook>) {
         .map(|(_, key, _)| {
             super::Owned::new(super::data::ability(key), super::rewards::Rarity::Common)
         });
+    info!("survivors: run start class={} race={} abilities={:?} racial={:?} shield={:.0} shield_spell={}",
+        run.class.name, run.race, run.abilities.iter().map(|o| o.def.key).collect::<Vec<_>>(),
+        run.racial.as_ref().map(|o| o.def.key), run.shield, run.shield_spell);
     run.hp = run.stats().max_hp;
     run.version += 1;
 }
@@ -843,9 +884,9 @@ fn centred(
     ));
 }
 
-/// A partly learnt talent's frame; maxed is gold, an open row plain, a locked one dark.
+/// Green marks invested ranks, crimson a completed talent, steel an available one.
 const LEARNING: Color = Color::srgb(0.38, 0.82, 0.42);
-const LOCKED: Color = Color::srgb(0.17, 0.16, 0.14);
+const LOCKED: Color = Color::srgb(0.16, 0.19, 0.22);
 const SIDE_W: f32 = 250.0;
 const GAP: f32 = 14.0;
 
@@ -866,18 +907,30 @@ fn build_panel(
             right: Val::Px(0.0),
             top: Val::Px(0.0),
             bottom: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(12.0),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundColor(Color::srgba(0.01, 0.01, 0.008, 0.92)),
+        BackgroundColor(skin::INK),
         Interaction::default(),
         bevy::ui::FocusPolicy::Block,
         GlobalZIndex(1000),
     ))
     .with_children(|back| {
         back.spawn(Node {
+            width: Val::Px(3.0 * (TREE_W + 2.0) + 3.0 * GAP + SIDE_W),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        }).with_children(|head| {
+            text(head, f, "Talents", 22.0, skin::TEXT);
+            text(head, f, "Learn / left-click    Refund / right-click    Free respecs", 10.0, skin::MUTED);
+        });
+        back.spawn(Node {
             flex_direction: FlexDirection::Row,
+            min_height: Val::Px(520.0),
             align_items: AlignItems::Stretch,
             column_gap: Val::Px(GAP),
             ..default()
@@ -906,7 +959,7 @@ fn side_panel(
         width: Val::Px(SIDE_W),
         flex_direction: FlexDirection::Column,
         align_items: AlignItems::Center,
-        padding: UiRect::all(Val::Px(18.0)),
+        padding: UiRect::all(Val::Px(16.0)),
         row_gap: Val::Px(8.0),
         ..default()
     }))
@@ -918,7 +971,7 @@ fn side_panel(
             13.0,
             class_def.map_or(skin::GOLD, |c| rgb(c.color)),
         );
-        centred(p, f, format!("TALENT SPEC {}", page.active_spec() + 1), 12.0, skin::MUTED);
+        centred(p, f, format!("ACTIVE BUILD / SPEC {}", page.active_spec() + 1), 10.0, skin::MUTED);
         p.spawn(Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
@@ -931,11 +984,12 @@ fn side_panel(
                 tabs.spawn((
                     Button,
                     SelectSpec(spec),
+                    skin::MenuControl,
                     skin::Control { primary: false, selected, enabled: true },
                     Node {
                         flex_grow: 1.0,
                         flex_basis: Val::Px(0.0),
-                        min_height: Val::Px(34.0),
+                        min_height: Val::Px(28.0),
                         border: UiRect::all(Val::Px(1.0)),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
@@ -945,14 +999,13 @@ fn side_panel(
                     BorderColor::all(if selected { skin::GOLD } else { skin::EDGE }),
                 ))
                 .with_children(|button| {
-                    text(button, f, format!("Spec {}", spec + 1), 12.0, skin::GOLD);
+                    text(button, f, format!("Spec {}", spec + 1), 12.0, if selected { skin::TEXT } else { skin::MUTED });
                 });
             }
         });
-        centred(p, f, "TALENT POINTS", 18.0, skin::GOLD);
+        centred(p, f, "AVAILABLE POINTS", 10.0, skin::MUTED);
         skin::rule(p);
-        centred(p, f, page.available().to_string(), 40.0, skin::GOLD);
-        centred(p, f, "TO SPEND", 10.0, skin::MUTED);
+        centred(p, f, page.available().to_string(), 32.0, skin::TEXT);
         centred(
             p,
             f,
@@ -1057,7 +1110,7 @@ fn info(
         let Some((ti, t)) =
             hovered.and_then(|(t, i)| trees.get(t).and_then(|tr| tr.talents.get(i)).map(|x| (t, x)))
         else {
-            text(b, f, "Point at a talent to read it.", 14.0, skin::GOLD);
+            text(b, f, "Choose a talent to inspect", 14.0, skin::TEXT);
             text(
                 b,
                 f,
@@ -1092,7 +1145,7 @@ fn info(
                 ..default()
             })
             .with_children(|c| {
-                text(c, f, t.name, 15.0, skin::GOLD);
+                text(c, f, t.name, 15.0, skin::TEXT);
                 text(c, f, format!("Rank {rank} / {}", t.ranks), 11.0, skin::MUTED);
             });
         });
@@ -1152,7 +1205,7 @@ fn tree_column(
             ..default()
         })
         .with_children(|head| {
-            text(head, f, tree.name, 17.0, skin::GOLD);
+            text(head, f, tree.name, 16.0, skin::TEXT);
             text(
                 head,
                 f,
@@ -1169,7 +1222,7 @@ fn tree_column(
                 border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            BackgroundColor(Color::srgb(0.018, 0.023, 0.028)),
         ))
         .with_children(|grid| {
             // Prerequisite links first, so the icons draw over them.
@@ -1252,8 +1305,8 @@ fn cell(
             top: Val::Px(f32::from(t.tier) * CELL + (CELL - ICON) / 2.0),
             width: Val::Px(ICON),
             height: Val::Px(ICON),
-            border: UiRect::all(Val::Px(2.0)),
-            border_radius: BorderRadius::all(Val::Px(4.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(2.0)),
             overflow: Overflow::clip(),
             ..default()
         },

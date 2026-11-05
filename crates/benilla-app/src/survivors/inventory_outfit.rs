@@ -1,4 +1,4 @@
-//! Dress local and co-op heroes with owned item displays, preserving empty starter slots.
+//! Dress local and co-op heroes with exactly the item displays they have equipped.
 #[cfg(not(target_os = "macos"))]
 use super::{
     coop::{Ally, Coop},
@@ -59,13 +59,14 @@ fn dress(
             &NetEntity,
             &mut ObjectStore,
             Option<&Ally>,
+            Option<&super::item_preview::ViewerModel>,
             Option<&Applied>,
         ),
-        Or<(With<Hero>, With<Ally>)>,
+        Or<(With<Hero>, With<Ally>, With<super::item_preview::ViewerModel>)>,
     >,
 ) {
     let Some(creatures) = creatures else { return };
-    for (entity, net, mut store, ally, applied) in &mut heroes {
+    for (entity, net, mut store, ally, viewer, applied) in &mut heroes {
         let Some(display) = net.display_id else {
             continue;
         };
@@ -89,60 +90,52 @@ fn dress(
                 continue;
             };
             features = member.hero.features;
-            (pose.outfit.clone(), class)
+            // An ally that has sent no outfit yet still wears its class's basic gear.
+            let look = if pose.outfit.is_empty() {
+                asr_coop::starter::look(None, class.id, &inventory.catalog)
+            } else {
+                pose.outfit.clone()
+            };
+            (look, class)
+        } else if viewer.is_some() {
+            let Some(class) = data::CLASSES.iter().find(|class| class.id == inventory.viewer_class) else { continue };
+            features = Some(super::appearance::base(base));
+            let look = inventory.viewer_outfit.iter().filter_map(|(slot, id)| {
+                let def = inventory.catalog.definition(id)?;
+                def.fits(class.id, slot).then(|| asr_coop::economy::LookItem {
+                    slot: slot.clone(), display: def.display_id, category: def.category.clone(),
+                })
+            }).collect();
+            (look, class)
         } else if *phase.get() == Phase::Menu {
             let Some(class) = selection.class_def() else {
                 continue;
             };
-            let look = inventory
-                .hero(&inventory.realm(&coop), class.id)
-                .map_or_else(Vec::new, |hero| {
-                    hero.inventory
-                        .items
-                        .iter()
-                        .filter_map(|item| {
-                            let slot = item.slot.as_ref()?;
-                            let d = inventory.catalog.definition(&item.definition)?;
-                            Some(asr_coop::economy::LookItem {
-                                slot: slot.clone(),
-                                display: d.display_id,
-                                category: d.category.clone(),
-                            })
-                        })
-                        .collect()
-                });
+            let hero = inventory.view(&inventory.realm(&coop), class.id);
+            let look = asr_coop::starter::look(hero.as_ref().map(|hero| &hero.inventory), class.id, &inventory.catalog);
             (look, class)
+        } else if run.gear_look.is_empty() {
+            // A run entered past the menu (a restart, auto-play) has no snapshot of the hero's gear.
+            let hero = inventory.view(&inventory.realm(&coop), run.class.id);
+            let look = asr_coop::starter::look(hero.as_ref().map(|hero| &hero.inventory), run.class.id, &inventory.catalog);
+            (look, run.class)
         } else {
             (run.gear_look.clone(), run.class)
         };
-        if applied.is_some_and(|a| a.0 == look && a.1 == display && a.2 == features)
-            || (look.is_empty() && features.is_none() && applied.is_none())
-        {
+        if applied.is_some_and(|a| a.0 == look && a.1 == display && a.2 == features) {
             continue;
         }
         // A dial change alone leaves the worn set as it was, so the re-dress is forced below.
         let refeature = applied.is_some_and(|a| a.2 != features);
+        // The body starts bare: a trainer display's own armor and weapons would show through or
+        // clash with what is worn, so only equipped items reach the character.
         let mut eq = Equipment {
-            bodyslots: std::array::from_fn(|i| base.equipment[i + 2]),
-            helm: base.equipment[0],
-            survivors_shoulders: Some(base.equipment[1]),
+            survivors_shoulders: Some(0),
             settled: true,
             ..default()
         };
         let mut pairs = vec![(OUTFIT_MARKER, 1)];
         let mut weapons = [(0u32, 0u32, 0u32); 3];
-        for &(slot, display, class, sub, material, inv, sheath) in class.weapons {
-            if let Some(weapon) = weapons.get_mut(usize::from(slot)) {
-                *weapon = (
-                    display,
-                    u32::from(class)
-                        | u32::from(sub) << 8
-                        | u32::from(material) << 16
-                        | u32::from(inv) << 24,
-                    u32::from(sheath),
-                );
-            }
-        }
         for item in &look {
             match item.slot.as_str() {
                 "head" => eq.helm = item.display,

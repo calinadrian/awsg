@@ -8,10 +8,10 @@ Riverpaw Brute #175 hp 120 dmg 9 speed 4.6 swing 2.2 scale 1.1 xp 4 level 6 from
 Prowler #644 hp 50 dmg 7 speed 7.6 swing 1.3 scale 1.3 xp 2 level 7 from 360 cost 1.5 big false roam false last false ranged 0 phases 0
 Defias Rogue Wizard #2315 hp 40 dmg 7 speed 5 swing 3.2 scale 1 xp 3 level 8 from 450 cost 2 big false roam false last false ranged 116 phases 0
 Defias Enforcer #2324 hp 170 dmg 12 speed 4.8 swing 2.2 scale 1.25 xp 4 level 9 from 540 cost 3 big false roam false last false ranged 0 phases 0
-Hogger #384 hp 3600 dmg 22 speed 5.6 swing 1 scale 3.5 xp 35 level 11 from 180 cost 0 big false roam false last false ranged 0 phases 4
-Mother Fang #7536 hp 9000 dmg 30 speed 6 swing 1 scale 0.83 xp 60 level 10 from 360 cost 0 big false roam false last false ranged 0 phases 3
-Princess #703 hp 28000 dmg 46 speed 6.2 swing 1 scale 4.46 xp 100 level 11 from 720 cost 0 big false roam false last false ranged 0 phases 2
-Morgan the Collector #2322 hp 52500 dmg 54 speed 6.6 swing 1 scale 8.24 xp 150 level 12 from 960 cost 0 big false roam false last true ranged 0 phases 2
+Hogger #384 hp 3600 dmg 22 speed 9.25 swing 1 scale 3.5 xp 35 level 11 from 180 cost 0 big false roam false last false ranged 0 phases 0
+Mother Fang #7536 hp 9000 dmg 30 speed 6 swing 1 scale 0.83 xp 60 level 10 from 360 cost 0 big false roam false last false ranged 0 phases 4
+Princess #703 hp 28000 dmg 46 speed 6.2 swing 1 scale 4.46 xp 100 level 11 from 720 cost 0 big false roam false last false ranged 0 phases 0
+Morgan the Collector #2322 hp 52500 dmg 54 speed 6.6 swing 1 scale 8.24 xp 150 level 12 from 960 cost 0 big false roam false last true ranged 0 phases 0
 Kobold Taskmaster #163 hp 600 dmg 18 speed 5.4 swing 2 scale 2.03 xp 25 level 10 from 210 cost 0 big false roam true last false ranged 0 phases 0
 Gruff Swiftbite #246 hp 800 dmg 22 speed 6.6 swing 1.6 scale 1.62 xp 28 level 10 from 480 cost 0 big false roam true last false ranged 0 phases 0
 Fedfennel #204 hp 17000 dmg 38 speed 5.4 swing 1 scale 2.98 xp 80 level 11 from 540 cost 0 big false roam false last false ranged 0 phases 0
@@ -137,7 +137,7 @@ lair Fedfennel @1200 slain 0: 80155.000 34.4105
 lair Fedfennel @1200 slain 2: 80155.000 34.4105
 lair Bellygrub @1200 slain 0: 43050.000 138.4387
 lair Bellygrub @1200 slain 2: 64575.000 152.2826
-boss Hogger: 16974.000 19.9218 5.600
+boss Hogger: 16974.000 19.9218 9.250
 boss Mother Fang: 42435.000 27.1662 6.000
 boss Princess: 132020.000 41.6548 6.200
 boss Morgan the Collector: 247537.500 48.8991 6.600

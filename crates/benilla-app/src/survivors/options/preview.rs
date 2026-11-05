@@ -686,6 +686,7 @@ mod tests {
     fn the_plates_tab_previews_the_live_settings() {
         let mut world = World::new();
         world.insert_resource(super::super::super::hud::HudFont(Handle::default()));
+        world.init_resource::<Assets<Image>>();
         world.run_system_once(super::super::spawn).unwrap();
         let (topic, tab) = PLATES;
         world.insert_resource(Options {

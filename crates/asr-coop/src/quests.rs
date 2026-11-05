@@ -221,7 +221,7 @@ impl QuestCatalog {
     }
 
     /// Earn every achievement whose criteria or prerequisites are met, paying its points.
-    fn earn(&self, inventory: &mut Inventory, now: u64) -> Vec<String> {
+    pub(crate) fn earn(&self, inventory: &mut Inventory, now: u64) -> Vec<String> {
         let mut earned = Vec::new();
         loop {
             let ready = self.achievements.iter().find(|def| {

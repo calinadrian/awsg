@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 
 use super::appearance::{self, DIALS};
-use super::front_end::{self as skin, gap, size};
+use super::menu_skin::{self as skin, gap, size};
 use super::menu::MenuAction;
 
 const ROW: f32 = 22.;
@@ -72,6 +72,7 @@ fn arrow(row: &mut ChildSpawnerCommands, f: &Handle<Font>, glyph: &str, action: 
     row.spawn((
         Button,
         action,
+        skin::MenuControl,
         skin::Control {
             primary: false,
             selected: false,

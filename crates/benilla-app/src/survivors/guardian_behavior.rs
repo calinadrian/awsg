@@ -227,6 +227,7 @@ fn charge(
     tele.lane(pos, to, half, now, 1.0, 1.0 + rush);
     fx.cast(entity, 100, &[], None);
     en.charge = Some(Charge {
+        boar_impact: None,
         to,
         spell: 100,
         damage: 2.0 * en.damage * en.weaken,

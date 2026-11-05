@@ -1,7 +1,7 @@
 //! Inventory, equipment and shared auctions in the character menu.
 use super::{
     coop::Coop,
-    front_end::{self as skin, gap, size},
+    menu_skin::{self as skin, gap, size},
     hud::HudFont,
     inventory::{Equipment, Pane},
     Phase, Selection,
@@ -10,6 +10,9 @@ use crate::glue::GlueClicks;
 use asr_coop::economy::{Action as Trade, Definition, Item, SLOTS};
 use bevy::input::{keyboard::KeyboardInput, ButtonState};
 use bevy::prelude::*;
+
+#[path = "item_viewer.rs"]
+mod item_viewer;
 
 #[derive(Component, Clone)]
 pub(super) enum Action {
@@ -33,14 +36,26 @@ pub(super) enum Action {
     Keep,
     Refresh,
     Redeem(bool),
+    ViewerRace(u8),
+    ViewerClass(u8),
+    ViewerSex(u8),
+    ViewerTry(String),
+    ViewerRemove(String),
+    ViewerClear,
+    ViewerHand(bool),
+    ViewerRotate(f32),
+    ViewerZoom(f32),
+    ViewerZone,
+    ViewerSort,
+    ViewerSlot,
+    ViewerQuality,
+    ViewerReset,
     LootClass(Option<u8>),
     LootSlot,
     LootQuality,
     LootSource,
     Search,
     ClearSearch,
-    /// Keep the bags in the solo economy (true) or on the online realm (false).
-    Realm(bool),
     /// Open a quest in the quest log.
     QuestPick(String),
     /// Offer quests from one economy zone, or from all the hero's zones.
@@ -69,9 +84,9 @@ struct ItemTipRoot;
 struct ScrollMemory {
     positions: [Vec2; 8],
     #[allow(clippy::type_complexity)]
-    query: Option<(Option<usize>, Pane, usize, Option<usize>, String, (Option<u8>, Option<usize>, usize, usize), (Option<String>, usize))>,
+    query: Option<(Option<usize>, Pane, usize, Option<usize>, String, (Option<u8>, Option<usize>, usize, usize), (Option<String>, usize), (Option<u8>, u8, Option<String>, Option<usize>, usize, bool))>,
 }
-const BAG_MIN_SLOTS: usize = 72;
+const BAG_MIN_SLOTS: usize = 50;
 /// A bag slot's target size and the gap between slots, in canvas units.
 const BAG_CELL: f32 = 46.;
 const BAG_GAP: f32 = 5.;
@@ -106,6 +121,8 @@ fn button(
 ) -> Entity {
     p.spawn((
         Button,
+
+        skin::MenuControl,
         action,
         skin::Control {
             primary: false,
@@ -152,7 +169,7 @@ pub(super) fn choice(
         },
         BorderColor::all(if selected { skin::GOLD } else { skin::EDGE }),
         BackgroundColor(if selected {
-            Color::srgb(0.19, 0.045, 0.02)
+            Color::srgb(0.16, 0.08, 0.12)
         } else {
             skin::SURFACE
         }),
@@ -282,6 +299,8 @@ fn doll_slot(
         SlotFrame,
         ItemTip(item.map(|(item, _)| item.clone())),
         Button,
+
+        skin::MenuControl,
         action,
         skin::Control {
             primary: false,
@@ -297,11 +316,11 @@ fn doll_slot(
             flex_shrink: 0.,
             ..default()
         },
-        BackgroundColor(Color::srgb(0.035, 0.032, 0.025)),
+        BackgroundColor(skin::WELL),
         BorderColor::all(if selected || filtered {
             skin::GOLD
         } else {
-            Color::srgb(0.25, 0.24, 0.23)
+            skin::EDGE
         }),
     ))
     .with_children(|p| {
@@ -416,6 +435,12 @@ fn input(
         .and_then(|id| gear.listings.iter().find(|l| l.id == id).cloned());
     let mut trade = None;
     gear.search_active = matches!(action, Action::Search);
+    if matches!(action, Action::Open(Pane::Items) | Action::Tab(Pane::Items)) && gear.viewer_race.is_none() {
+        let race = selection.look.and_then(|i| selection.looks.get(i)).map_or(1, |look| look.1);
+        gear.viewer_class = class;
+        gear.viewer_sex = selection.look.and_then(|i| selection.looks.get(i)).map_or(0, |look| look.2);
+        item_viewer::pick_race(&mut gear, race);
+    }
     match action {
         Action::Open(pane) => {
             gear.open = true;
@@ -433,7 +458,6 @@ fn input(
             gear.open = false;
             gear.confirm = None;
         }
-        Action::Realm(solo) => gear.set_solo(solo),
         Action::Tab(pane) => {
             gear.pane = pane;
             gear.filter = 0;
@@ -514,6 +538,42 @@ fn input(
             }
         }
         Action::Redeem(gear_reward) => trade = Some(Trade::RedeemAchievement { gear: gear_reward }),
+        Action::ViewerRace(race) => item_viewer::pick_race(&mut gear, race),
+        Action::ViewerClass(class) => {
+            if super::races::RACES.iter().any(|r| Some(r.id) == gear.viewer_race && r.classes.contains(&class))
+                && super::data::CLASSES.iter().any(|c| c.id == class) {
+                gear.viewer_class = class;
+                item_viewer::fit_outfit(&mut gear);
+            }
+        }
+        Action::ViewerSex(sex) => gear.viewer_sex = sex.min(1),
+        Action::ViewerTry(id) => item_viewer::try_item(&mut gear, &id),
+        Action::ViewerRemove(slot) => { gear.viewer_outfit.remove(&slot); }
+        Action::ViewerClear => gear.viewer_outfit.clear(),
+        Action::ViewerHand(off_hand) => gear.viewer_off_hand = off_hand,
+        Action::ViewerRotate(delta) => gear.viewer_yaw = (gear.viewer_yaw + delta).rem_euclid(std::f32::consts::TAU),
+        Action::ViewerZoom(delta) => gear.viewer_zoom = (gear.viewer_zoom + delta).clamp(0.6, 1.6),
+        Action::ViewerSort => gear.viewer_sort_zone = !gear.viewer_sort_zone,
+        Action::ViewerZone => {
+            gear.viewer_zone = match gear.viewer_zone.as_ref() {
+                None => gear.catalog.zones.keys().next().cloned(),
+                Some(zone) => gear.catalog.zones.keys().skip_while(|id| *id != zone).nth(1).cloned(),
+            };
+        }
+        Action::ViewerSlot => {
+            gear.viewer_slot = match gear.viewer_slot {
+                None => Some(0),
+                Some(index) if index + 1 < SLOTS.len() => Some(index + 1),
+                _ => None,
+            };
+        }
+        Action::ViewerQuality => gear.viewer_quality = (gear.viewer_quality + 1) % 5,
+        Action::ViewerReset => {
+            gear.viewer_zone = None;
+            gear.viewer_slot = None;
+            gear.viewer_quality = 0;
+            gear.search.clear();
+        }
         Action::LootClass(class) => gear.loot_class = class,
         Action::LootSlot => {
             gear.loot_slot = match gear.loot_slot {
@@ -658,6 +718,7 @@ impl Preview {
                     "inventory" => Pane::Inventory,
                     "auction" => Pane::Auction,
                     "drops" => Pane::Drops,
+                    "items" | "viewer" => Pane::Items,
                     "quests" => Pane::Quests,
                     "achievements" => Pane::Achievements,
                     _ => return None,
@@ -821,7 +882,7 @@ fn item_slot(
     );
     let node = Node {
         width: Val::Percent(100.),
-        aspect_ratio: Some(1.),
+        height: Val::Px(BAG_CELL),
         padding: UiRect::all(Val::Px(2.)),
         row_gap: Val::Px(1.),
         align_items: AlignItems::Center,
@@ -879,6 +940,8 @@ fn item_slot(
             SlotFrame,
             ItemTip(item.map(|(item, _)| item.clone())),
             Button,
+
+            skin::MenuControl,
             action,
             skin::Control {
                 primary: false,
@@ -958,10 +1021,14 @@ fn detail(
     skin::label(
         p,
         f,
-        gear.catalog
-            .zones
-            .get(&d.zone)
-            .map_or(d.zone.as_str(), |z| z.name.as_str()),
+        if d.is_starter() {
+            "Starter gear"
+        } else {
+            gear.catalog
+                .zones
+                .get(&d.zone)
+                .map_or(d.zone.as_str(), |z| z.name.as_str())
+        },
         12.,
         skin::MUTED,
     );
@@ -1006,7 +1073,7 @@ fn detail(
         skin::label(
             p,
             f,
-            "The inventory server is offline. Item actions will be queued until it reconnects.",
+            "Loading the saved inventory. Item actions are applied locally once it is ready.",
             11.,
             skin::MUTED,
         );
@@ -1107,6 +1174,8 @@ fn detail(
                 Action::Upgrade,
                 enabled && !item.locked && !item.listed,
             );
+        } else if d.is_starter() {
+            skin::label(p, f, "Starter gear cannot be upgraded", 13., skin::MUTED);
         } else {
             skin::label(p, f, "Fully upgraded (+5)", 13., skin::GREEN);
         }
@@ -1446,13 +1515,14 @@ fn bag_grid(
             .then_some((i, d))
         })
         .collect();
-    // Whole rows only: the empty slots round the bag up to a full last row.
-    let slots = items.len().max(BAG_MIN_SLOTS).div_ceil(columns) * columns;
+    // Always show 50 slots; additional owned items extend the grid without a storage cap.
+    let slots = items.len().max(BAG_MIN_SLOTS);
     p.spawn(scroller(1)).with_children(|p| {
         p.spawn(Node {
             width: Val::Percent(100.),
             display: Display::Grid,
-            grid_template_columns: RepeatedGridTrack::flex(columns as u16, 1.),
+            grid_template_columns: RepeatedGridTrack::px(columns as u16, BAG_CELL),
+            grid_auto_rows: vec![GridTrack::px(BAG_CELL)],
             flex_shrink: 0.,
             column_gap: Val::Px(BAG_GAP),
             row_gap: Val::Px(BAG_GAP),
@@ -1493,7 +1563,7 @@ fn paper_doll(
     hero: Option<&super::inventory::HeroSave>,
     class: &super::data::ClassDef,
 ) {
-    skin::label(p, f, "EQUIPMENT", 12., skin::MUTED);
+    skin::heading(p, f, "Equipment");
     let equipped = |slot: &str| {
         hero.and_then(|h| {
             h.inventory
@@ -1550,7 +1620,7 @@ fn paper_doll(
             ..default()
         })
         .with_children(|center| {
-            skin::label(center, f, class.name, 20., skin::GOLD);
+            skin::label(center, f, class.name, 18., super::hud::rgb(class.color));
             let count = hero.map_or(0, |h| {
                 h.inventory
                     .items
@@ -1658,6 +1728,8 @@ fn auction_list(p: &mut ChildSpawnerCommands, f: &Handle<Font>, gear: &Equipment
             let selected = gear.listing == Some(sale.id);
             p.spawn((
                 Button,
+
+                skin::MenuControl,
                 Action::Listing(sale.id),
                 ItemTip(Some(sale.item.clone())),
                 skin::Control {
@@ -1751,6 +1823,8 @@ fn search_box(p: &mut ChildSpawnerCommands, f: &Handle<Font>, gear: &Equipment) 
     .with_children(|p| {
         p.spawn((
             Button,
+
+            skin::MenuControl,
             Action::Search,
             skin::Control {
                 primary: false,
@@ -1800,10 +1874,11 @@ fn search_box(p: &mut ChildSpawnerCommands, f: &Handle<Font>, gear: &Equipment) 
     });
 }
 /// The account window's tabs, in bar order.
-const PANES: [(Pane, &str); 5] = [
+const PANES: [(Pane, &str); 6] = [
     (Pane::Inventory, "Inventory"),
     (Pane::Auction, "Auction House"),
     (Pane::Drops, "Zone Drops"),
+    (Pane::Items, "Item Viewer"),
     (Pane::Quests, "Quests"),
     (Pane::Achievements, "Achievements"),
 ];
@@ -1848,7 +1923,7 @@ fn draw(
     };
     let f = &font.0;
     let realm = gear.realm(&coop);
-    let solo = realm == super::inventory::SOLO;
+    let solo = !gear.server_online();
     let shared_view = gear.view(&realm, class.id);
     let hero = shared_view.as_ref();
     // The panes share the window's inner width by weight, so the bags know their columns.
@@ -1866,7 +1941,7 @@ fn draw(
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0., 0., 0., 0.80)),
+            BackgroundColor(skin::INK),
             GlobalZIndex(400),
         ))
         .with_children(|root| {
@@ -1880,8 +1955,24 @@ fn draw(
                 ..default()
             }))
             .with_children(|p| {
-                // The tab bar never moves: no per-tab title in front of it.
                 p.spawn(Node {
+                    width: Val::Percent(100.), justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center, flex_shrink: 0., column_gap: Val::Px(gap::M), ..default()
+                }).with_children(|head| {
+                    skin::label(head, f, PANES.iter().find(|(tab, _)| *tab == pane).map_or("Inventory", |(_, title)| *title), size::HEADING, skin::TEXT);
+                    if pane == Pane::Items {
+                        skin::label(head, f, "Click gear to try it on · hover for stats", size::SMALL, skin::MUTED);
+                    } else {
+                    skin::label(head, f, format!("{}  /  Gear {}  ·  {} gold  ·  {} AP", class.name,
+                        hero.map_or(0, |h| h.inventory.gear_score(&gear.catalog, class.id)),
+                        hero.map_or(0, |h| h.inventory.gold),
+                        hero.map_or(0, |h| h.inventory.achievement_points)), size::SMALL, skin::MUTED);
+                    }
+                });
+                // Navigation stays separate from the account totals.
+                p.spawn(Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    row_gap: Val::Px(gap::XS),
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(gap::S),
                     flex_shrink: 0.,
@@ -1895,30 +1986,11 @@ fn draw(
                         flex_grow: 1.,
                         ..default()
                     });
-                    // Which economy these bags are: the player's own, or the shared realm.
-                    if cfg!(target_arch = "wasm32") {
-                        skin::chip(p, f, "Solo", skin::GREEN);
-                    } else {
-                        let solo = gear.solo();
-                        skin::tab_state(p, f, "Solo", Action::Realm(true), solo);
-                        skin::tab_state(p, f, "Online", Action::Realm(false), !solo);
-                    }
+                    skin::chip(p, f, if gear.server_online() { "Connected / auto-sync" } else { "Offline / saved locally" }, if gear.server_online() { skin::GREEN } else { skin::MUTED });
                     p.spawn(Node {
                         width: Val::Px(gap::M),
                         ..default()
                     });
-                    skin::label(
-                        p,
-                        f,
-                        format!(
-                            "Gear score {}  ·  {} gold  ·  {} AP",
-                            hero.map_or(0, |h| h.inventory.gear_score(&gear.catalog, class.id)),
-                            hero.map_or(0, |h| h.inventory.gold),
-                            hero.map_or(0, |h| h.inventory.achievement_points)
-                        ),
-                        size::LEAD,
-                        skin::GOLD,
-                    );
                     skin::tab(p, f, "Close", Action::Close);
                 });
                 skin::rule(p);
@@ -1945,21 +2017,22 @@ fn draw(
                                 ..default()
                             }))
                             .with_children(|p| {
-                                skin::label(p, f, "The Auction House is for online realms", size::HEADING, skin::GOLD);
+                                skin::label(p, f, "The Auction House needs a server connection", size::HEADING, skin::GOLD);
                                 let note = skin::label(
                                     p,
                                     f,
-                                    "Solo heroes keep everything they find; trading needs other players. Your solo bags, drops, quests and achievements are saved on this device.",
+                                    "Your inventory and progress are saved locally. They synchronize automatically when the server is available again.",
                                     size::BODY,
                                     skin::TEXT,
                                 );
                                 p.commands().entity(note).insert(TextLayout::new_with_justify(Justify::Center));
                                 if !cfg!(target_arch = "wasm32") {
-                                    skin::tab(p, f, "Play online instead", Action::Realm(false));
+                                    skin::tab(p, f, "Retry connection", Action::Refresh);
                                 }
                             });
                         });
                     }
+                    Pane::Items => item_viewer::build(body, f, &gear, inner),
                     Pane::Drops => {
                         body.spawn(pane_node(1.)).with_children(|p| {
                             zone_loot(p, f, &gear, selection.map_def().name);
@@ -1999,6 +2072,7 @@ fn draw(
                                         skin::MUTED,
                                     );
                                 } else {
+                                    skin::heading(p, f, "Bags");
                                     row(p, |p| {
                                         for (i, name) in ["All", "Cloth", "Leather", "Mail", "Plate"]
                                             .iter()
@@ -2157,6 +2231,7 @@ fn scroll(
         gear.search.clone(),
         (gear.loot_class, gear.loot_slot, gear.loot_quality, gear.loot_source),
         (gear.quest_zone.clone(), gear.category),
+        (gear.viewer_race, gear.viewer_class, gear.viewer_zone.clone(), gear.viewer_slot, gear.viewer_quality, gear.viewer_sort_zone),
     );
     let reset = memory.query.as_ref() != Some(&query);
     if reset {
@@ -2198,11 +2273,11 @@ fn slot_colors(
         *border = BorderColor::all(if style.selected {
             skin::GOLD
         } else if hot {
-            Color::srgb(0.69, 0.55, 0.24)
+            Color::srgb(0.64, 0.69, 0.74)
         } else {
-            Color::srgb(0.28, 0.27, 0.28)
+            skin::EDGE
         });
-        background.0 = Color::srgb(0.035, 0.032, 0.025);
+        background.0 = skin::WELL;
     }
 }
 fn scrollbars(
@@ -2276,7 +2351,7 @@ fn tooltip_panel() -> impl Bundle {
             ..default()
         },
         BackgroundColor(Color::srgba(0.012, 0.012, 0.012, 0.97)),
-        BorderColor::all(Color::srgb(0.46, 0.46, 0.46)),
+        BorderColor::all(skin::EDGE),
         bevy::ui::FocusPolicy::Pass,
     )
 }
@@ -2359,7 +2434,7 @@ fn item_tooltip(
     mut tips: Query<(Entity, &ComputedNode, &mut Node, &mut Visibility), With<ItemTipRoot>>,
     mut shown: Local<Option<(u64, String, u8, u64, u8)>>,
 ) {
-    let class = selection.class_def().map_or(0, |class| class.id);
+    let class = if gear.pane == Pane::Items { gear.viewer_class } else { selection.class_def().map_or(0, |class| class.id) };
     let hovered = slots
         .iter()
         .find(|(tip, interaction, ..)| tip.0.is_some() && **interaction != Interaction::None)
@@ -2476,7 +2551,7 @@ fn item_tooltip(
                             },
                         );
                     }
-                    if item.slot.is_none() && d.can_use(class) {
+                    if gear.pane != Pane::Items && item.slot.is_none() && d.can_use(class) {
                         compare(p, &font.0, &gear, &coop, class, item, d);
                     }
                     let classes = d
@@ -2522,7 +2597,8 @@ fn item_tooltip(
                     .zones
                     .get(&d.zone)
                     .map_or(d.zone.as_str(), |zone| zone.name.as_str());
-                root.spawn(tooltip_panel()).with_children(|p| {
+                // Starter gear drops nowhere, so it has no source line.
+                if !d.is_starter() { root.spawn(tooltip_panel()).with_children(|p| {
                     p.spawn((
                         Text::new("- Drops from elites and bosses in "),
                         TextFont {
@@ -2549,7 +2625,7 @@ fn item_tooltip(
                             TextColor(Color::srgb(0., 0.65, 1.)),
                         ));
                     });
-                });
+                }); }
             });
         return;
     }

@@ -26,6 +26,18 @@ fn secret() -> String {
     )
 }
 impl Host for Disk<'_> {
+    fn backup_before_sync(&mut self, state: &[u8]) -> Result<(), String> {
+        let path = self.path.with_extension("before-offline-sync.json");
+        if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        match OpenOptions::new().write(true).create_new(true).open(path) {
+            Ok(mut file) => file.write_all(state).and_then(|_| file.sync_all()).map_err(|e| e.to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let bytes = std::fs::read(self.path.with_extension("before-offline-sync.json")).map_err(|e| e.to_string())?;
+                serde_json::from_slice::<State>(&bytes).map(|_| ()).map_err(|e| format!("Pre-sync backup is unreadable: {e}"))
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
     fn now(&mut self) -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

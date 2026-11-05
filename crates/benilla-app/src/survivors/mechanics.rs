@@ -104,6 +104,7 @@ pub(crate) struct Phase {
 pub(crate) struct Kit {
     pub phases: &'static [Phase],
     /// Seconds after it arrives that it enrages, hitting harder and faster; 0 for never.
+    #[allow(dead_code)] // Legacy kit value; all bosses now use boss_enrage::SECONDS.
     pub enrage: f32,
 }
 
@@ -200,6 +201,7 @@ pub(super) struct Guard(pub Entity);
 struct Slot {
     mv: Move,
     wait: f32,
+    ready: bool,
 }
 
 /// Where a blow lands, as the players' feet are tested against it.
@@ -312,6 +314,12 @@ pub(super) struct Mechanics {
 }
 
 impl Mechanics {
+    pub(super) fn enrage_pending(&mut self) {
+        for impact in &mut self.impacts { impact.damage *= super::boss_enrage::DAMAGE; impact.dot *= super::boss_enrage::DAMAGE; }
+        for queued in &mut self.queued { queued.damage *= super::boss_enrage::DAMAGE; }
+        if let Some(closing) = self.closing.as_mut() { closing.damage *= super::boss_enrage::DAMAGE; }
+        if let Some(second) = self.second.as_mut() { second.2 *= super::boss_enrage::DAMAGE; }
+    }
     pub(super) fn boss(kit: &'static Kit) -> Self {
         Self::new(Some(kit), 0)
     }
@@ -320,7 +328,11 @@ impl Mechanics {
         let mut m = Self::new(None, affixes);
         m.moves = affix_moves(affixes)
             .into_iter()
-            .map(|mv| Slot { mv, wait: mv.first })
+            .map(|mv| Slot {
+                mv,
+                wait: mv.first,
+                ready: false,
+            })
             .collect();
         m
     }
@@ -367,7 +379,36 @@ impl Mechanics {
     /// how far through it is.
     pub(super) fn casting(&self, now: f32) -> Option<(u32, &'static str, f32)> {
         let (spell, verb, from, to) = self.cast?;
-        (now < to).then(|| (spell, verb_name(verb), ((now - from) / (to - from)).clamp(0.0, 1.0)))
+        (now < to).then(|| {
+            (
+                spell,
+                verb_name(verb),
+                ((now - from) / (to - from)).clamp(0.0, 1.0),
+            )
+        })
+    }
+
+    /// Read the interpreter's live clocks; a failed range/busy check remains ready.
+    pub(super) fn cooldowns(&self, now: f32) -> Vec<super::boss_cooldowns::Timer> {
+        self.moves
+            .iter()
+            .map(|slot| {
+                let cast = self.cast.filter(|(spell, verb, _, to)| {
+                    *spell == slot.mv.spell && *verb == slot.mv.verb && *to > now
+                });
+                super::boss_cooldowns::Timer {
+                    spell: slot.mv.spell,
+                    name: verb_name(slot.mv.verb).to_string(),
+                    due: now + slot.wait.max(0.0),
+                    period: (slot.mv.every * if self.enraged { 0.6 } else { 1.0 })
+                        .max(slot.mv.first)
+                        .max(0.1),
+                    cast_until: cast.map_or(0.0, |(_, _, _, to)| to),
+                    cast_duration: cast.map_or(0.0, |(_, _, from, to)| to - from),
+                    ready: slot.ready || slot.wait <= 0.0,
+                }
+            })
+            .collect()
     }
 
     /// Takes every turn its health has reached, returning the lines it yells.
@@ -383,7 +424,11 @@ impl Mechanics {
             }
             for op in phase.ops {
                 match *op {
-                    Op::Add(mv) => self.moves.push(Slot { mv, wait: mv.first }),
+                    Op::Add(mv) => self.moves.push(Slot {
+                        mv,
+                        wait: mv.first,
+                        ready: false,
+                    }),
                     Op::Remove(id) => self.moves.retain(|s| s.mv.id != id),
                 }
             }
@@ -478,6 +523,7 @@ fn charge(en: &mut Enemy, pos: Vec3, to: Vec3, ground: &super::dungeon::Ground, 
     let rush = (d + 4.0) / SPEED + 0.3;
     tele.lane(pos, end, en.radius.max(1.0) + 0.6, now, WINDUP, WINDUP + rush);
     en.charge = Some(Charge {
+        boar_impact: None,
         to: end,
         spell,
         damage,
@@ -510,6 +556,7 @@ pub(super) fn run_mechanics(
     guards: Query<(&Guard, &Enemy), Without<Mechanics>>,
     mut fx: Fx,
     mut tele: ResMut<Telegraphs>,
+    mut windups: ResMut<super::boss_pacing::Windups>,
     coop: Res<super::coop::Coop>,
     allies: Query<(Entity, &super::coop::Ally)>,
 ) {
@@ -576,7 +623,7 @@ pub(super) fn run_mechanics(
             m.last_hp = en.hp;
             continue;
         }
-        let born = *m.born.get_or_insert(now);
+        m.born.get_or_insert(now);
         if m.speed <= 0.0 {
             m.speed = en.speed;
         }
@@ -590,16 +637,6 @@ pub(super) fn run_mechanics(
             debug!("survivors mechanics: {} turns at {:.0}%: {line}", en.def.name, en.hp / en.max_hp * 100.0);
             run.yell = Some((format!("{} yells: {line}", en.def.name), 4.0));
         }
-        if let Some(kit) = m.kit {
-            if kit.enrage > 0.0 && !m.enraged && now - born >= kit.enrage {
-                // Its swings and its moves hit half again as hard, and its moves come faster.
-                m.enraged = true;
-                en.damage *= 1.5;
-                fx.cast(e, spell::ENRAGE, &[], None);
-                run.yell = Some((format!("{} becomes enraged!", en.def.name), 4.0));
-            }
-        }
-
         // The passive affixes.
         if m.affixes & affix::JUGGERNAUT != 0 {
             en.stun_t = 0.0;
@@ -750,12 +787,19 @@ pub(super) fn run_mechanics(
             let Move { verb, spell, every, power: scale, .. } = m.moves[slot].mv;
             let support = matches!(verb, Verb::Summon { .. } | Verb::Shield { .. } | Verb::Fixate { .. });
             if !support && !free {
+                m.moves[slot].ready = true;
+                continue;
+            }
+            let major = !support && !matches!(verb, Verb::Throw { .. } | Verb::Pool { .. });
+            if en.boss && major && !windups.available(now) {
+                m.moves[slot].ready = true;
                 continue;
             }
             // Out of reach, it tries again shortly.
             let retry = match verb {
-                Verb::Stomp { radius } | Verb::Vortex { radius, .. } => dist > radius * 2.0 + 6.0,
-                Verb::Cone { radius, .. } => dist > radius + 4.0,
+                Verb::Stomp { radius } => !targets.iter().any(|t| flat(t.pos - pos).length() <= radius),
+                Verb::Vortex { radius, .. } => dist > radius * 2.0 + 6.0,
+                Verb::Cone { radius, .. } => dist > radius,
                 Verb::Charge { .. } => !(4.0..=30.0).contains(&dist) || en.root_t > 0.0,
                 Verb::Blink => dist < 6.0 || dist > 40.0,
                 Verb::Throw { .. } | Verb::Bombs { .. } | Verb::Pool { .. } => dist > 32.0,
@@ -766,9 +810,12 @@ pub(super) fn run_mechanics(
             };
             if retry {
                 m.moves[slot].wait = 1.0;
+                m.moves[slot].ready = true;
                 continue;
             }
             m.moves[slot].wait = every * pace;
+            m.moves[slot].ready = false;
+            if en.boss && major { windups.take(now); }
             let damage = power * scale;
             let was_busy = m.busy;
             debug!("survivors mechanics: {} {:?} for {damage:.0} at t={now:.0}", en.def.name, verb);
@@ -853,7 +900,10 @@ pub(super) fn run_mechanics(
                         let def = rows[rng.index(rows.len())];
                         let a = n as f32 / f32::from(count) * std::f32::consts::TAU;
                         let at = ground.spawn_spot(pos + Vec3::new(a.cos(), 0.0, a.sin()) * 4.0, pos.y);
-                        enemies::spawn_enemy(&mut commands, &mut run, def, at, tpos, false);
+                        let summoned = enemies::spawn_enemy(&mut commands, &mut run, def, at, tpos, false);
+                        if en.boss && summoned != Entity::PLACEHOLDER {
+                            commands.entity(summoned).entry::<Enemy>().and_modify(|mut add| add.boss_minion = true);
+                        }
                     }
                 }
                 Verb::Soak { radius, need } => {
@@ -1099,26 +1149,38 @@ pub(super) fn auras(
     spell_name: impl Fn(u32) -> Option<String>,
 ) -> Vec<Aura> {
     let mut out = Vec::new();
-    if let Some(m) = mech {
-        if let Some(kit) = m.kit.filter(|k| k.enrage > 0.0) {
-            if m.enraged {
-                out.push(aura(
-                    spell::ENRAGE,
-                    "Enraged",
-                    "Its swings and abilities hit 50% harder, and its abilities come faster.",
-                    None,
-                    true,
-                ));
-            } else if let Some(born) = m.born {
-                out.push(aura(
-                    spell::ENRAGE,
-                    "Enrage Timer",
-                    "Enrages when the timer runs out: 50% more damage and faster abilities.",
-                    Some((born + kit.enrage - now).max(0.0)),
-                    true,
-                ));
-            }
+    if en.boss {
+        out.push(aura(
+            super::almighty_strength::ICON,
+            super::almighty_strength::NAME,
+            super::almighty_strength::DESCRIPTION,
+            None,
+            true,
+        ));
+    }
+    if en.boss && en.def.name == "Morgan the Collector" && en.hp <= en.max_hp * 0.2 {
+        out.push(aura(8599, "Last Stand",
+            "Triggered at 20% health: ability cooldowns are 20% shorter. Explosive coin bags detonate twice. No more reinforcements. Stacks with the three-minute Berserk.",
+            None, true));
+    }
+    if en.boss && !en.dead {
+        if en.timed_enraged {
+            out.push(aura(8599, super::boss_enrage::NAME, super::boss_enrage::DESCRIPTION, None, true));
+        } else {
+            out.push(aura(8599, "Berserk Timer", "Defeat this boss within three minutes or it gains 500% damage and 50% movement speed.",
+                Some((en.enrage_at - now).max(0.0)), true));
         }
+    }
+    if en.hogger_enraged {
+        out.push(aura(
+            super::hogger::FRENZY_ICON,
+            super::hogger::FRENZY_NAME,
+            super::hogger::FRENZY_DESCRIPTION,
+            None,
+            true,
+        ));
+    }
+    if let Some(m) = mech {
         if let Some((_, until)) = m.ward.filter(|_| en.ward) {
             out.push(aura(
                 642,
@@ -1151,7 +1213,8 @@ pub(super) fn auras(
     if en.stun_t > 0.0 {
         out.push(aura(853, "Stunned", "Cannot move or attack.", Some(en.stun_t), false));
     }
-    if en.root_t > 0.0 && mech.is_none_or(|m| m.mend.is_none()) {
+    // A boss holding still for its own warning is not suffering a hostile root.
+    if !en.boss && en.root_t > 0.0 && mech.is_none_or(|m| m.mend.is_none()) {
         out.push(aura(122, "Rooted", "Cannot move.", Some(en.root_t), false));
     }
     if en.fear_t > 0.0 {

@@ -4,11 +4,13 @@ pub mod economy;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod economy_store;
 pub mod ledger;
+pub mod offline;
 pub mod quests;
+pub mod starter;
 pub mod story;
 
 pub const PROTOCOL: u32 = 1;
-pub const BUILD: &str = "asr-elwynn-coop-economy-7";
+pub const BUILD: &str = "asr-elwynn-coop-economy-8-offline-sync";
 pub const MAX_PLAYERS: usize = 4;
 pub const MAX_MESSAGE: usize = 2 * 1024 * 1024;
 

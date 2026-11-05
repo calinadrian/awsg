@@ -10,15 +10,9 @@ pub(super) struct Race {
 }
 include!("races_data.rs");
 
-pub(super) fn unlock_zone(race: u8) -> Option<&'static str> {
-    match race {
-        3 | 7 => Some("Dun Morogh"),
-        4 => Some("Teldrassil"),
-        5 => Some("Tirisfal Glades"),
-        6 => Some("Mulgore"),
-        8 => Some("Durotar"),
-        _ => None,
-    }
+// Classic races are starter choices; no zone currently awards an additional race.
+pub(super) fn unlock_zone(_race: u8) -> Option<&'static str> {
+    None
 }
 
 pub(super) fn can_enter(race: u8, zone: &str) -> bool {

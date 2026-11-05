@@ -272,8 +272,7 @@ class Package:
         for display in sorted(ids):
             row = displays.by_id.get(display)
             if row is None:
-                self.source_missing.append(dict(display=display, reason='absent from source CreatureDisplayInfo'))
-                continue
+                raise ValueError(f'Required creature display {display} is missing from source CreatureDisplayInfo')
             model = models.by_id[row[1]]
             path = canonical(models.text(model[2]))
             self.add(path, f'creature display {display}')

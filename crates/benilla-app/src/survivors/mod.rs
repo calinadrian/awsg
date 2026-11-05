@@ -5,11 +5,21 @@
 //! hero is driven by WoW's own player controller ([`drive`]).
 
 mod abilities;
+mod almighty_strength;
 mod amulets;
 pub(crate) mod appearance;
 mod auto;
 mod auto_attack;
 mod boss_scripts;
+mod boss_cooldowns;
+mod boss_pacing;
+mod boss_enrage;
+mod hogger;
+mod mother_fang;
+mod princess;
+mod morgan;
+mod encounter_announcer;
+mod hud_notices;
 mod caches;
 mod card_content;
 mod card_view;
@@ -54,6 +64,9 @@ mod mechanics;
 mod menu;
 mod menu_icons;
 mod menu_layout;
+mod menu_skin;
+mod menu_preview;
+mod item_preview;
 mod minimap;
 mod options;
 mod plates;
@@ -112,6 +125,7 @@ impl Plugin for SurvivorsPlugin {
             .init_resource::<caches::Spawner>()
             .init_resource::<Selection>()
             .init_resource::<Run>()
+            .init_resource::<boss_pacing::Windups>()
             .init_resource::<hero::CamRig>()
             .init_resource::<hero::AimPoint>()
             .init_resource::<auto_attack::AutoAttack>()
@@ -146,11 +160,21 @@ impl Plugin for SurvivorsPlugin {
             )
             .add_plugins(unit_frames::plugin)
             .add_plugins(hud_layout::plugin)
+            .add_plugins(boss_cooldowns::plugin)
+            .add_plugins(boss_enrage::plugin)
+            .add_plugins(hogger::plugin)
+            .add_plugins(mother_fang::plugin)
+            .add_plugins(morgan::plugin)
+            .add_plugins(encounter_announcer::plugin)
+            .add_plugins(hud_notices::plugin)
             .add_plugins(magnets::plugin)
             .add_plugins(test_grounds::plugin)
             .add_plugins(appearance::plugin)
             .add_plugins((inventory::plugin, inventory_ui::plugin, inventory_outfit::plugin))
             .add_plugins(adventure_atlas::plugin)
+            .add_plugins(menu_preview::plugin)
+            .add_plugins(item_preview::plugin)
+            .add_systems(Update, menu_skin::hover.after(front_end::hover).after(menu::refresh_menu_ui))
             .add_plugins(ui_audit::plugin)
             .add_systems(
                 Update,
@@ -202,6 +226,7 @@ impl Plugin for SurvivorsPlugin {
                     abilities::tick_areas.run_if(in_state(Phase::Playing)),
                     abilities::apply_hits,
                     coop::apply_guest_hits,
+                    morgan::cleanup.run_if(coop::authority),
                     enemies::tick_marks,
                     enemies::drop_loot.run_if(coop::authority),
                     enemies::collect_gems.run_if(coop::authority),
@@ -238,6 +263,7 @@ impl Plugin for SurvivorsPlugin {
                         menu::refresh_menu_ui.before(crate::glue::GlueVisuals),
                         menu_layout::refresh_adventure,
                         menu_layout::refresh_pick_plate,
+                        menu_layout::refresh_class,
                     ).chain(),
                     talents::talent_screen,
                     talents::fill_talent_icons,
@@ -354,7 +380,7 @@ pub(super) struct Selection {
 
 impl Selection {
     pub fn race_unlocked(&self, race: u8) -> bool {
-        matches!(race, 1 | 2) || self.unlocked_races.contains(&race)
+        matches!(race, 1..=8) || self.unlocked_races.contains(&race)
     }
     pub fn can_visit(&self, map: usize) -> bool {
         let race = self.look.and_then(|i| self.looks.get(i)).map(|look| look.1).unwrap_or(1);
@@ -540,6 +566,7 @@ pub(super) struct Run {
     pub amulet: Option<amulets::Amulet>,
     pub shield: f32,
     pub shield_t: f32,
+    pub shield_spell: u32,
     pub immune_t: f32,
     pub gear: [f32; 5],
     /// Item affixes keyed by spell, as fractions (1000 basis points = 10%).
@@ -596,6 +623,15 @@ pub(super) struct Run {
     /// Enemy attacks route through the host to this guest; zero means the local hero.
     pub coop_target: u32,
     pub coop_damage: Vec<(u32, f32)>,
+    brood_poison: mother_fang::Poison,
+    morgan_bleed: morgan::Bleed,
+    morgan_mark_until: f32,
+    morgan_bomb_slow_until: f32,
+    coop_morgan_debuffs: Vec<(u32, morgan::Debuff)>,
+    stun_until: f32,
+    healing_blocked_until: f32,
+    coop_boar_impacts: Vec<(u32, f32, f32)>,
+    pub coop_poison: Vec<(u32, f32)>,
     /// A boss's pull still to move the local hero, and each guest by peer.
     pub push: Vec3,
     pub coop_push: Vec<(u32, Vec3)>,
@@ -625,6 +661,7 @@ impl Default for Run {
             amulet: None,
             shield: 0.0,
             shield_t: 0.0,
+            shield_spell: 0,
             immune_t: 0.0,
             gear: [0.; 5],
             spell_damage: Default::default(),
@@ -665,6 +702,15 @@ impl Default for Run {
             struck: false,
             coop_target: 0,
             coop_damage: Vec::new(),
+            brood_poison: Default::default(),
+            morgan_bleed: Default::default(),
+            morgan_mark_until: 0.0,
+            morgan_bomb_slow_until: 0.0,
+            coop_morgan_debuffs: Vec::new(),
+            stun_until: 0.0,
+            healing_blocked_until: 0.0,
+            coop_boar_impacts: Vec::new(),
+            coop_poison: Vec::new(),
             push: Vec3::ZERO,
             coop_push: Vec::new(),
             coop_run: false,
@@ -717,9 +763,15 @@ impl Run {
         }
         1.0 + self.coop_living.saturating_sub(1) as f32 * 0.7 * coefficient
     }
-    /// Ordinary healing cannot bring back a fallen hero, including on the lethal frame.
+    pub fn stunned(&self) -> bool {
+        self.stun_until > self.elapsed
+    }
+
+    /// Ordinary healing cannot bring back a fallen hero or bypass encounter healing blocks.
     pub fn heal(&mut self, amount: f32) {
-        if self.dead_t.is_none() && self.hp > 0.0 {
+        if self.dead_t.is_none() && self.hp > 0.0
+            && self.healing_blocked_until <= self.elapsed && self.morgan_bleed.until <= self.elapsed
+        {
             self.hp = (self.hp + amount).min(self.stats().max_hp);
         }
     }
@@ -788,6 +840,9 @@ impl Run {
                 _ => {}
             }
         }
+        if self.brood_poison.until > self.elapsed { s.speed *= 0.7; }
+        if self.morgan_bomb_slow_until > self.elapsed { s.speed *= 0.5; }
+        if self.stunned() { s.speed = 0.0; }
         s
     }
 

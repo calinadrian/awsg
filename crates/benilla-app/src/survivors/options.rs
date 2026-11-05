@@ -295,7 +295,9 @@ struct Topic {
     group: &'static str,
     name: &'static str,
     about: &'static str,
-    icon: u32,
+    /// The PNGs from `tools/export_settings_icons.js`, for the sidebar and the page title.
+    icon_small: &'static [u8],
+    icon: &'static [u8],
     tabs: &'static [&'static str],
 }
 
@@ -304,36 +306,49 @@ const TOPICS: &[Topic] = &[
         group: "Game",
         name: "Graphics",
         about: "How the world is drawn.",
-        icon: 6197,
+        icon_small: include_bytes!("../../assets/settings/graphics_small.png"),
+        icon: include_bytes!("../../assets/settings/graphics.png"),
         tabs: &["Display", "World"],
     },
     Topic {
         group: "Game",
         name: "Audio",
         about: "Volume and sound.",
-        icon: 6673,
+        icon_small: include_bytes!("../../assets/settings/audio_small.png"),
+        icon: include_bytes!("../../assets/settings/audio.png"),
         tabs: &["Volume"],
     },
     Topic {
         group: "Interface",
         name: "HUD layout",
         about: "The sizes of the panels round the screen.",
-        icon: 2580,
+        icon_small: include_bytes!("../../assets/settings/hud_layout_small.png"),
+        icon: include_bytes!("../../assets/settings/hud_layout.png"),
         tabs: &["Sizes"],
     },
     Topic {
         group: "Interface",
         name: "Unit frames",
         about: "Your frame and your target's.",
-        icon: 139,
+        icon_small: include_bytes!("../../assets/settings/unit_frames_small.png"),
+        icon: include_bytes!("../../assets/settings/unit_frames.png"),
         tabs: &["Health", "Auras"],
     },
     Topic {
         group: "Interface",
         name: "Nameplates",
         about: "The bars and names over units' heads.",
-        icon: 1130,
+        icon_small: include_bytes!("../../assets/settings/nameplates_small.png"),
+        icon: include_bytes!("../../assets/settings/nameplates.png"),
         tabs: &["Plates", "Auras", "Names"],
+    },
+    Topic {
+        group: "Interface",
+        name: "Encounter warnings",
+        about: "Compact boss instructions, severity filters and cooldown visibility.",
+        icon_small: include_bytes!("../../assets/settings/hud_layout_small.png"),
+        icon: include_bytes!("../../assets/settings/hud_layout.png"),
+        tabs: &["Visibility"],
     },
 ];
 
@@ -378,6 +393,9 @@ impl Item {
                 | InterfaceSetting::CompactPlates
                 | InterfaceSetting::HeroPlate,
             ) => (4, 0),
+            Self::Flag(InterfaceSetting::EncounterWarnings | InterfaceSetting::WarningLethal
+                | InterfaceSetting::WarningDangerous | InterfaceSetting::WarningStandard
+                | InterfaceSetting::BossCooldowns) => (5, 0),
             Self::Flag(_) => (4, 2),
         }
     }
@@ -416,6 +434,10 @@ struct ValueLabel(usize);
 struct Switch(InterfaceSetting);
 #[derive(Component)]
 struct TopicIcon(u8);
+
+/// A topic's picture in the sidebar: dimmed until its row is open or under the pointer.
+#[derive(Component)]
+struct SideIcon(u8);
 #[derive(Component)]
 enum PageText {
     Title,
@@ -442,6 +464,11 @@ enum Action {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum InterfaceSetting {
+    EncounterWarnings,
+    WarningLethal,
+    WarningDangerous,
+    WarningStandard,
+    BossCooldowns,
     PlayerNames,
     NpcNames,
     OwnName,
@@ -453,7 +480,12 @@ enum InterfaceSetting {
 }
 
 impl InterfaceSetting {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 13] = [
+        Self::EncounterWarnings,
+        Self::WarningLethal,
+        Self::WarningDangerous,
+        Self::WarningStandard,
+        Self::BossCooldowns,
         Self::PlayerNames,
         Self::NpcNames,
         Self::OwnName,
@@ -466,6 +498,11 @@ impl InterfaceSetting {
 
     fn label(self) -> &'static str {
         match self {
+            Self::EncounterWarnings => "Show encounter warnings",
+            Self::WarningLethal => "Lethal warnings (red skull)",
+            Self::WarningDangerous => "Dangerous warnings (white skull)",
+            Self::WarningStandard => "Standard warnings (steel diamond)",
+            Self::BossCooldowns => "Show boss cooldowns",
             Self::PlayerNames => "Player names",
             Self::NpcNames => "NPC names",
             Self::OwnName => "Your name",
@@ -479,6 +516,11 @@ impl InterfaceSetting {
 
     fn cvar(self) -> Option<&'static str> {
         match self {
+            Self::EncounterWarnings => Some("SurvivorEncounterWarnings"),
+            Self::WarningLethal => Some("SurvivorWarningLethal"),
+            Self::WarningDangerous => Some("SurvivorWarningDangerous"),
+            Self::WarningStandard => Some("SurvivorWarningStandard"),
+            Self::BossCooldowns => Some("SurvivorBossCooldowns"),
             Self::PlayerNames => Some("UnitNamePlayer"),
             Self::NpcNames => Some("UnitNameNPC"),
             Self::OwnName => Some("UnitNameOwn"),
@@ -543,31 +585,16 @@ fn text(font: &Handle<Font>, value: &str, size: f32, color: Color) -> impl Bundl
     col::label(font, value, size, color)
 }
 
-/// An icon in a small steel frame, filled from `spell`'s icon once the client data is up.
-fn icon(spell: u32, size: f32) -> impl Bundle {
+/// A topic's picture, unframed.
+fn icon(image: Handle<Image>, size: f32) -> impl Bundle {
     (
         Node {
             width: Val::Px(size),
             height: Val::Px(size),
             flex_shrink: 0.,
-            border: UiRect::all(Val::Px(1.)),
             ..default()
         },
-        BackgroundColor(Color::BLACK),
-        BorderColor::all(col::STEEL_LO),
-        Outline::new(Val::Px(1.), Val::ZERO, Color::BLACK),
-        children![(
-            Node {
-                width: Val::Percent(100.),
-                height: Val::Percent(100.),
-                ..default()
-            },
-            ImageNode {
-                color: Color::NONE,
-                ..default()
-            },
-            super::hud::SpellIcon(spell),
-        )],
+        ImageNode::new(image),
     )
 }
 
@@ -625,7 +652,12 @@ fn cross(parent: &mut ChildSpawnerCommands) {
 #[derive(Component)]
 struct NavLabel(Action);
 
-fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), With<Root>>) {
+fn spawn(
+    mut commands: Commands,
+    font: Option<Res<HudFont>>,
+    roots: Query<(), With<Root>>,
+    mut images: ResMut<Assets<Image>>,
+) {
     if !roots.is_empty() {
         return;
     }
@@ -743,17 +775,22 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                         for (i, topic) in TOPICS.iter().enumerate() {
                             if topic.group != group {
                                 group = topic.group;
-                                side.spawn((
-                                    Node {
-                                        padding: UiRect::new(
-                                            Val::Px(14.),
-                                            Val::ZERO,
-                                            Val::Px(10.),
-                                            Val::Px(4.),
-                                        ),
-                                        ..default()
-                                    },
-                                    text(f, &group.to_uppercase(), 10., col::STEEL),
+                                // A text node ignores its own padding: a box holds the label off
+                                // the edge and the row above.
+                                side.spawn(Node {
+                                    padding: UiRect::new(
+                                        Val::Px(14.),
+                                        Val::ZERO,
+                                        Val::Px(10.),
+                                        Val::Px(4.),
+                                    ),
+                                    ..default()
+                                })
+                                .with_child(text(
+                                    f,
+                                    &group.to_uppercase(),
+                                    10.,
+                                    col::STEEL,
                                 ));
                             }
                             let action = Action::Topic(i as u8);
@@ -772,7 +809,10 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                                 BorderColor::all(Color::NONE),
                             ))
                             .with_children(|b| {
-                                b.spawn(icon(topic.icon, 18.));
+                                b.spawn((
+                                    SideIcon(i as u8),
+                                    icon(super::card_view::png(topic.icon_small, &mut images), 18.),
+                                ));
                                 b.spawn((
                                     NavLabel(action),
                                     text(f, topic.name, 13., col::TEXT_DIM),
@@ -806,7 +846,13 @@ fn spawn(mut commands: Commands, font: Option<Res<HudFont>>, roots: Query<(), Wi
                                 })
                                 .with_children(|seat| {
                                     for (i, topic) in TOPICS.iter().enumerate() {
-                                        seat.spawn((TopicIcon(i as u8), icon(topic.icon, 34.)));
+                                        seat.spawn((
+                                            TopicIcon(i as u8),
+                                            icon(
+                                                super::card_view::png(topic.icon, &mut images),
+                                                34.,
+                                            ),
+                                        ));
                                     }
                                 });
                             title
@@ -1175,13 +1221,18 @@ fn paint_nav(
         &mut Node,
     )>,
     mut knobs: Query<(&Switch, &mut BackgroundColor), Without<Action>>,
+    mut side_icons: Query<(&SideIcon, &mut ImageNode)>,
 ) {
     if !options.settings {
         return;
     }
     let searching = !options.search.trim().is_empty();
+    let mut lit = [false; TOPICS.len()];
     for (action, interaction, mut bg, mut border, mut node) in &mut buttons {
         let hot = *interaction != Interaction::None;
+        if let Action::Topic(t) = *action {
+            lit[usize::from(t)] = hot || (t == options.topic && !searching);
+        }
         let (fill, edge) = match *action {
             Action::Topic(t) if t == options.topic && !searching => (PICKED, col::WINE_HI),
             Action::Topic(_) => (if hot { HOVER } else { Color::NONE }, Color::NONE),
@@ -1237,6 +1288,12 @@ fn paint_nav(
     for (switch, mut bg) in &mut knobs {
         let on = switch.0.enabled(&cvars, &nameplates);
         bg.set_if_neq(BackgroundColor(if on { Color::WHITE } else { col::STEEL }));
+    }
+    for (side, mut image) in &mut side_icons {
+        let tint = Color::WHITE.with_alpha(if lit[usize::from(side.0)] { 1. } else { 0.82 });
+        if image.color != tint {
+            image.color = tint;
+        }
     }
 }
 
@@ -1382,11 +1439,26 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = World::new();
         world.insert_resource(HudFont(Handle::default()));
+        world.init_resource::<Assets<Image>>();
         world.run_system_once(spawn).unwrap();
         assert_eq!(
             world.query::<&Row>().iter(&world).count(),
             Item::all().count()
         );
+    }
+
+    #[test]
+    fn every_topic_icon_is_a_transparent_picture_at_its_size() {
+        for topic in TOPICS {
+            for (bytes, size) in [(topic.icon_small, 48), (topic.icon, 96)] {
+                let image = image::load_from_memory(bytes)
+                    .expect("topic icon PNG")
+                    .to_rgba8();
+                assert_eq!(image.dimensions(), (size, size), "{}", topic.name);
+                assert_eq!(image.get_pixel(0, 0).0[3], 0, "{}", topic.name);
+                assert!(image.pixels().any(|p| p.0[3] == 255), "{}", topic.name);
+            }
+        }
     }
 
     #[test]

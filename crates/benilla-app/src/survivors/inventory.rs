@@ -1,6 +1,5 @@
-//! The inventory client, with cached gear and a durable transaction outbox. The outbox drains
-//! into one of two economies with the same rules ([`asr_coop::ledger`]): the realm at the co-op
-//! server's address, or the player's own solo ledger, which needs no server at all.
+//! One offline-capable inventory, backed by the local ledger and synchronized with the realm.
+//! Normal actions commit locally; auctions use the server after outstanding changes synchronize.
 use super::{coop::Coop, Phase, Run, Selection};
 use asr_coop::{
     economy::{Action, Catalog, Inventory, Listing, Reply, Request},
@@ -20,20 +19,34 @@ pub(super) struct HeroSave {
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Job {
+    #[serde(default)]
+    local_base: Option<Inventory>,
     key: String,
     request: Request,
 }
 #[derive(Default, Serialize, Deserialize)]
 struct Save {
+    #[serde(default)]
+    device: String,
+    #[serde(default)]
+    namespaced: bool,
+    #[serde(default)]
+    sync_bases: BTreeMap<String, Inventory>,
+    #[serde(default)]
+    delivery: Option<Delivery>,
     heroes: BTreeMap<String, HeroSave>,
     pending: Vec<Job>,
     #[serde(default)]
     linked: BTreeMap<String, String>,
-    /// Whether the player chose the solo economy; unset, a player with no realm heroes is solo.
+    /// Legacy mode preference, retained when reading and rewriting older saves.
     #[serde(default)]
     solo: Option<bool>,
 }
-/// The solo economy's address in hero keys: `solo:<class>`.
+#[derive(Clone, Serialize, Deserialize)]
+struct Delivery { server: String, job: Job, reply: Reply }
+#[path = "inventory_sync.rs"]
+mod sync;
+/// The local inventory's address in hero keys: `solo:<class>`.
 pub(super) const SOLO: &str = "solo";
 /// The account window's open tab.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Hash)]
@@ -42,12 +55,19 @@ pub(super) enum Pane {
     Inventory,
     Auction,
     Drops,
+    Items,
     Quests,
     Achievements,
+}
+/// A newly credited item, never a refresh or a replay of the saved inventory.
+pub(super) struct LootNotice {
+    pub definition: String,
+    pub source: String,
 }
 #[derive(Resource)]
 pub(super) struct Equipment {
     pub catalog: Catalog,
+    pub loot_notices: std::collections::VecDeque<LootNotice>,
     save: Save,
     pub listings: Vec<Listing>,
     pub status: String,
@@ -57,6 +77,17 @@ pub(super) struct Equipment {
     pub search: String,
     pub search_active: bool,
     pub search_cursor: super::text_edit::Cursor,
+    pub viewer_race: Option<u8>,
+    pub viewer_class: u8,
+    pub viewer_sex: u8,
+    pub viewer_outfit: BTreeMap<String, String>,
+    pub viewer_off_hand: bool,
+    pub viewer_yaw: f32,
+    pub viewer_zoom: f32,
+    pub viewer_slot: Option<usize>,
+    pub viewer_quality: usize,
+    pub viewer_zone: Option<String>,
+    pub viewer_sort_zone: bool,
     pub loot_class: Option<u8>,
     pub loot_slot: Option<usize>,
     pub loot_quality: usize,
@@ -78,6 +109,7 @@ pub(super) struct Equipment {
     connection: Option<std::sync::Mutex<asr_coop::transport::Connection>>,
     /// The solo economy, read from its save the first time it is needed.
     ledger: Option<Ledger>,
+    import_profile: bool,
     server: String,
     connected: bool,
     flight: bool,
@@ -178,6 +210,7 @@ impl Default for Equipment {
         };
         Self {
             catalog: Catalog::load(),
+            loot_notices: Default::default(),
             save,
             listings: Vec::new(),
             status,
@@ -187,6 +220,17 @@ impl Default for Equipment {
             search: String::new(),
             search_active: false,
             search_cursor: Default::default(),
+            viewer_race: None,
+            viewer_class: 1,
+            viewer_sex: 0,
+            viewer_outfit: BTreeMap::new(),
+            viewer_off_hand: false,
+            viewer_yaw: 0.,
+            viewer_zoom: 1.,
+            viewer_slot: None,
+            viewer_quality: 0,
+            viewer_zone: None,
+            viewer_sort_zone: true,
             loot_class: None,
             loot_slot: None,
             loot_quality: 0,
@@ -203,6 +247,7 @@ impl Default for Equipment {
             #[cfg(not(target_arch = "wasm32"))]
             connection: None,
             ledger: None,
+            import_profile: false,
             server: String::new(),
             connected: false,
             flight: false,
@@ -223,37 +268,35 @@ impl Equipment {
     pub fn key(server: &str, class: u8) -> String {
         format!("{}:{class}", server.trim_end_matches('/'))
     }
-    /// Whether this player keeps their bags in the solo economy. The web build has no realm
-    /// connection, so it is always solo there.
-    pub fn solo(&self) -> bool {
-        cfg!(target_arch = "wasm32")
-            || self.save.solo.unwrap_or_else(|| {
-                let prefix = format!("{SOLO}:");
-                self.save.heroes.keys().all(|key| key.starts_with(&prefix))
-            })
-    }
-    /// The economy this player's bags and rewards live in: the solo ledger, or the realm at the
-    /// co-op server's address. A co-op room always plays on the realm its players share.
-    pub fn realm(&self, coop: &Coop) -> String {
-        if self.solo() && !coop.in_room() {
-            SOLO.into()
-        } else {
-            coop.url.clone()
-        }
-    }
-    pub fn set_solo(&mut self, solo: bool) {
-        if self.save.solo != Some(solo) {
-            self.save.solo = Some(solo);
-            self.persist();
-            self.listings.clear();
-            self.selected = None;
-            self.listing = None;
-            self.revision += 1;
-        }
-    }
+    /// Gameplay and equipment always use the local inventory, including inside co-op rooms.
+    pub fn realm(&self, _coop: &Coop) -> String { SOLO.into() }
+    pub fn server_online(&self) -> bool { self.connected }
     /// An economy's answer to the outbox's first job for `server`, solo or realm alike.
     fn receive(&mut self, server: &str, job: Job, reply: Reply) {
         if reply.ok {
+            // Only reward actions create notifications. Imports, shared-stash linking and
+            // remote reconciliation must never announce an existing bag as new loot.
+            let reward = matches!(&job.request.action,
+                Action::Reward { .. } | Action::TurnInQuest { .. } | Action::RedeemAchievement { .. });
+            if reward {
+                if let (Some(before), Some(after)) = (self.save.heroes.get(&job.key), reply.inventory.as_ref()) {
+                    let known: std::collections::HashSet<_> = before.inventory.items.iter().map(|item| item.id).collect();
+                    for item in after.items.iter().filter(|item| !known.contains(&item.id)) {
+                        let source = match &job.request.action {
+                            Action::TurnInQuest { .. } => "Quest reward".to_string(),
+                            Action::RedeemAchievement { .. } => "Achievement reward".to_string(),
+                            Action::Reward { boss_names, .. } => {
+                                let zone = self.catalog.definition(&item.definition).and_then(|def| self.catalog.zones.get(&def.zone));
+                                let boss = zone.and_then(|zone| zone.boss_drops.iter().find(|drop|
+                                    drop.item == item.definition && boss_names.contains(&drop.boss)));
+                                boss.map_or_else(|| zone.map_or("Equipment drop".into(), |zone| zone.name.clone()), |drop| drop.boss.clone())
+                            }
+                            _ => "Equipment drop".into(),
+                        };
+                        self.loot_notices.push_back(LootNotice { definition: item.definition.clone(), source });
+                    }
+                }
+            }
             let prefix = format!("{}:", server.trim_end_matches('/'));
             let linked = if let Action::LinkInventory { tokens } = &job.request.action {
                 self.save.linked.insert(prefix.clone(), tokens.join("|"));
@@ -317,8 +360,6 @@ impl Equipment {
     }
     /// Drain the solo jobs through the solo ledger, at once: there is no one to wait for.
     fn solo_tick(&mut self, class: u8) {
-        self.server = SOLO.into();
-        self.connected = true;
         if self.ledger.is_none() {
             let loaded = solo_path().map(|p| crate::local_state::read_to_string(&p));
             let state = match loaded {
@@ -341,11 +382,16 @@ impl Equipment {
             };
             self.ledger = Some(Ledger::new(state, Catalog::load()));
         }
+        let remote_link_failed = self.link_failed;
+        self.link_failed = false;
         self.link_classes(SOLO, class);
+        self.link_failed = remote_link_failed;
         let Some(mut ledger) = self.ledger.take() else { return };
         let mut host = SoloHost::new();
         let prefix = format!("{SOLO}:");
         for _ in 0..32 {
+            // A newly registered class must join the shared local stash before it is exported.
+            self.link_classes(SOLO, class);
             let Some(index) = self.save.pending.iter().position(|j| j.key.starts_with(&prefix)) else {
                 break;
             };
@@ -401,7 +447,7 @@ impl Equipment {
         self.read_only
     }
     pub fn online(&self) -> bool {
-        self.connected
+        self.ledger.is_some() && !self.read_only
     }
     /// Whether an accept, abandon or turn-in for this quest is still waiting on the ledger.
     pub fn quest_busy(&self, quest: &str) -> bool {
@@ -419,17 +465,20 @@ impl Equipment {
                 .save
                 .pending
                 .iter()
-                .any(|job| match job.request.action {
+                .any(|job| match match &job.request.action {
+                    Action::Online { action, .. } => action.as_ref(),
+                    action => action,
+                } {
                     Action::Equip { item: pending, .. }
                     | Action::Lock { item: pending, .. }
                     | Action::Upgrade { item: pending }
                     | Action::Scrap { item: pending }
-                    | Action::List { item: pending, .. } => pending == item,
+                    | Action::List { item: pending, .. } => *pending == item,
                     _ => false,
                 })
     }
     fn link_classes(&mut self, server: &str, class: u8) {
-        if self.link_failed {
+        if self.link_failed && server != SOLO {
             return;
         }
         let prefix = format!("{}:", server.trim_end_matches('/'));
@@ -494,6 +543,7 @@ impl Equipment {
             return;
         }
         self.save.pending.push(Job {
+            local_base: None,
             key,
             request: Request {
                 id: id(),
@@ -505,6 +555,31 @@ impl Equipment {
         self.revision += 1;
     }
     pub fn action(&mut self, server: &str, class: u8, action: Action) {
+        if matches!(action, Action::Buy { .. } | Action::List { .. } | Action::Cancel { .. } | Action::Refresh) && server == SOLO {
+            if !self.connected || self.server.is_empty() {
+                self.timer = 3.;
+                self.status = "Offline: inventory is saved locally; auctions need a server".into();
+                self.revision += 1;
+                return;
+            }
+            if self.flight || !self.save.pending.is_empty() {
+                self.status = "Synchronizing offline changes before trading; try again when sync completes".into();
+                self.revision += 1;
+                return;
+            }
+            let local = self.view(SOLO, class).map(|h| h.inventory);
+            let base = self.save.sync_bases.get(&self.server);
+            if local.as_ref().zip(base).is_none_or(|(local, base)| !asr_coop::offline::same_inventory(local, base)) {
+                self.status = "Waiting for inventory synchronization before trading".into();
+                self.revision += 1;
+                return;
+            }
+            let url = self.server.clone();
+            self.queue(Self::key(&url, class), Action::Online { device: self.save.device.clone(), action: Box::new(action) });
+            if let Some(job) = self.save.pending.last_mut() { job.local_base = local; }
+            self.persist();
+            return;
+        }
         if matches!(action, Action::Refresh) {
             self.link_failed = false;
         }
@@ -512,6 +587,14 @@ impl Equipment {
     }
     fn ensure_hero(&mut self, server: &str, class: u8, name: &str) {
         let key = Self::key(server, class);
+        // A save from before starter gear gets its set from the ledger on the next exchange.
+        if self.save.heroes.get(&key).is_some_and(|hero| {
+            !hero.token.is_empty() && !hero.inventory.starter_classes.contains(&class)
+        }) && !self.save.pending.iter().any(|job| job.key == key)
+        {
+            self.queue(key, Action::Refresh);
+            return;
+        }
         if !self.save.heroes.contains_key(&key)
             && !self
                 .save
@@ -615,25 +698,9 @@ fn begin(
         gear.finished = true;
         gear.status = "Equipment drops are not available for this map".into();
     }
-    if let Some(hero) = gear.view(&url, run.class.id) {
-        run.gear_look = hero
-            .inventory
-            .items
-            .iter()
-            .filter(|item| item.equipped_for(run.class.id))
-            .filter_map(|item| {
-                let slot = item.slot.as_ref()?;
-                let d = gear.catalog.definition(&item.definition)?;
-                if !d.fits(run.class.id, slot) {
-                    return None;
-                }
-                Some(asr_coop::economy::LookItem {
-                    slot: slot.clone(),
-                    display: d.display_id,
-                    category: d.category.clone(),
-                })
-            })
-            .collect();
+    let saved = gear.view(&url, run.class.id);
+    run.gear_look = asr_coop::starter::look(saved.as_ref().map(|hero| &hero.inventory), run.class.id, &gear.catalog);
+    if let Some(hero) = saved {
         let mut inventory = hero.inventory.clone();
         inventory.class = run.class.id;
         run.spell_damage = inventory
@@ -664,7 +731,7 @@ fn rewards(
         return;
     }
     gear.reward_t += time.delta_secs();
-    if gear.reward_t >= 10. || run.boss_loot.len() > gear.boss_counted {
+    if gear.reward_t >= 10. || run.boss_loot.len() > gear.boss_counted || run.equipment_kills[1] > gear.counted[1] {
         gear.reward_t = 0.;
         gear.rewards(&run, 0, None);
     }
@@ -685,134 +752,21 @@ fn settle_exit(mut exits: MessageReader<AppExit>, run: Res<Run>, coop: Res<Coop>
         gear.finished = true;
     }
 }
-fn network(
-    time: Res<Time<Real>>,
-    selection: Res<Selection>,
-    coop: Res<Coop>,
-    mut gear: ResMut<Equipment>,
-) {
-    let Some(class) = selection.class_def().map(|c| c.id) else {
-        return;
-    };
-    let url = gear.realm(&coop);
-    if gear.open {
-        gear.ensure_hero(&url, class, &coop.name);
-    }
-    if gear.read_only {
-        return;
-    }
-    if url == SOLO {
+fn network(time: Res<Time<Real>>, selection: Res<Selection>, coop: Res<Coop>, mut gear: ResMut<Equipment>, mut talents: ResMut<super::talents::TalentBook>, mut progress: ResMut<super::progress::Progress>) {
+    let Some(class) = selection.class_def().map(|c| c.id) else { return };
+    if gear.read_only { return; }
+    gear.ensure_hero(SOLO, class, &coop.name);
+    // Finish a persisted acknowledgement before allowing further local mutations.
+    if gear.save.delivery.is_some() && !gear.finish_delivery() {
+        // A remote conflict pauses reconciliation, not offline rewards and item actions.
         gear.solo_tick(class);
+        gear.sync_profile(class, &mut talents, &mut progress);
         return;
     }
-    gear.timer += time.delta_secs();
-    gear.refresh_t += time.delta_secs();
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let prefix = format!("{}:", url.trim_end_matches('/'));
-        if gear.server != url {
-            gear.connection = None;
-            gear.connected = false;
-            gear.flight = false;
-            gear.server = url.clone();
-            gear.listings.clear();
-            gear.link_failed = false;
-        }
-        let relevant = gear.save.pending.iter().any(|j| j.key.starts_with(&prefix));
-        if gear.connection.is_none() && (gear.open || relevant) && gear.timer >= 3. {
-            gear.timer = 0.;
-            gear.connection = Some(std::sync::Mutex::new(asr_coop::transport::connect(
-                url.clone(),
-            )));
-            gear.status = "Connecting to shared inventory and auctions…".into();
-            gear.revision += 1;
-        }
-        let events: Vec<_> = gear
-            .connection
-            .as_ref()
-            .and_then(|c| c.lock().ok())
-            .map_or_else(Vec::new, |c| c.recv.try_iter().take(64).collect());
-        for event in events {
-            match event {
-                Ok(Server::Welcome) => {
-                    gear.connected = true;
-                    gear.timer = 0.;
-                }
-                Ok(Server::Economy { reply }) => {
-                    if !gear.flight
-                        || gear
-                            .save
-                            .pending
-                            .first()
-                            .is_none_or(|j| j.request.id != reply.id)
-                    {
-                        continue;
-                    }
-                    if reply.retry {
-                        gear.status = reply.message;
-                        gear.connection = None;
-                        gear.connected = false;
-                        gear.flight = false;
-                        gear.timer = 0.;
-                        gear.revision += 1;
-                        continue;
-                    }
-                    let job = gear.save.pending.remove(0);
-                    gear.flight = false;
-                    gear.receive(&url, job, reply);
-                }
-                Err(reason) | Ok(Server::Error { reason }) => {
-                    gear.status = format!("Shared economy unavailable: {reason}. Pending transactions are saved for retry.");
-                    gear.connection = None;
-                    gear.connected = false;
-                    gear.flight = false;
-                    gear.timer = 0.;
-                    gear.revision += 1;
-                }
-                _ => {}
-            }
-        }
-        if gear.flight && gear.timer > 15. {
-            gear.connection = None;
-            gear.connected = false;
-            gear.flight = false;
-            gear.timer = 0.;
-            gear.status = "No reply from economy service; retrying the saved transaction".into();
-            gear.revision += 1;
-        }
-        if gear.connected && !gear.flight {
-            gear.link_classes(&url, class);
-            if gear.save.pending.is_empty() && gear.open && gear.refresh_t > 5. {
-                gear.refresh_t = 0.;
-                gear.action(&url, class, Action::Refresh);
-            }
-            if let Some(index) = gear.save.pending.iter().position(|j| j.key.starts_with(&prefix)) {
-                if index != 0 {
-                    let job = gear.save.pending.remove(index);
-                    gear.save.pending.insert(0, job);
-                }
-                let Some(request) = gear.signed(&gear.save.pending[0]) else {
-                    gear.status =
-                        "Missing hero credential; restore survivors-inventory.json from backup".into();
-                    return;
-                };
-                gear.save.pending[0].request = request;
-                if gear.persist() {
-                    let request = gear.save.pending[0].request.clone();
-                    let sent = gear
-                        .connection
-                        .as_ref()
-                        .and_then(|c| c.lock().ok())
-                        .is_some_and(|c| c.send.try_send(Client::Economy { request }).is_ok());
-                    gear.flight = sent;
-                    gear.timer = 0.;
-                }
-            } else if gear.timer > 10. {
-                if let Some(c) = gear.connection.as_ref().and_then(|c| c.lock().ok()) {
-                    let _ = c.send.try_send(Client::List);
-                }
-                gear.timer = 0.;
-            }
-        }
-    }
+    gear.solo_tick(class);
+    if gear.read_only { return; }
+    gear.sync_profile(class, &mut talents, &mut progress);
+    gear.sync_network(&coop.url, &coop.name, class, time.delta_secs());
+    // Import acknowledgements before the next frame can edit talents or personal records.
+    gear.sync_profile(class, &mut talents, &mut progress);
 }

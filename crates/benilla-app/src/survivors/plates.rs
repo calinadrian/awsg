@@ -824,16 +824,14 @@ const TEXT_HI: Color = Color::srgb(0.91, 0.918, 0.941);
 const TEXT_ELITE: Color = Color::srgb(0.788, 0.8, 0.839);
 const TEXT_SMALL: Color = Color::srgb(0.722, 0.741, 0.792);
 const CAST_TEXT: Color = Color::srgb(0.788, 0.839, 0.949);
-const YELL_RED: Color = Color::srgb(1.0, 0.435, 0.51);
 
 /// The boss bars under the clock, one per engaged boss or elite however far off it is: a ringed
 /// medallion, the name and level and health inside a crimson well framed in steel, the script's
 /// phase lines, the move it winds up, and its buffs to the left and debuffs to the right, each
-/// with a tooltip. The latest yell sits above them.
+/// with a tooltip. Yells use the separate announcement panel.
 #[derive(Component)]
 pub(super) struct BossBar {
     rows: Vec<BarRow>,
-    yell: Entity,
 }
 
 struct BarRow {
@@ -1514,11 +1512,9 @@ fn spawn_bar_row(commands: &mut Commands, f: &Handle<Font>) -> BarRow {
 }
 
 fn spawn_boss_bar(commands: &mut Commands, f: &Handle<Font>) -> Entity {
-    let yell = commands.spawn(bar_text(f, 14.0, YELL_RED)).id();
     let rows: Vec<BarRow> = (0..MAX_BARS).map(|_| spawn_bar_row(commands, f)).collect();
-    let mut children: Vec<Entity> = rows.iter().map(|row| row.row).collect();
-    children.push(yell);
-    // In the top column ([`super::hud::TopStack`]), the bars first and the latest yell under them.
+    let children: Vec<Entity> = rows.iter().map(|row| row.row).collect();
+    // In the top column ([`super::hud::TopStack`]), one row per engaged enemy.
     commands
         .spawn((
             Node {
@@ -1528,7 +1524,7 @@ fn spawn_boss_bar(commands: &mut Commands, f: &Handle<Font>) -> Entity {
                 ..default()
             },
             Visibility::Hidden,
-            BossBar { rows, yell },
+            BossBar { rows },
         ))
         .add_children(&children)
         .id()
@@ -1630,7 +1626,7 @@ fn brighter(c: Color, k: f32) -> Color {
 }
 
 /// Show a bar for every engaged boss and elite wherever it is, bosses first and then the
-/// nearest, and the latest yell above them.
+/// nearest. Yells appear in the compact announcement panel.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn boss_bar(
     mut commands: Commands,
@@ -1685,13 +1681,12 @@ pub(super) fn boss_bar(
             }
         }
     }
-    let yell = run.yell.as_ref().map(|(s, _)| s.clone());
-    *vis = if playing && (!fights.is_empty() || yell.is_some()) {
+    // Yells use the compact announcement panel instead of a second line at the boss bars.
+    *vis = if playing && !fights.is_empty() {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
-    set_text(&mut texts, bar.yell, yell.unwrap_or_default());
     lags.resize(bar.rows.len(), 1.0);
     let dt = time.delta_secs();
     let now = run.elapsed;
@@ -1729,7 +1724,7 @@ pub(super) fn boss_bar(
         // Rank: a boss in steel with a skull, an elite in darker steel with a star.
         let elite = !e.boss;
         let focus = selection.target == Some(id);
-        let raging = mech.is_some_and(|m| m.raging());
+        let raging = e.hogger_enraged || mech.is_some_and(|m| m.raging());
         paint.border(row.bar, if elite { ELITE_EDGE } else { STEEL_LO });
         let drop = (Color::srgba(0.0, 0.0, 0.0, 0.6), 0.0, 2.0, 0.0, 6.0);
         let (color, x, y, spread, blur) = if raging {
@@ -2027,7 +2022,7 @@ pub(super) fn compact_plates(
 pub(super) struct PlateOf(pub Entity);
 
 /// The hero's buffs as auras: the spells they cast on themselves, their shield, immunity, thorns
-/// and healing over time. Nothing in a run puts a lasting debuff on the hero yet.
+/// and healing over time, plus encounter debuffs such as broodling venom.
 pub(super) fn hero_auras(run: &super::Run, name: impl Fn(u32, &str) -> String) -> Vec<super::mechanics::Aura> {
     let aura = |icon: u32, fallback: &str, text: String, left: f32| super::mechanics::Aura {
         icon,
@@ -2046,7 +2041,7 @@ pub(super) fn hero_auras(run: &super::Run, name: impl Fn(u32, &str) -> String) -
         })
         .collect();
     if run.shield_t > 0.0 && run.shield > 0.0 {
-        out.push(aura(17, "Shield", format!("Absorbs {:.0} damage.", run.shield), run.shield_t));
+        out.push(aura(run.shield_spell, "Absorb Shield", format!("Absorbs {:.0} damage.", run.shield), run.shield_t));
     }
     if run.immune_t > 0.0 {
         out.push(aura(642, "Immune", "Immune to all damage.".into(), run.immune_t));
@@ -2056,6 +2051,48 @@ pub(super) fn hero_auras(run: &super::Run, name: impl Fn(u32, &str) -> String) -
     }
     if run.heal_t > 0.0 {
         out.push(aura(139, "Healing", format!("Heals {:.0} health a second.", run.heal_rate), run.heal_t));
+    }
+    if run.morgan_bleed.until > run.elapsed {
+        out.push(super::mechanics::Aura {
+            icon: 703, name: "Collector's Bleeding".into(),
+            text: format!("Bleeding for {:.0} damage each second. Healing received reduced by 100%. Hits from Morgan's spells refresh the 30-second duration.", run.morgan_bleed.damage),
+            left: Some(run.morgan_bleed.until - run.elapsed), buff: false, stacks: 1,
+        });
+    }
+    if run.morgan_bomb_slow_until > run.elapsed {
+        out.push(super::mechanics::Aura {
+            icon: 13812, name: "Collector's Bomb: Slowed".into(),
+            text: "Movement speed reduced by 50%. Bomb hits also cause bleeding and prevent healing for 30 seconds.".into(),
+            left: Some(run.morgan_bomb_slow_until - run.elapsed), buff: false, stacks: 1,
+        });
+    }
+    if run.morgan_mark_until > run.elapsed {
+        out.push(super::mechanics::Aura {
+            icon: 1130, name: "Marked for Collection".into(),
+            text: "Morgan is aiming at you. Sidestep after the gunshot lane locks.".into(),
+            left: Some(run.morgan_mark_until - run.elapsed), buff: false, stacks: 1,
+        });
+    }
+    if run.stunned() {
+        out.push(super::mechanics::Aura {
+            icon: 853, name: "Stunned".into(),
+            text: "Cannot move, attack or cast spells.".into(),
+            left: Some(run.stun_until - run.elapsed), buff: false, stacks: 1,
+        });
+    }
+    if run.healing_blocked_until > run.elapsed {
+        out.push(super::mechanics::Aura {
+            icon: 12294, name: "Boar Ambush: Healing Reduced".into(),
+            text: "Healing received reduced by 100%. Further ambush hits refresh the 30-second duration.".into(),
+            left: Some(run.healing_blocked_until - run.elapsed), buff: false, stacks: 1,
+        });
+    }
+    if run.brood_poison.until > run.elapsed {
+        out.push(super::mechanics::Aura {
+            icon: 6917, name: "Brood Venom".into(),
+            text: format!("Poisoned: {:.0} damage per second. Movement speed reduced by 30%. Further bites refresh the 3-second duration.", run.brood_poison.damage),
+            left: Some(run.brood_poison.until - run.elapsed), buff: false, stacks: 1,
+        });
     }
     out
 }

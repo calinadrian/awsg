@@ -75,8 +75,6 @@ static HORDE: [EnemyDef; 9] = [
 
 /// `Spell.dbc` War Stomp, the old table's stomp.
 const WAR_STOMP: u32 = 20549;
-/// `Spell.dbc` Explosive Trap Effect, the old table's Defias bombs.
-const BOMB: u32 = 13812;
 
 const fn boss(r: Row, level: u32, phases: &'static [BossPhase]) -> EnemyDef {
     EnemyDef {
@@ -90,49 +88,9 @@ static BOSSES: [EnemyDef; 4] = [
     EnemyDef {
         intro: "Grrr... fresh meat!",
         ..boss(
-            ("Hogger", 384, 3.5, 3600.0, 22.0, 1.0, 5.6, 35, 3.0),
+            ("Hogger", 384, 3.5, 3600.0, 22.0, 1.0, 9.25, 35, 3.0),
             11,
-            &[
-                BossPhase {
-                    below: 1.0,
-                    yell: "",
-                    action: BossAction::Throw {
-                        spell: ROCK,
-                        radius: 4.0,
-                        damage: 18.0,
-                        every: 7.0,
-                    },
-                },
-                BossPhase {
-                    below: 1.0,
-                    yell: "",
-                    action: BossAction::Charge {
-                        spell: CHARGE,
-                        damage: 20.0,
-                        every: 10.0,
-                    },
-                },
-                BossPhase {
-                    below: 1.0,
-                    yell: "",
-                    action: BossAction::Stomp {
-                        spell: WAR_STOMP,
-                        radius: 7.0,
-                        damage: 18.0,
-                        every: 11.0,
-                    },
-                },
-                BossPhase {
-                    below: 0.5,
-                    yell: "Hogger is enraged! Grrrr!",
-                    action: BossAction::Stomp {
-                        spell: WAR_STOMP,
-                        radius: 8.0,
-                        damage: 22.0,
-                        every: 7.0,
-                    },
-                },
-            ],
+            &[], // Distance-aware pursuit and combos live in `hogger`.
         )
     },
     EnemyDef {
@@ -141,6 +99,11 @@ static BOSSES: [EnemyDef; 4] = [
             ("Mother Fang", 7536, 0.83, 9000.0, 30.0, 1.0, 6.0, 60, 6.0),
             10,
             &[
+                BossPhase {
+                    below: 1.0,
+                    yell: "",
+                    action: BossAction::Eggs { count: 3, every: 18.0 },
+                },
                 // Spits venom at the hero's feet and pounces down a lane from the start.
                 BossPhase {
                     below: 1.0,
@@ -181,28 +144,7 @@ static BOSSES: [EnemyDef; 4] = [
         ..boss(
             ("Princess", 703, 4.46, 28000.0, 46.0, 1.0, 6.2, 100, 12.0),
             11,
-            &[
-                BossPhase {
-                    below: 0.66,
-                    yell: "You landlubbers are tougher than I thought! I'll have to improvise!",
-                    action: BossAction::Stomp {
-                        spell: WHIRLWIND,
-                        radius: 5.0,
-                        damage: 16.0,
-                        every: 2.5,
-                    },
-                },
-                BossPhase {
-                    below: 0.33,
-                    yell: "D'ah! Now you're making me angry!",
-                    action: BossAction::Stomp {
-                        spell: WAR_STOMP,
-                        radius: 9.0,
-                        damage: 69.0,
-                        every: 13.0,
-                    },
-                },
-            ],
+            &[], // Movement, tusk sweeps and the second-phase stampede live in `princess`.
         )
     },
     EnemyDef {
@@ -221,28 +163,7 @@ static BOSSES: [EnemyDef; 4] = [
                 16.0,
             ),
             12,
-            &[
-                BossPhase {
-                    below: 0.5,
-                    yell: "Fools! Our cause is righteous!",
-                    action: BossAction::Summon {
-                        foe: "Defias Thug",
-                        count: 5,
-                        every: 0.0,
-                    },
-                },
-                BossPhase {
-                    below: 0.25,
-                    yell: "The Brotherhood shall prevail!",
-                    action: BossAction::Bombs {
-                        spell: BOMB,
-                        count: 6,
-                        radius: 4.0,
-                        damage: 10.0,
-                        every: 2.4,
-                    },
-                },
-            ],
+            &[], // The three-phase Defias finale lives in `morgan`.
         )
     },
 ];
@@ -251,14 +172,8 @@ static BOSSES: [EnemyDef; 4] = [
 const VENOM_SPIT: u32 = 6917;
 const POISON_CLOUD: u32 = 3815;
 
-/// `Spell.dbc` Whirlwind, Princess's spin.
-const WHIRLWIND: u32 = 1680;
-
-/// `Spell.dbc` Hogger's Throw Rock.
-const ROCK: u32 = 4164;
-/// `Spell.dbc` Mother Fang's Rushing Charge and Hogger's Charge.
+/// `Spell.dbc` Mother Fang's Rushing Charge.
 const RUSHING_CHARGE: u32 = 6268;
-const CHARGE: u32 = 100;
 
 /// Elite base stats; lair availability and kits are independent of enemy unlock times.
 static GUARDIANS: [EnemyDef; 4] = [

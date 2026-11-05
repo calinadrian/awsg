@@ -9,10 +9,10 @@ use bevy::prelude::*;
 
 use super::abilities::Hit;
 use super::data::{self, EnemyDef};
-use super::hero::{self, HERO_RADIUS, Hero};
-use super::units::{self, COLOR_HURT, Fx, Marks, UnitSpec, flat, yaw_toward};
+use super::hero::{self, Hero, HERO_RADIUS};
+use super::units::{self, flat, yaw_toward, Fx, Marks, UnitSpec, COLOR_HURT};
 use super::{Phase, Rng, Run, Selection};
-use crate::creature_anim::{Engaged, MovementState, move_flags};
+use crate::creature_anim::{move_flags, Engaged, MovementState};
 use crate::net::{FieldChanged, Guid, ObjectStore};
 
 #[derive(Component)]
@@ -25,7 +25,13 @@ pub(super) struct Enemy {
     pub radius: f32,
     pub xp: u32,
     pub boss: bool,
+    /// Hogger's health-triggered, latched enrage; also replicated for his buff and body look.
+    pub hogger_enraged: bool,
+    pub enrage_at: f32,
+    pub timed_enraged: bool,
     pub attack_cd: f32,
+    /// Script-owned cast hold; separate from hostile roots and recovery windows.
+    pub script_hold_until: f32,
     /// A ranged cast winding up: Elwynn casters then release a bolt, others a marked blast.
     cast: Option<RangedCast>,
     pub slow: f32,
@@ -48,6 +54,7 @@ pub(super) struct Enemy {
     pub ward: bool,
     /// Raised to hold up a master's ward: every spell goes for it first.
     pub guard: bool,
+    pub boss_minion: bool,
     /// Holding in melee reach: it stands and swings until the hero steps clear.
     melee: bool,
     /// Wears [`Engaged`] for the Ready stance while it holds in melee.
@@ -86,9 +93,19 @@ fn scaled_level(hero: u32, role: Role) -> u32 {
 const CHASE_PACE: f32 = 0.8;
 
 /// How far past its reach the hero may step before a mob in melee gives chase again.
-const MELEE_LEEWAY: f32 = 0.6;
+const MELEE_LEEWAY: f32 = 1.25;
 
 impl Enemy {
+    pub(super) fn enrage_damage(&self) -> f32 {
+        if self.timed_enraged { super::boss_enrage::DAMAGE } else { 1.0 }
+    }
+    fn enrage_speed(&self) -> f32 {
+        if self.timed_enraged { super::boss_enrage::SPEED } else { 1.0 }
+    }
+    pub(super) fn enrage_pending(&mut self) {
+        if let Some(charge) = self.charge.as_mut() { charge.damage *= super::boss_enrage::DAMAGE; }
+        if let Some(cast) = self.cast.as_mut() { cast.damage *= super::boss_enrage::DAMAGE; }
+    }
     /// A lair guardian not yet woken: spells pass it by until the hero comes near or strikes it.
     pub(super) fn asleep(&self) -> bool {
         self.home.is_some_and(|h| !h.awake)
@@ -98,9 +115,12 @@ impl Enemy {
     pub(super) fn untargetable(&self) -> bool {
         self.asleep() || self.ward
     }
-    /// What spells go for first: bosses, lair guardians and a warded master's guards.
-    pub(super) fn priority(&self) -> bool {
-        self.boss || self.home.is_some() || self.guard
+    /// Automatic spells focus boss adds, then bosses, elites, then the ordinary horde.
+    pub(super) fn priority(&self) -> u8 {
+        if self.boss_minion || self.guard { 3 }
+        else if self.boss { 2 }
+        else if self.home.is_some() || self.def.roaming_elite || self.silver { 1 }
+        else { 0 }
     }
 
     pub(super) fn relocated(&mut self, _pos: Vec3, _center: Vec3) {
@@ -141,6 +161,8 @@ fn bolt_speed(spell: u32) -> f32 {
 /// A scripted charge down a marked lane.
 #[derive(Clone, Copy)]
 pub(super) struct Charge {
+    /// Princess charges apply their own hit consequences.
+    pub boar_impact: Option<super::princess::Impact>,
     pub to: Vec3,
     pub spell: u32,
     pub damage: f32,
@@ -158,6 +180,8 @@ const CHARGE_SPEED: f32 = 20.0;
 /// A blow marked on the ground, landing at `at` (run seconds).
 #[derive(Clone, Copy)]
 pub(super) struct Blast {
+    owner: Entity,
+    damage_factor: f32,
     at: f32,
     spot: Vec3,
     radius: f32,
@@ -186,8 +210,21 @@ const RANGED_BLAST_RADIUS: f32 = 3.5;
 #[derive(Component, Default)]
 pub(super) struct Script {
     guardian: super::guardian_behavior::Script,
+    hogger: super::hogger::Script,
+    pub(super) morgan: super::morgan::Script,
+    pub(super) princess: super::princess::Script,
     next: usize,
     running: Vec<(data::BossAction, f32)>,
+    /// Display telemetry follows the interpreter's clocks, including retries and windups.
+    pub(super) cooldowns: Vec<super::boss_cooldowns::Timer>,
+}
+
+impl Script {
+    pub(super) fn enrage_pending(&mut self) {
+        self.hogger.enrage_pending();
+        self.princess.enrage_pending();
+        self.morgan.enrage_pending();
+    }
 }
 
 pub(super) struct Dot {
@@ -399,8 +436,12 @@ fn spawn_with(
             level,
             faction: units::FACTION_MONSTER,
             bytes0: 1 << 8,
-            weapons: &[],
-            sheath: 0,
+            weapons: if boss && def.name == "Morgan the Collector" {
+                super::morgan::WEAPONS
+            } else {
+                &[]
+            },
+            sheath: if boss && def.name == "Morgan the Collector" { 2 } else { 0 },
         },
         pos,
         yaw_toward(hero - pos),
@@ -429,11 +470,15 @@ fn spawn_with(
             radius: radius_for(def) * grow,
             xp: def.xp * if silver { SILVER_XP } else { 1 },
             boss,
+            hogger_enraged: false,
+            enrage_at: if boss { run.elapsed + super::boss_enrage::SECONDS } else { 0.0 },
+            timed_enraged: false,
             attack_cd: if home.is_some() {
                 def.attack * 0.5
             } else {
                 0.5
             },
+            script_hold_until: 0.0,
             cast: None,
             slow: 1.0,
             slow_t: 0.0,
@@ -449,6 +494,7 @@ fn spawn_with(
             affixes,
             ward: false,
             guard: false,
+            boss_minion: false,
             melee: false,
             engaged: false,
             level,
@@ -457,7 +503,9 @@ fn spawn_with(
         },
         Marks::debuffs(),
     ));
-    if !def.phases.is_empty() || home.is_some() || def.roaming_elite {
+    if !def.phases.is_empty() || home.is_some() || def.roaming_elite
+        || (boss && matches!(def.name, "Hogger" | "Princess" | "Morgan the Collector"))
+        || std::ptr::eq(def, &super::princess::STAMPEDE_BOAR) {
         commands.entity(e).insert(Script::default());
     }
     if let Some(kit) = def.script.filter(|_| boss) {
@@ -710,6 +758,7 @@ pub(super) fn move_enemies(
         {
             e.charge = None;
         }
+        let enrage_speed = e.enrage_speed();
         if let Some(c) = e.charge.as_mut() {
             let way = flat(c.to - pos);
             let mut speed = 0.0;
@@ -725,6 +774,7 @@ pub(super) fn move_enemies(
                 } else {
                     CHARGE_SPEED
                 };
+                speed *= enrage_speed;
                 let stride = (speed * dt).min(way.length());
                 next = ground.at(pos + way.normalize_or_zero() * stride, pos.y);
                 c.left -= dt;
@@ -753,6 +803,9 @@ pub(super) fn move_enemies(
             } {
                 c.hit = true;
                 let taken = hero::hurt_hero(&mut run, c.damage);
+                if let Some(impact) = c.boar_impact {
+                    super::princess::impact(&mut run, impact);
+                }
                 fx.swing(ent, hero_e, taken);
                 if taken > 0.0 {
                     fx.number(hero_e, taken, false, COLOR_HURT);
@@ -823,11 +876,11 @@ pub(super) fn move_enemies(
             }
         }
 
-        let held = e.stun_t > 0.0 || e.root_t > 0.0;
+        let held = e.stun_t > 0.0 || e.root_t > 0.0 || now < e.script_hold_until;
         let contact_reach = if e.home.is_some() {
             2.2 + 1.2 * e.def.scale * e.size * 1.35
         } else {
-            HERO_RADIUS + e.radius + 0.35
+            (HERO_RADIUS + e.radius + 1.0).max(3.0)
         };
         // WoW's melee hold: a mob stops a little inside its reach and gives chase again only
         // once the hero steps clear of it plus a leeway, so it never stutters between run and
@@ -837,7 +890,7 @@ pub(super) fn move_enemies(
         } else if dist > contact_reach + MELEE_LEEWAY {
             e.melee = false;
         }
-        let contact = e.melee && dist <= contact_reach + MELEE_LEEWAY;
+        let mut contact = e.melee && dist <= contact_reach + MELEE_LEEWAY;
         // A caster stops once the hero is in its reach and throws from there.
         let in_reach = e
             .def
@@ -846,7 +899,7 @@ pub(super) fn move_enemies(
         let mut step = Vec3::ZERO;
         let mut speed = 0.0;
         if let Some(dir) = homing {
-            speed = e.speed;
+            speed = e.speed * e.enrage_speed();
             step = dir * speed;
             tf.rotation = Quat::from_rotation_y(yaw_toward(dir));
         } else if !held && !hero_down {
@@ -860,7 +913,7 @@ pub(super) fn move_enemies(
                 // Straight at the hero at the full gait. The last stride is clipped to stop at
                 // the hold distance, but the animation keeps the run's speed: a creeping speed
                 // would freeze the run cycle mid-stride while the body glides.
-                speed = e.speed * e.slow * CHASE_PACE;
+                speed = e.speed * e.slow * CHASE_PACE * e.enrage_speed();
                 let stride = if fleeing {
                     speed * dt
                 } else {
@@ -873,11 +926,24 @@ pub(super) fn move_enemies(
                 tf.rotation = tf.rotation.slerp(target, 1.0 - (-12.0 * dt).exp());
             }
         }
-        // A mob holding in melee is only nudged by the crowd, not slid around in its stance.
-        let shove = push.get(&ent).copied().unwrap_or_default() * if speed > 0.0 { 1.0 } else { 0.3 };
+        // A planted attacker or a committed cast owns its spot. Arriving neighbours must move
+        // around it, rather than shoving it out of melee and repeatedly restarting its chase.
+        let shove = if contact || held || in_reach { Vec3::ZERO }
+            else { push.get(&ent).copied().unwrap_or_default() };
         let mut next = pos + step * dt + shove * (dt * 8.0).min(0.5);
         next = ground.at(next, pos.y);
         tf.translation = next;
+        // Enter the hold and swing on arrival, rather than keeping the run animation and
+        // waiting another frame to notice the player is already in reach.
+        let arrived = flat(hpos - next).length();
+        if homing.is_none() && !hero_down && e.fear_t <= 0.0 && arrived <= contact_reach {
+            e.melee = true;
+            contact = true;
+            speed = 0.0;
+        } else if arrived > contact_reach + MELEE_LEEWAY {
+            e.melee = false;
+            contact = false;
+        }
         if speed > 0.0 {
             mv.speed = speed;
             mv.flags = move_flags::FORWARD;
@@ -899,6 +965,7 @@ pub(super) fn move_enemies(
         let free = homing.is_none()
             && e.stun_t <= 0.0
             && e.fear_t <= 0.0
+            && now >= e.script_hold_until
             && e.attack_cd <= 0.0
             && !hero_down;
         let native_caster = e.def.cost > 0.0;
@@ -949,6 +1016,11 @@ pub(super) fn move_enemies(
                 e.hp = (e.hp + raw * 3.0).min(e.max_hp);
             }
             fx.swing(ent, hero_e, taken);
+            if taken > 0.0 && std::ptr::eq(e.def, &super::mother_fang::BROODLING) {
+                let poison = e.damage * 0.2;
+                if peer == 0 { super::mother_fang::poison(&mut run, poison); }
+                else { run.coop_poison.push((peer, poison)); }
+            }
             if taken > 0.0 {
                 fx.number(hero_e, taken, false, COLOR_HURT);
             }
@@ -1164,9 +1236,12 @@ pub(super) fn run_scripts(
     selection: Res<Selection>,
     ground: super::dungeon::Ground,
     hero: Query<(Entity, &Transform), (With<Hero>, Without<Enemy>)>,
-    mut scripted: Query<(Entity, &Transform, &mut Enemy, &mut Script), Without<Hero>>,
+    mut scripted: Query<(Entity, &Guid, &mut Transform, &mut Enemy, &mut Script), Without<Hero>>,
+    unscripted: Query<(Entity, &Enemy), Without<Script>>,
     mut fx: Fx,
     mut tele: ResMut<super::telegraphs::Telegraphs>,
+    mut windups: ResMut<super::boss_pacing::Windups>,
+    mut eggs: ResMut<super::mother_fang::Eggs>,
     // Blows marked on the ground: when they land, where, how wide, how hard, and the visual they
     // land with (its caster, spell, and the spot it plays at, or on the caster).
     mut blasts: Local<Vec<Blast>>,
@@ -1187,11 +1262,15 @@ pub(super) fn run_scripts(
     for Blast {
         spot,
         radius,
-        damage,
+        mut damage,
+        owner,
+        damage_factor,
         visual,
         ..
     } in due
     {
+        let factor = scripted.get(owner).map(|(_, _, _, en, _)| en.enrage_damage()).unwrap_or(damage_factor);
+        damage *= factor / damage_factor;
         if let Some((caster, spell, dest)) = visual {
             fx.cast(caster, spell, &[], dest);
         }
@@ -1214,7 +1293,9 @@ pub(super) fn run_scripts(
 
     let pool = unlocked(roster, now);
     let players = super::mechanics::living(&run, &coop, (hero_e, hpos), &allies);
-    for (e, tf, mut en, mut script) in &mut scripted {
+    let living_adds: Vec<Entity> = unscripted.iter().filter(|(_, en)| !en.dead && en.hp > 0.0)
+        .map(|(e, _)| e).collect();
+    for (e, guid, mut tf, mut en, mut script) in &mut scripted {
         let (_, hpos, peer, _) = coop.target(
             tf.translation,
             (hero_e, hpos),
@@ -1222,6 +1303,27 @@ pub(super) fn run_scripts(
             &allies,
         );
         run.coop_target = peer;
+        if en.boss && en.def.name == "Morgan the Collector" {
+            script.morgan.tick(&mut commands, e, &mut en, &mut tf, &players, &living_adds,
+                now, &mut run, &ground, &mut fx, &mut tele, &mut windups, &mut rng);
+            script.cooldowns = if en.dead { Vec::new() }
+                else { script.morgan.timers(now, en.hp / en.max_hp) };
+            continue;
+        }
+        if en.boss && en.def.name == "Hogger" {
+            let scale = data::damage_scale(now) * super::difficulty::factors(en.def.tier).boss_damage * en.enrage_damage();
+            script.hogger.tick(e, &mut en, &mut tf, hpos, &players, now, scale,
+                &mut run, &ground, &mut fx, &mut tele, &mut windups);
+            script.cooldowns = if en.dead { Vec::new() } else { script.hogger.timers(now) };
+            continue;
+        }
+        if (en.boss && en.def.name == "Princess") || std::ptr::eq(en.def, &super::princess::STAMPEDE_BOAR) {
+            let scale = data::damage_scale(now) * super::difficulty::factors(en.def.tier).boss_damage * en.enrage_damage();
+            script.princess.tick(&mut commands, e, &mut en, &mut tf, hpos, &players, now, scale,
+                &mut run, &ground, &mut fx, &mut tele, &mut windups);
+            script.cooldowns = if en.dead { Vec::new() } else { script.princess.timers(now) };
+            continue;
+        }
         if en.home.is_some() || en.def.roaming_elite {
             super::guardian_behavior::tick(
                 &mut script.guardian,
@@ -1259,17 +1361,37 @@ pub(super) fn run_scripts(
                 0.0
             };
             script.running.push((phase.action, first));
+            script.cooldowns.push(super::boss_cooldowns::Timer::native(
+                phase.action,
+                now,
+                first,
+            ));
         }
         let pos = tf.translation;
         let damage_scale =
-            data::damage_scale(now) * super::difficulty::factors(def.tier).boss_damage;
+            data::damage_scale(now) * super::difficulty::factors(def.tier).boss_damage * en.enrage_damage();
         let mut calls = Vec::new();
-        for (action, wait) in &mut script.running {
+        let script = &mut *script;
+        let mut busy = en.charge.is_some() || en.stun_t > 0.0 || en.fear_t > 0.0
+            || script.cooldowns.iter().any(|t| t.cast_until > now);
+        for ((action, wait), timer) in script.running.iter_mut().zip(&mut script.cooldowns) {
             *wait -= dt;
+            timer.due = now + wait.max(0.0);
             if *wait > 0.0 {
                 continue;
             }
+            if busy || (en.boss && !windups.available(now)) {
+                timer.ready = true;
+                continue;
+            }
             match *action {
+                data::BossAction::Eggs { count, every } => {
+                    *wait = every;
+                    timer.started(now, every, 0.8);
+                    en.root_t = en.root_t.max(0.8);
+                    eggs.lay(guid.0, pos, count + u32::from(share <= 0.5),
+                        en.max_hp, en.damage, &mut run, &ground, &mut tele);
+                }
                 data::BossAction::Stomp {
                     spell,
                     radius,
@@ -1277,14 +1399,18 @@ pub(super) fn run_scripts(
                     every,
                 } => {
                     // Only with the hero close; it plants its feet while the circle fills.
-                    if flat(hpos - pos).length() > radius + 6.0 || en.charge.is_some() {
+                    if !players.iter().any(|p| flat(p.pos - pos).length() <= radius) || en.charge.is_some() {
                         *wait = 1.0;
+                        timer.ready = true;
                         continue;
                     }
                     *wait = every;
+                    timer.started(now, every, STOMP_WINDUP);
                     en.root_t = en.root_t.max(STOMP_WINDUP);
                     tele.circle(pos, radius, now, STOMP_WINDUP);
                     blasts.push(Blast {
+                        owner: e,
+                        damage_factor: en.enrage_damage(),
                         at: now + STOMP_WINDUP,
                         spot: pos,
                         radius,
@@ -1300,12 +1426,15 @@ pub(super) fn run_scripts(
                     every,
                 } => {
                     *wait = every;
+                    timer.started(now, every, 1.4);
                     for _ in 0..count {
                         let a = rng.range(0.0, std::f32::consts::TAU);
                         let r = rng.range(0.0, 6.0);
                         let at = ground.at(hpos + Vec3::new(a.cos(), 0.0, a.sin()) * r, hpos.y);
                         tele.circle(at, radius, now, 1.4);
                         blasts.push(Blast {
+                            owner: e,
+                            damage_factor: en.enrage_damage(),
                             at: now + 1.4,
                             spot: at,
                             radius,
@@ -1324,9 +1453,11 @@ pub(super) fn run_scripts(
                     // Only from a run-up: too close or too far, it tries again shortly.
                     if !(4.0..=24.0).contains(&d) || en.stun_t > 0.0 || en.root_t > 0.0 {
                         *wait = 1.0;
+                        timer.ready = true;
                         continue;
                     }
                     *wait = every;
+                    timer.started(now, every, CHARGE_WINDUP);
                     let to = ground.at(pos + way / d * (d + 3.0), hpos.y);
                     let rush = (d + 3.0) / CHARGE_SPEED + 0.3;
                     tele.lane(
@@ -1338,6 +1469,7 @@ pub(super) fn run_scripts(
                         CHARGE_WINDUP + rush,
                     );
                     en.charge = Some(Charge {
+                        boar_impact: None,
                         to,
                         spell,
                         damage: damage * damage_scale,
@@ -1355,6 +1487,7 @@ pub(super) fn run_scripts(
                     let d = flat(hpos - pos).length();
                     if d > 28.0 || en.stun_t > 0.0 || en.charge.is_some() {
                         *wait = 1.0;
+                        timer.ready = true;
                         continue;
                     }
                     *wait = every;
@@ -1362,8 +1495,11 @@ pub(super) fn run_scripts(
                     fx.cast(e, spell, &[], Some(at));
                     // In the air long enough to see it coming and step out.
                     let flight = (d / 14.0).clamp(1.2, 1.8);
+                    timer.started(now, every, flight);
                     tele.circle(at, radius, now, flight);
                     blasts.push(Blast {
+                        owner: e,
+                        damage_factor: en.enrage_damage(),
                         at: now + flight,
                         spot: at,
                         radius,
@@ -1374,6 +1510,10 @@ pub(super) fn run_scripts(
                 data::BossAction::Summon { foe, count, every } => {
                     // Once only, unless it repeats.
                     *wait = if every > 0.0 { every } else { f32::INFINITY };
+                    timer.started(now, every, 0.0);
+                    if every <= 0.0 {
+                        timer.due = f32::INFINITY;
+                    }
                     if foe.is_empty() {
                         for _ in 0..count {
                             if !pool.is_empty() {
@@ -1385,12 +1525,20 @@ pub(super) fn run_scripts(
                     }
                 }
             }
+            if timer.cast_until > now {
+                busy = true;
+                en.attack_cd = en.attack_cd.max(timer.cast_until - now);
+                if en.boss { windups.take(now); }
+            }
         }
         for (def, count) in calls {
             for i in 0..count {
                 let a = i as f32 / count as f32 * std::f32::consts::TAU;
                 let at = ground.spawn_spot(pos + Vec3::new(a.cos(), 0.0, a.sin()) * 3.0, pos.y);
-                spawn_enemy(&mut commands, &mut run, def, at, hpos, false);
+                let summoned = spawn_enemy(&mut commands, &mut run, def, at, hpos, false);
+                if en.boss && summoned != Entity::PLACEHOLDER {
+                    commands.entity(summoned).entry::<Enemy>().and_modify(|mut add| add.boss_minion = true);
+                }
             }
         }
     }

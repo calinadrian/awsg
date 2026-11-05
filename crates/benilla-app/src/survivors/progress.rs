@@ -126,6 +126,36 @@ fn finish(mut progress: ResMut<Progress>, run: Res<Run>, selection: Res<Selectio
     progress.settle(&run, selection.stage_def().name, run.coop_run);
 }
 impl Progress {
+    pub(super) fn export_offline(&self, inventory: &mut asr_coop::economy::Inventory) {
+        inventory.cleared_zones.extend(self.cleared_zones.iter().cloned());
+        for (id, record) in &self.records {
+            for (key, n) in [("runs", record.runs), ("wins", record.wins), ("coop_wins", record.coop_wins)] {
+                inventory.offline_progress.insert(format!("record:{id}:{key}"), u64::from(n));
+            }
+            inventory.offline_progress.insert(format!("best:{id}:kills"), u64::from(record.best_kills));
+            inventory.offline_progress.insert(format!("best:{id}:seconds"), (record.best_seconds.max(0.) * 1000.).round() as u64);
+        }
+    }
+
+    pub(super) fn import_offline(&mut self, inventory: &asr_coop::economy::Inventory) {
+        self.cleared_zones.extend(inventory.cleared_zones.iter().cloned());
+        for (key, value) in &inventory.offline_progress {
+            let Some((prefix, tail)) = key.split_once(':') else { continue };
+            if !matches!(prefix, "record" | "best") { continue; }
+            let Some((id, metric)) = tail.rsplit_once(':') else { continue };
+            let r = self.records.entry(id.into()).or_default();
+            match metric {
+                "runs" => r.runs = r.runs.max((*value).min(u32::MAX.into()) as u32),
+                "wins" => r.wins = r.wins.max((*value).min(u32::MAX.into()) as u32),
+                "coop_wins" => r.coop_wins = r.coop_wins.max((*value).min(u32::MAX.into()) as u32),
+                "kills" => r.best_kills = r.best_kills.max((*value).min(u32::MAX.into()) as u32),
+                "seconds" => r.best_seconds = r.best_seconds.max(*value as f32 / 1000.),
+                _ => {}
+            }
+        }
+        self.save();
+    }
+
     fn save(&self) {
         if let (Some(path), Ok(text)) = (path(), toml::to_string(self)) {
             let _ = crate::local_state::write_atomic(&path, &text);

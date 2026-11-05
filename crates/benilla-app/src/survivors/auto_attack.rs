@@ -72,6 +72,9 @@ pub(super) fn swing(
         auto.target = None;
         return;
     };
+    if run.stunned() {
+        return;
+    }
     if run.dead_t.is_some() {
         auto.target = None;
         return;
@@ -103,9 +106,8 @@ pub(super) fn swing(
 const FOCUS_RANGE: f32 = 30.0;
 
 /// The target frame shows what the hero is attacking: the auto-attack target, else the enemy the
-/// auto-cast spells pick first ([`super::abilities`]' `focused` order: hunter's mark, then a
-/// priority enemy, then the nearest). It re-picks every frame, so a nearer enemy takes over the
-/// moment it comes closer.
+/// auto-cast spells pick first: boss adds, bosses, elites, then regulars; a mark and distance
+/// break ties within a rank. Explicit right-click attacks retain their selected target.
 pub(super) fn follow_focus(
     run: Res<Run>,
     auto: Res<AutoAttack>,
@@ -127,9 +129,9 @@ pub(super) fn follow_focus(
                 })
                 .min_by(|a, b| {
                     let marked = |e: Entity| run.passives.marks.get(&e).is_some_and(|m| m.hunter);
-                    marked(b.0)
-                        .cmp(&marked(a.0))
-                        .then_with(|| b.2.priority().cmp(&a.2.priority()))
+                    b.2.priority()
+                        .cmp(&a.2.priority())
+                        .then_with(|| marked(b.0).cmp(&marked(a.0)))
                         .then_with(|| dist(a.1).total_cmp(&dist(b.1)))
                 })
                 .map(|(e, ..)| e)

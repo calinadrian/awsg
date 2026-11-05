@@ -47,7 +47,7 @@ window.BALANCE_DATA = {
         "multi_shot",
         "serpent_sting",
         "volley",
-        "explosive_trap",
+        "mending",
         "concussive_shot",
         "aimed_shot",
         "immolation_trap",
@@ -65,7 +65,7 @@ window.BALANCE_DATA = {
         "blade_flurry",
         "rupture",
         "kidney_shot",
-        "gouge",
+        "recuperate",
         "ghostly_strike",
         "adrenaline_rush",
         "backstab",
@@ -123,7 +123,7 @@ window.BALANCE_DATA = {
         "flamestrike",
         "fire_blast",
         "cone_of_cold",
-        "blast_wave",
+        "evocation",
         "pyroblast",
         "ice_barrier",
         "polymorph"
@@ -681,23 +681,22 @@ window.BALANCE_DATA = {
         "duration"
       ]
     },
-    "explosive_trap": {
-      "id": 13812,
-      "kind": "Nova",
-      "damage": 34.799999,
+    "mending": {
+      "id": 136,
+      "kind": "Heal",
+      "damage": 0.3,
       "dot": 0,
-      "cooldown": 6,
-      "radius": 9,
+      "cooldown": 12,
+      "radius": 0,
       "range": 0,
       "count": 0,
-      "duration": 0,
+      "duration": 6,
       "ticks": 0,
-      "native": 2,
-      "school": 2,
+      "native": 9,
+      "school": 3,
       "axes": [
         "power",
-        "cooldown",
-        "area"
+        "cooldown"
       ]
     },
     "concussive_shot": {
@@ -892,23 +891,22 @@ window.BALANCE_DATA = {
         "targets"
       ]
     },
-    "gouge": {
-      "id": 1776,
-      "kind": "Melee",
-      "damage": 25.5,
+    "recuperate": {
+      "id": 746,
+      "kind": "Heal",
+      "damage": 0.3,
       "dot": 0,
-      "cooldown": 5,
+      "cooldown": 12,
       "radius": 0,
-      "range": 7,
-      "count": 3,
-      "duration": 0,
+      "range": 0,
+      "count": 0,
+      "duration": 6,
       "ticks": 0,
-      "native": 5,
+      "native": 9,
       "school": 0,
       "axes": [
         "power",
-        "cooldown",
-        "targets"
+        "cooldown"
       ]
     },
     "ghostly_strike": {
@@ -1593,23 +1591,22 @@ window.BALANCE_DATA = {
         "area"
       ]
     },
-    "blast_wave": {
-      "id": 11113,
-      "kind": "Nova",
-      "damage": 33.900002,
+    "evocation": {
+      "id": 12051,
+      "kind": "Heal",
+      "damage": 0.3,
       "dot": 0,
-      "cooldown": 8,
-      "radius": 10,
+      "cooldown": 12,
+      "radius": 0,
       "range": 0,
       "count": 0,
-      "duration": 0,
+      "duration": 6,
       "ticks": 0,
-      "native": 2,
-      "school": 2,
+      "native": 9,
+      "school": 6,
       "axes": [
         "power",
-        "cooldown",
-        "area"
+        "cooldown"
       ]
     },
     "pyroblast": {

@@ -96,7 +96,7 @@ struct Foe {
     pos: Vec3,
     dist: f32,
     radius: f32,
-    priority: bool,
+    priority: u8,
     marked: bool,
     health: f32,
 }
@@ -243,9 +243,9 @@ fn focused(foes: &[Foe], range: f32, n: usize, finisher: bool) -> Vec<Foe> {
         .copied()
         .collect();
     v.sort_by(|a, b| {
-        b.marked
-            .cmp(&a.marked)
-            .then_with(|| b.priority.cmp(&a.priority))
+        b.priority
+            .cmp(&a.priority)
+            .then_with(|| b.marked.cmp(&a.marked))
             .then_with(|| {
                 if finisher {
                     (b.health < 0.3).cmp(&(a.health < 0.3)).then_with(|| {
@@ -266,16 +266,21 @@ fn focused(foes: &[Foe], range: f32, n: usize, finisher: bool) -> Vec<Foe> {
 }
 
 fn around(foes: &[Foe], center: Vec3, r: f32) -> Vec<Foe> {
-    foes.iter()
+    let mut targets: Vec<_> = foes.iter()
         .filter(|f| flat(f.pos - center).length() <= r + f.radius * 0.5)
         .copied()
-        .collect()
+        .collect();
+    targets.sort_by(|a, b| b.priority.cmp(&a.priority)
+        .then_with(|| b.marked.cmp(&a.marked))
+        .then_with(|| flat(a.pos - center).length_squared().total_cmp(&flat(b.pos - center).length_squared())));
+    targets
 }
 
 /// The point among the nearest enemies in range with the most others within `r` of it.
 fn densest(foes: &[Foe], range: f32, r: f32) -> Option<Vec3> {
-    let near: Vec<&Foe> = foes.iter().filter(|f| f.dist <= range).take(40).collect();
-    near.iter()
+    let near: Vec<&Foe> = foes.iter().filter(|f| f.dist <= range).collect();
+    let priority = near.iter().map(|f| f.priority).max()?;
+    near.iter().filter(|f| f.priority == priority).take(40)
         .map(|f| {
             (
                 f.pos,
@@ -323,7 +328,7 @@ pub(super) fn cast_abilities(
     mut hits: MessageWriter<Hit>,
 ) {
     let dt = time.delta_secs();
-    if run.dead_t.is_some() || dt <= 0.0 {
+    if run.dead_t.is_some() || run.stunned() || dt <= 0.0 {
         return;
     }
     let Ok((me, htf)) = hero.single() else { return };
@@ -396,8 +401,8 @@ pub(super) fn cast_abilities(
                 };
                 let targets = if def.kind == Kind::Missiles {
                     let mut pool = focused(&foes, reach, usize::MAX, false);
-                    if pool.iter().any(|f| f.priority) {
-                        pool.retain(|f| f.priority);
+                    if let Some(priority) = pool.iter().map(|f| f.priority).max() {
+                        pool.retain(|f| f.priority == priority);
                     }
                     if pool.is_empty() {
                         Vec::new()
@@ -534,9 +539,9 @@ pub(super) fn cast_abilities(
                             .filter(|f| !chain.iter().any(|c| c.e == f.e))
                             .filter(|f| flat(f.pos - last).length() <= p.radius)
                             .min_by(|a, b| {
-                                flat(a.pos - last)
+                                b.priority.cmp(&a.priority).then_with(|| flat(a.pos - last)
                                     .length()
-                                    .total_cmp(&flat(b.pos - last).length())
+                                    .total_cmp(&flat(b.pos - last).length()))
                             });
                         match next {
                             Some(f) => chain.push(*f),
@@ -603,7 +608,10 @@ pub(super) fn cast_abilities(
                 if run.shield > 0.0 && run.shield_t > 0.0 {
                     continue;
                 }
+                info!("survivors: absorb granted class={} race={} ability={} spell={} amount={:.0} elapsed={:.2}",
+                    run.class.name, run.race, def.key, def.spell, p.dmg, run.elapsed);
                 run.shield = p.dmg;
+                run.shield_spell = def.spell;
                 run.shield_t = if def.native_kind == 9 {
                     f32::INFINITY
                 } else {
@@ -860,9 +868,9 @@ pub(super) fn tick_areas(
                     .filter(|(d, _)| *d <= totem.range)
                     .collect();
                 targets.sort_by(|a, b| {
-                    b.1.marked
-                        .cmp(&a.1.marked)
-                        .then_with(|| b.1.priority.cmp(&a.1.priority))
+                    b.1.priority
+                        .cmp(&a.1.priority)
+                        .then_with(|| b.1.marked.cmp(&a.1.marked))
                         .then_with(|| a.0.total_cmp(&b.0))
                 });
                 for (dist, f) in targets.into_iter().take(totem.count) {
@@ -1009,6 +1017,8 @@ pub(super) fn apply_hits(
             if h.crit {
                 super::talents::trigger(&mut run, &mut rng, 2, None);
             }
+            // Cap after every offensive multiplier, before healing, procs and the meter.
+            dmg = super::almighty_strength::damage(en.boss, en.max_hp, dmg);
             let leech = run.talents.stat(14) + run.jewel_stat(18);
             if leech > 0.0 {
                 run.heal(dmg * leech);
@@ -1075,13 +1085,13 @@ pub(super) fn apply_hits(
         }
         let boss = en.boss || en.home.is_some();
         match h.effect {
-            Effect::Slow(m, t) => {
+            Effect::Slow(m, t) if !en.boss => {
                 let m = if boss { m.max(0.75) } else { m };
                 en.slow = if en.slow_t > 0.0 { en.slow.min(m) } else { m };
                 en.slow_t = en.slow_t.max(t);
             }
-            Effect::Root(t) => en.root_t = en.root_t.max(if boss { t * 0.25 } else { t }),
-            Effect::Stun(t) => en.stun_t = en.stun_t.max(if boss { t * 0.25 } else { t }),
+            Effect::Root(t) if !en.boss => en.root_t = en.root_t.max(if boss { t * 0.25 } else { t }),
+            Effect::Stun(t) if !en.boss => en.stun_t = en.stun_t.max(if boss { t * 0.25 } else { t }),
             Effect::Fear(t) if !boss => en.fear_t = en.fear_t.max(t),
             Effect::Weaken(m, t) => {
                 en.weaken = m;
@@ -1093,7 +1103,12 @@ pub(super) fn apply_hits(
             }
             Effect::Shield(f) => {
                 let max = run.stats().max_hp;
+                if run.shield <= 0.0 {
+                    info!("survivors: absorb granted class={} race={} hit_spell={} amount={:.0} elapsed={:.2}",
+                        run.class.name, run.race, h.spell, max * f, run.elapsed);
+                }
                 run.shield = (run.shield + max * f).min(max);
+                run.shield_spell = h.spell;
                 run.shield_t = f32::INFINITY;
             }
             _ => {}
@@ -1134,16 +1149,22 @@ pub(super) fn apply_hits(
         let mut dealt = 0.0;
         let mut drained = 0.0;
         let mut remaining_hp = en.hp.max(0.0);
+        let boss = en.boss;
+        let maximum = en.max_hp;
+        let guest_id = if coop.guest() { replicas.get(e).ok().map(|id| id.0) } else { None };
         for d in &mut en.dots {
             d.left -= dt;
             d.tick -= dt.min((d.left + dt).max(0.0)) * (1.0 + run.jewel_stat(19));
             while d.tick <= 0.00001 {
                 d.tick += d.every.max(0.01);
-                dealt += d.damage;
-                let landed = d.damage.max(0.0).min(remaining_hp);
+                let damage = super::almighty_strength::damage(boss, maximum, d.damage);
+                dealt += damage;
+                let landed = damage.min(remaining_hp);
                 run.record_damage(d.source, d.spell, landed);
                 remaining_hp -= landed;
-                drained += d.damage * d.drain;
+                drained += damage * d.drain;
+                // Send each tick separately so the host's per-hit cap never merges skills.
+                if let Some(id) = guest_id { coop.submit(id, damage, Effect::None); }
             }
         }
         en.dots.retain(|d| d.left > 0.0);
@@ -1152,9 +1173,6 @@ pub(super) fn apply_hits(
             en.hp -= dealt;
             fx.number(e, dealt, false, COLOR_SPELL);
             if coop.guest() {
-                if let Ok(id) = replicas.get(e) {
-                    coop.submit(id.0, dealt, Effect::None);
-                }
                 en.hp = en.hp.max(0.001);
             }
             if run.test_immortal {

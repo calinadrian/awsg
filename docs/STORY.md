@@ -34,7 +34,7 @@ the class level cap is 52.
 | Molten Core | Burning Steppes | Attunement to the Core |
 
 Accept the attunement in the quest log before clearing its zone, then turn it in.
-The quest must be completed in the selected hero's current solo/realm economy.
+The quest is stored in the hero's offline-capable inventory and synchronized with the realm.
 Co-op hosts need the story route unlocked; every raid participant needs their own
 class level and attunement. Co-op guests can follow the host through ordinary zones.
 

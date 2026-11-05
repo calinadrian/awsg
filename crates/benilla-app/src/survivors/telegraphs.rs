@@ -170,6 +170,25 @@ struct Telegraph {
 pub(super) struct Telegraphs(Vec<Telegraph>);
 
 impl Telegraphs {
+    pub(super) fn remove_cone(&mut self, center: Vec3, dir: Vec3, radius: f32) {
+        self.0.retain(|t| !matches!(t.shape, Shape::Cone { center: c, dir: d, radius: r, .. }
+            if c.distance_squared(center) < 0.01 && d.distance_squared(dir) < 0.01
+                && (r - radius).abs() < 0.01));
+    }
+
+    pub(super) fn remove_lane(&mut self, from: Vec3, to: Vec3, half: f32) {
+        let way = super::units::flat(to - from);
+        let dir = way.normalize_or_zero();
+        self.0.retain(|t| !matches!(t.shape, Shape::Lane { from: f, dir: d, len, half: h }
+            if f.distance_squared(from) < 0.01 && d.distance_squared(dir) < 0.01
+                && (len - way.length()).abs() < 0.01 && (h - half).abs() < 0.01));
+    }
+
+    /// Remove an egg's step marker as soon as that egg is crushed or its owner dies.
+    pub(super) fn remove_circle(&mut self, center: Vec3, radius: f32) {
+        self.0.retain(|t| !matches!(t.shape, Shape::Circle { center: c, radius: r }
+            if c.distance_squared(center) < 0.01 && (r - radius).abs() < 0.01));
+    }
     /// The host sends warnings as shapes and encounter times; each guest projects its own art.
     pub(super) fn snapshot(&self) -> Vec<[f32; 14]> {
         self.0

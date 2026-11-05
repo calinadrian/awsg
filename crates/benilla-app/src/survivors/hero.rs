@@ -388,6 +388,20 @@ pub(super) fn hero_vitals(
         return;
     }
     run.elapsed += dt;
+    // Venom refreshes one three-second effect; repeated bites do not stack slows or ticks.
+    let now = run.elapsed;
+    while run.brood_poison.next > 0.0 && run.brood_poison.next <= now
+        && run.brood_poison.next <= run.brood_poison.until {
+        let damage = run.brood_poison.damage;
+        run.brood_poison.next += 1.0;
+        let previous = run.coop_target;
+        run.coop_target = 0;
+        let taken = hurt_hero(&mut run, damage);
+        run.coop_target = previous;
+        if taken > 0.0 { fx.number(entity, taken, false, units::COLOR_HURT); }
+    }
+    if now >= run.brood_poison.until { run.brood_poison = Default::default(); }
+    super::morgan::tick_bleed(&mut run, entity, &mut fx, now);
     for buff in &mut run.buffs {
         buff.3 -= dt;
     }
@@ -406,7 +420,7 @@ pub(super) fn hero_vitals(
     // The buffs show as their own state kits: the shield bubble, the immunity glow, the orbs.
     let mut shown: Vec<u32> = Vec::new();
     if run.shield_t > 0.0 && run.shield > 0.0 {
-        shown.push(17);
+        if run.shield_spell != 0 { shown.push(run.shield_spell); }
     }
     if run.immune_t > 0.0 {
         shown.push(642);
@@ -425,6 +439,11 @@ pub(super) fn hero_vitals(
     if run.heal_t > 0.0 {
         shown.push(139);
     }
+    if run.brood_poison.until > now { shown.push(6917); }
+    if run.stunned() { shown.push(853); }
+    if run.morgan_bleed.until > now { shown.push(703); }
+    if run.morgan_mark_until > now { shown.push(1130); }
+    if run.healing_blocked_until > now { shown.push(12294); }
     marks.set(&shown);
     marks.flush(entity, guid.0, &mut store, &mut fields);
 
@@ -437,6 +456,12 @@ pub(super) fn hero_vitals(
     if run.hp <= 0.0 {
         run.hp = 0.0;
         run.dead_t = Some(0.0);
+        run.brood_poison = Default::default();
+        run.morgan_bleed = Default::default();
+        run.morgan_mark_until = 0.0;
+        run.morgan_bomb_slow_until = 0.0;
+        run.stun_until = 0.0;
+        run.healing_blocked_until = 0.0;
         run.heal_t = 0.0;
         if coop.active() {
             run.banner = Some((
@@ -531,5 +556,27 @@ mod tests {
 
         run.gear[4] = 0.9;
         assert_eq!(run.stats().reduction, 0.6, "reduction stops at 60%");
+    }
+
+    #[test]
+    fn move_speed_bonuses_stop_at_fifteen_percent_and_slows_still_apply() {
+        let mut run = Run::default();
+        assert_eq!(run.stats().speed, super::super::BASE_SPEED);
+
+        let carrot = super::super::jewelry::JEWELS
+            .iter()
+            .position(|jewel| jewel.name == "Carrot on a Stick")
+            .unwrap();
+        run.jewelry.push(super::super::jewelry::Jewel {
+            index: carrot,
+            strength: 0.40,
+            picks: 5,
+            rarity: super::super::rewards::Rarity::Legendary,
+        });
+        assert_eq!(run.stats().speed, super::super::MAX_SPEED);
+        assert!((super::super::MAX_SPEED / super::super::BASE_SPEED - 1.15).abs() < 1e-5);
+
+        run.morgan_bomb_slow_until = run.elapsed + 1.0;
+        assert_eq!(run.stats().speed, super::super::MAX_SPEED * 0.5);
     }
 }

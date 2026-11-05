@@ -140,9 +140,22 @@ Kills are submitted in batches during the run, and unspent run gold is banked
 when the results open, when leaving to the menu, or on a graceful exit. Spending
 run gold on caches reduces that payout. Pending requests are saved before sending
 and retried with the same transaction ID after connection loss or a server write
-failure. The client caches equipped gear for offline play; new transactions wait
-for the shared server. The simulation remains player-hosted: bounded reward
+failure. Solo and co-op use one inventory: normal rewards, equipment actions,
+quests, talent experience, builds and completion records commit to the local ledger
+even without a server. Reconnecting reconciles changes against the last acknowledged
+snapshot, imports server changes, and retains local changes made during the request.
+Auctions require a connection and wait for inventory synchronization before trading.
+Conflicting edits to the same item or talent build pause synchronization and preserve
+both versions rather than overwrite one. The simulation remains player-hosted: bounded reward
 reports and duplicate protection do not provide server-authoritative anti-cheat.
+
+Offline synchronization requires matching updated game and directory binaries.
+The first local migration preserves the inventory cache and local ledger as
+`*.before-offline-sync.bak`; keep these alongside the normal saves. A journalled
+acknowledgement and durable transaction IDs allow interrupted imports to resume.
+The server also retains an `asr-economy.before-offline-sync.json` snapshot before
+accepting its first offline inventory. Existing separate solo and realm inventories
+are combined on first connection; subsequent syncs apply changes since acknowledgement.
 
 The updated directory binary includes the economy service on the existing
 WebSocket port; it needs no separate Python service or database installation.

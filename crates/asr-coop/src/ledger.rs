@@ -10,6 +10,8 @@ pub const MAX_GOLD: u64 = 1_000_000_000_000;
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Account {
     #[serde(default)]
+    offline_devices: BTreeMap<String, Inventory>,
+    #[serde(default)]
     owner: Option<String>,
     inventory: Inventory,
     receipts: BTreeMap<String, (String, Option<String>)>,
@@ -41,6 +43,8 @@ impl State {
 
 /// What a ledger needs from wherever it runs.
 pub trait Host {
+    /// Preserve the pre-migration store before accepting the first offline device.
+    fn backup_before_sync(&mut self, _state: &[u8]) -> Result<(), String> { Ok(()) }
     /// Seconds since the Unix epoch.
     fn now(&mut self) -> u64;
     /// A uniform roll in `0..limit`; 0 when `limit` is 0.
@@ -57,6 +61,31 @@ pub struct Ledger {
     catalog: Catalog,
 }
 impl Ledger {
+    pub fn delivered_snapshot(&self, credential: &str, delivery: &str) -> Option<Inventory> {
+        let account = self.state.accounts.get(credential)?;
+        let account = account.owner.as_ref().and_then(|owner| self.state.accounts.get(owner)).unwrap_or(account);
+        account.receipts.contains_key(&format!("offline-delivery:{delivery}")).then(|| account.inventory.clone())
+    }
+    /// Install an acknowledged snapshot locally, retaining credentials, receipts and active runs.
+    /// The delivery ID makes recovery after a crash between the two save files idempotent.
+    pub fn install_snapshot(&mut self, credential: &str, mut inventory: Inventory, delivery: &str, host: &mut impl Host) -> Result<Inventory, String> {
+        let mut next = self.state.clone();
+        let owner = next.accounts.get(credential).ok_or("Local inventory credential missing")?.owner.clone().unwrap_or_else(|| credential.into());
+        let account = next.accounts.get_mut(&owner).ok_or("Local inventory missing")?;
+        let receipt = format!("offline-delivery:{delivery}");
+        if !account.receipts.contains_key(&receipt) {
+            // The owner credential's class stays fixed; views can request any linked class.
+            inventory.class = account.inventory.class;
+            inventory.name = account.inventory.name.clone();
+            account.inventory = inventory;
+            account.receipts.insert(receipt, (String::new(), None));
+            // Local rewards use a fresh random ID range, avoiding other devices' sequences.
+            next.serial = ((u64::from(host.random(u32::MAX)) << 32) | u64::from(host.random(u32::MAX))) & 0x0FFF_FFFF_FFFF_FFFF;
+            self.commit(next, host).map_err(|e| format!("Could not save transaction: {e}"))?;
+        }
+        Ok(self.state.accounts[&owner].inventory.clone())
+    }
+
     pub fn new(state: State, catalog: Catalog) -> Self {
         Self { state, catalog }
     }
@@ -106,6 +135,25 @@ impl Ledger {
         Some(pool[host.random(pool.len() as u32) as usize])
     }
     fn apply(&mut self, req: &Request, host: &mut impl Host) -> Result<Reply, String> {
+        if let Action::Online { device, action } = &req.action {
+            if device.is_empty() || device.len() > 100 || !matches!(action.as_ref(), Action::Buy { .. } | Action::List { .. } | Action::Cancel { .. } | Action::Refresh) {
+                return Err("Invalid online inventory action".into());
+            }
+            let inner = Request { id: req.id.clone(), token: req.token.clone(), action: *action.clone() };
+            let reply = self.apply(&inner, host)?;
+            if let Some(inventory) = &reply.inventory {
+                let mut next = self.state.clone();
+                let credential = next.accounts.get(&req.token).ok_or("Credential unavailable")?;
+                let owner = credential.owner.clone().unwrap_or_else(|| req.token.clone());
+                let account = next.accounts.get_mut(&owner).ok_or("Inventory unavailable")?;
+                if account.offline_devices.len() >= 64 && !account.offline_devices.contains_key(device) { return Err("Too many offline devices".into()); }
+                if account.offline_devices.get(device).is_none_or(|old| !crate::offline::same_inventory(old, inventory)) {
+                    account.offline_devices.insert(device.clone(), inventory.clone());
+                    self.commit(next, host).map_err(|e| format!("Could not save transaction: {e}"))?;
+                }
+            }
+            return Ok(reply);
+        }
         if req.id.is_empty() || req.id.len() > 100 {
             return Err("Invalid transaction ID".into());
         }
@@ -182,6 +230,12 @@ impl Ledger {
             .accounts
             .get_mut(&token)
             .is_some_and(|account| self.catalog.quests.migrate(&mut account.inventory, now));
+        // A sync brings the device's own set, and handing out a second one first would duplicate it.
+        let geared = !matches!(req.action, Action::SyncOffline { .. })
+            && next.accounts.get_mut(&token).is_some_and(|account| {
+                crate::starter::grant(&mut account.inventory, class, &mut next.serial, &self.catalog)
+            });
+        let migrated = migrated || geared;
         let fingerprint = serde_json::to_string(&req.action).map_err(|e| e.to_string())?;
         let receipt = next.accounts[&token].receipts.get(&req.id).cloned();
         if let Some((old, result)) = receipt {
@@ -191,6 +245,36 @@ impl Ledger {
             run = result;
         } else {
             match &req.action {
+                Action::SyncOffline { device, base, inventory } => {
+                    if !next.accounts[&token].offline_devices.contains_key(device) {
+                        let bytes = serde_json::to_vec(&self.state).map_err(|e| e.to_string())?;
+                        host.backup_before_sync(&bytes).map_err(|e| format!("Could not save transaction: {e}"))?;
+                    }
+                    if device.is_empty() || device.len() > 100 { return Err("Invalid offline device identity".into()); }
+                    let account = next.accounts.get_mut(&token).ok_or("Inventory unavailable")?;
+                    let expected = account.offline_devices.get(device);
+                    let empty = Inventory::default();
+                    if !crate::offline::same_inventory(base.as_ref(), expected.unwrap_or(&empty))
+                        && !crate::offline::same_inventory(base.as_ref(), &account.inventory) {
+                        return Err("Sync checkpoint changed; offline progress retained for recovery".into());
+                    }
+                    if account.offline_devices.len() >= 64 && !account.offline_devices.contains_key(device) { return Err("Too many offline devices".into()); }
+                    let mut merged = crate::offline::merge(&account.inventory, base, inventory, &self.catalog)?;
+                    self.catalog.quests.earn(&mut merged, now);
+                    merged.name = account.inventory.name.clone();
+                    merged.class = account.inventory.class;
+                    for item in &merged.items {
+                        let d = self.catalog.definition(&item.definition).ok_or("Offline item is missing from this server's catalog")?;
+                        if item.level > 5 || item.slot.as_ref().is_some_and(|slot| !d.fits(item.equipped_class.unwrap_or(inventory.class), slot)) {
+                            return Err("Invalid offline equipment".into());
+                        }
+                    }
+                    next.serial = next.serial.max(merged.items.iter().map(|i| i.id).max().unwrap_or(0));
+                    account.inventory = merged.clone();
+                    // Checkpoints preserve the requesting class, as replies do.
+                    merged.class = class;
+                    account.offline_devices.insert(device.clone(), merged);
+                }
                 Action::LinkInventory { tokens } => {
                     if tokens.len() > 9 {
                         return Err("Too many class inventories".into());
@@ -243,11 +327,22 @@ impl Ledger {
                         let done = std::mem::take(&mut old.inventory.quests_done);
                         let achievements = std::mem::take(&mut old.inventory.achievements);
                         let progress = std::mem::take(&mut old.inventory.achievement_progress);
+                        let offline_progress = std::mem::take(&mut old.inventory.offline_progress);
+                        let starter_classes = std::mem::take(&mut old.inventory.starter_classes);
+                        let offline_devices = std::mem::take(&mut old.offline_devices);
                         let receipts = old.receipts.clone();
                         let shared = next
                             .accounts
                             .get_mut(&token)
                             .ok_or("Inventory unavailable")?;
+                        shared.inventory.starter_classes.extend(starter_classes);
+                        for (key, value) in offline_progress {
+                            let current = shared.inventory.offline_progress.entry(key).or_default();
+                            *current = (*current).max(value);
+                        }
+                        for (device, checkpoint) in offline_devices {
+                            shared.offline_devices.entry(device).or_insert(checkpoint);
+                        }
                         shared.inventory.gold = shared
                             .inventory
                             .gold
@@ -721,6 +816,9 @@ impl Ledger {
                             if item.locked {
                                 return Err("Unlock the item before upgrading".into());
                             }
+                            if definition.is_starter() {
+                                return Err("Starter gear cannot be upgraded".into());
+                            }
                             let recipe = definition
                                 .upgrades
                                 .get(usize::from(item.level))
@@ -761,6 +859,9 @@ impl Ledger {
                             account.inventory.items.remove(index);
                         }
                         Action::List { price, .. } => {
+                            if definition.is_starter() {
+                                return Err("Starter gear cannot be sold".into());
+                            }
                             if *price == 0
                                 || *price > MAX_GOLD
                                 || item.locked
