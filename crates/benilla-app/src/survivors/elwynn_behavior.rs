@@ -1,6 +1,6 @@
 //! Elwynn rules read from the installed ASR 0.124 executable.
 //!
-//! Selection: RVAs 0x5c7ec90 and 0x5c8a2e0. Melee approach: 0x5c0bb91–0x5c0c1b9.
+//! Selection: RVAs 0x5c7ec90 and 0x5c8a2e0.
 
 /// The native enemy table's budget costs (+0x44), in regular-roster order.
 pub(super) const COSTS: [f32; 9] = [1.0, 1.0, 1.0, 2.0, 1.5, 3.0, 1.5, 2.0, 3.0];
@@ -18,6 +18,27 @@ pub(super) fn regular_stats(hp: f32, damage: f32, speed: f32, elapsed: f32) -> (
         damage * 1.25 * 0.82_f32.sqrt() * damage_curve,
         speed * 1.05,
     )
+}
+
+/// Roaming elite rows use 4.8x health and the 0.00594 cubic; damage has no regular 1.25x.
+/// Native 0x5c0062d and leaf 0x5c6a2e0; lair guardians retain their separate curves.
+pub(super) fn roaming_elite_stats(hp: f32, damage: f32, speed: f32, elapsed: f32) -> (f32, f32, f32) {
+    let minute = elapsed.max(0.0) / 60.0;
+    let health_curve =
+        1.0 + 0.10 * minute + 0.036 * minute * minute + 0.00594 * minute * minute * minute;
+    let damage_curve =
+        1.0 + 0.07 * minute + 0.015 * minute * minute + 0.0002 * minute * minute * minute;
+    (
+        hp * 4.8 * 0.82 * health_curve,
+        damage * 0.82_f32.sqrt() * damage_curve,
+        speed * 1.05,
+    )
+}
+
+/// Boss rows: 5.75x health and flat damage, with no run-time curve (native 0x5c134da and
+/// 0x5c1378f, normal mode, single hero). Speed and swing are the row's own.
+pub(super) fn boss_stats(hp: f32, damage: f32) -> (f32, f32) {
+    (hp * 5.75 * 0.82, damage * 0.82_f32.sqrt())
 }
 
 /// Older unlocked enemies retain weight; their cost reduces how often they are selected.
@@ -49,33 +70,6 @@ pub(super) fn choose(weights: &[f32], unit: f32) -> Option<usize> {
     last
 }
 
-/// Native melee reach is 1.2 × model scale, independent of neighbour separation.
-pub(super) fn melee_reach(scale: f32) -> f32 {
-    1.2 * scale
-}
-
-/// The native approach aims around the hero rather than stacking every mob at his centre.
-pub(super) fn approach_radius(scale: f32) -> f32 {
-    (0.8 * melee_reach(scale)).max(1.5)
-}
-
-/// The native move command is at most 14 yards, refreshed after 0.25–0.7 seconds.
-pub(super) fn repath_after(distance: f32, speed: f32) -> f32 {
-    (distance / speed.max(0.5)).clamp(0.25, 0.7)
-}
-
-/// A short move towards a slot around the hero, preserving the approaching side.
-pub(super) fn approach_goal(pos: [f32; 2], hero: [f32; 2], angle: f32, radius: f32) -> [f32; 2] {
-    let target = [
-        hero[0] + angle.cos() * radius,
-        hero[1] + angle.sin() * radius,
-    ];
-    let delta = [target[0] - pos[0], target[1] - pos[1]];
-    let length = delta[0].hypot(delta[1]);
-    let fraction = if length > 14.0 { 14.0 / length } else { 1.0 };
-    [pos[0] + delta[0] * fraction, pos[1] + delta[1] * fraction]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +86,13 @@ mod tests {
     }
 
     #[test]
+    fn boss_rows_use_the_native_health_factor_and_flat_damage() {
+        let (hp, damage) = boss_stats(3600.0, 22.0);
+        assert!((hp - 16974.0).abs() < 1.0);
+        assert!((damage - 19.92).abs() < 0.01);
+    }
+
+    #[test]
     fn weighted_draw_never_selects_locked_or_empty_buckets() {
         assert_eq!(choose(&[], 0.0), None);
         assert_eq!(choose(&[0.0, 0.0], 0.5), None);
@@ -100,25 +101,5 @@ mod tests {
         assert_eq!(choose(&weights, 0.249), Some(1));
         assert_eq!(choose(&weights, 0.25), Some(3));
         assert_eq!(choose(&weights, 1.0), Some(3));
-    }
-
-    #[test]
-    fn melee_approach_respects_body_size_without_expanding_combat_reach() {
-        assert!((melee_reach(0.7) - 0.84).abs() < 0.0001);
-        assert_eq!(approach_radius(0.7), 1.5);
-        assert!((approach_radius(3.5) - 3.36).abs() < 0.0001);
-    }
-
-    #[test]
-    fn approach_keeps_opposite_sides_and_limits_each_move() {
-        let east = approach_goal([30.0, 0.0], [0.0, 0.0], 0.0, 1.5);
-        let west = approach_goal([-30.0, 0.0], [0.0, 0.0], std::f32::consts::PI, 1.5);
-        assert_eq!(east, [16.0, 0.0]);
-        assert!((west[0] + 16.0).abs() < 0.0001);
-        let close = approach_goal([3.0, 0.0], [0.0, 0.0], 0.0, 1.5);
-        assert_eq!(close, [1.5, 0.0]);
-        assert_eq!(repath_after(0.0, 5.0), 0.25);
-        assert_eq!(repath_after(14.0, 5.0), 0.7);
-        assert_eq!(repath_after(14.0, 0.0), 0.7);
     }
 }

@@ -103,7 +103,10 @@ pub(in crate::entities) fn redress_player_looks(
         &mut players
     {
         // Wait until every visible item has resolved, or a half-dressed atlas composites first.
-        if net.kind != EntityKind::Player || !live.settled || *live == applied.0 {
+        let is_player = net.kind == EntityKind::Player;
+        #[cfg(not(target_os = "macos"))]
+        let is_player = is_player || live.survivors_shoulders.is_some();
+        if !is_player || !live.settled || *live == applied.0 {
             continue;
         }
         // Stamp first: a model-less player has nothing to re-dress and must not retry every frame.

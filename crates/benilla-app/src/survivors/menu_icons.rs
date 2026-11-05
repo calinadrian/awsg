@@ -1,8 +1,9 @@
 //! Plain square selection buttons, with the portrait contained inside the border.
 use bevy::prelude::*;
 
-use crate::glue::art::{GlueArt, GOLD};
-use crate::glue::widgets::{outlined_text, GlueText, Hilight, HoverLabel, LockHighlight};
+use super::menu_skin::GOLD;
+use crate::glue::art::GlueArt;
+use crate::glue::widgets::{GlueText, Hilight, HoverLabel, LockHighlight, outlined_text};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn icon_button<A: Component, I: Bundle, L: Bundle>(

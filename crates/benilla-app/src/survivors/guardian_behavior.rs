@@ -4,8 +4,8 @@
 use bevy::prelude::*;
 
 use super::enemies::{self, Charge, Enemy};
-use super::units::{COLOR_HURT, Fx, flat};
-use super::{Rng, Run, data, dungeon::Ground, hero, telegraphs::Telegraphs};
+use super::units::{flat, Fx};
+use super::{data, dungeon::Ground, mechanics, telegraphs::Telegraphs, Rng, Run};
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -104,12 +104,13 @@ const FEDFENNEL: &[Move] = &[
     },
 ];
 
-fn kit(name: &str) -> &'static [Move] {
-    match name {
-        "Kobold Taskmaster" => TASKMASTER,
-        "Gruff Swiftbite" => GRUFF,
-        "Bellygrub" => BELLYGRUB,
-        "Fedfennel" => FEDFENNEL,
+/// An elite's kit by its slot: Elwynn's Taskmaster, Gruff, Fedfennel and Bellygrub.
+fn kit(def: &data::EnemyDef) -> &'static [Move] {
+    match def.kit {
+        1 => TASKMASTER,
+        2 => GRUFF,
+        3 => FEDFENNEL,
+        4 => BELLYGRUB,
         _ => &[],
     }
 }
@@ -117,10 +118,10 @@ fn kit(name: &str) -> &'static [Move] {
 /// The normal-mode reference guardian curves; the boss-health floor uses all
 /// non-final source bosses, including Fedfennel's original 9:00 record.
 pub(super) fn stats(def: &data::EnemyDef, elapsed: f32, slain: u32) -> (f32, f32) {
-    // Fedfennel is the agreed roster exception: retain his boss stats, rather than
-    // applying a guardian curve to an already boss-sized health pool.
-    if def.name == "Fedfennel" {
-        return (def.hp, def.damage);
+    // A lair lord (Elwynn's Fedfennel) keeps its boss row's spawn stats, rather than a
+    // guardian curve on an already boss-sized health pool.
+    if def.lord {
+        return super::elwynn_behavior::boss_stats(def.hp, def.damage);
     }
     const BOSSES: [(f32, f32); 4] = [
         (180.0, 3600.0),
@@ -160,6 +161,23 @@ enum Shape {
     Cone { dir: Vec3, radius: f32, cosine: f32 },
 }
 
+impl Shape {
+    /// Whether a player at `delta` from the blow's centre stands in it.
+    fn hits(self, delta: Vec3) -> bool {
+        match self {
+            Shape::Circle(radius) => delta.length() <= radius,
+            Shape::Cone {
+                dir,
+                radius,
+                cosine,
+            } => {
+                delta.length() <= radius
+                    && (delta == Vec3::ZERO || delta.normalize().dot(dir) >= cosine)
+            }
+        }
+    }
+}
+
 struct Impact {
     at: f32,
     pos: Vec3,
@@ -180,9 +198,9 @@ pub(super) struct Script {
 }
 
 impl Script {
-    pub(super) fn reset(&mut self, name: &str) {
+    pub(super) fn reset(&mut self, def: &data::EnemyDef) {
         // Native spawn and evade both initialize cooldowns to half their period.
-        self.waits = kit(name).iter().map(|m| m.every * 0.5).collect();
+        self.waits = kit(def).iter().map(|m| m.every * 0.5).collect();
         self.second_charge = None;
         self.busy = 0.0;
         self.impacts.clear();
@@ -203,11 +221,13 @@ fn charge(
     let way = flat(target - pos);
     let distance = (way.length() + 6.0).max(4.0);
     let to = ground.at(pos + way.normalize_or(Vec3::X) * distance, pos.y);
-    let half = (en.def.scale * 1.35 * 1.2).clamp(4.0, 7.0);
+    let scale = if en.home.is_some() { 1.35 } else { 1.0 };
+    let half = (en.def.scale * en.size * scale * 1.2).clamp(4.0, 7.0);
     let rush = distance / 40.0;
     tele.lane(pos, to, half, now, 1.0, 1.0 + rush);
     fx.cast(entity, 100, &[], None);
     en.charge = Some(Charge {
+        boar_impact: None,
         to,
         spell: 100,
         damage: 2.0 * en.damage * en.weaken,
@@ -225,8 +245,8 @@ pub(super) fn tick(
     en: &mut Enemy,
     entity: Entity,
     pos: Vec3,
-    hero_entity: Entity,
     target: Vec3,
+    players: &[mechanics::Target],
     dt: f32,
     commands: &mut Commands,
     run: &mut Run,
@@ -237,33 +257,21 @@ pub(super) fn tick(
     tele: &mut Telegraphs,
 ) {
     let now = run.elapsed;
-    if script.waits.len() != kit(en.def.name).len() {
-        script.reset(en.def.name);
+    if script.waits.len() != kit(en.def).len() {
+        script.reset(en.def);
     }
     if en.dead {
         script.impacts.clear();
         return;
     }
-    if !en.home.is_some_and(|h| h.awake) {
-        script.reset(en.def.name);
+    if en.home.is_some_and(|h| !h.awake) {
+        script.reset(en.def);
         return;
     }
     for impact in &mut script.impacts {
         if now < impact.at {
             continue;
         }
-        let delta = flat(target - impact.pos);
-        let hit = match impact.shape {
-            Shape::Circle(radius) => delta.length() <= radius,
-            Shape::Cone {
-                dir,
-                radius,
-                cosine,
-            } => {
-                delta.length() <= radius
-                    && (delta == Vec3::ZERO || delta.normalize().dot(dir) >= cosine)
-            }
-        };
         if impact.spell != 0 {
             fx.cast(entity, impact.spell, &[], Some(impact.pos));
             if impact.ticks > 0 {
@@ -272,12 +280,15 @@ pub(super) fn tick(
                 }
             }
         }
-        if hit && run.dead_t.is_none() {
-            let taken = hero::hurt_hero(run, impact.damage);
-            if taken > 0.0 {
-                fx.number(hero_entity, taken, false, COLOR_HURT);
-            }
+        // Every player standing in it, not only the one the guardian chases.
+        let chased = run.coop_target;
+        for player in players
+            .iter()
+            .filter(|p| impact.shape.hits(flat(p.pos - impact.pos)))
+        {
+            mechanics::strike(run, fx, player, impact.damage);
         }
+        run.coop_target = chased;
         if impact.ticks > 0 {
             impact.ticks -= 1;
             impact.at += 1.0;
@@ -291,7 +302,7 @@ pub(super) fn tick(
     for wait in &mut script.waits {
         *wait -= dt;
     }
-    if run.dead_t.is_some() || en.stun_t > 0.0 || en.fear_t > 0.0 {
+    if (run.dead_t.is_some() && run.coop_target == 0) || en.stun_t > 0.0 || en.fear_t > 0.0 {
         return;
     }
     if script.second_charge.is_some_and(|at| now >= at) {
@@ -300,7 +311,7 @@ pub(super) fn tick(
             script.busy = now + charge(en, pos, target, entity, fx, ground, now, tele);
         }
     }
-    for (i, movement) in kit(en.def.name).iter().enumerate() {
+    for (i, movement) in kit(en.def).iter().enumerate() {
         if script.waits[i] > 0.0 {
             continue;
         }
@@ -331,11 +342,11 @@ pub(super) fn tick(
                     .collect();
                 let weights: Vec<_> = pool
                     .iter()
-                    .map(|&(i, def)| {
+                    .map(|&(_, def)| {
                         super::elwynn_behavior::weight(
                             now,
                             def.from,
-                            super::elwynn_behavior::COSTS[i],
+                            def.cost,
                         )
                     })
                     .collect();
@@ -404,7 +415,7 @@ pub(super) fn tick(
                 }
             }
             Action::Stomp => {
-                let (radius, multiplier) = if en.def.name == "Fedfennel" {
+                let (radius, multiplier) = if en.def.lord {
                     (8.0, 1.4)
                 } else {
                     (7.0, 1.3)

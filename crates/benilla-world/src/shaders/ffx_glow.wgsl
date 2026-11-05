@@ -15,7 +15,7 @@ struct FfxCombine {
     // x = zone glow weight `w` (both combines), y = FFXDeath gate (1 while a ghost, no ramp),
     // z = haze mix, w = deband dither on.
     lane: vec4<f32>,
-    // xy = the GlowWave phases `(t mod 3174)/3174` and `(t mod 2805)/2805`, t in ms; zw unused.
+    // xy = the GlowWave phases, z = FSR EASU enabled for the world backdrop, w unused.
     wave: vec4<f32>,
 }
 @group(0) @binding(3) var<uniform> ffx: FfxCombine;
@@ -88,11 +88,104 @@ fn combine_out(outg: vec3<f32>, alpha: f32, frag_coord: vec2<f32>) -> vec4<f32> 
 #endif
 }
 
+#ifdef SURVIVORS_UPSCALE
+// FSR 1 EASU, adapted to WGSL from AMD's ffx_fsr1.h v1.0.2. Loads use full RGB texels.
+// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+fn easu_gradient(north: f32, west: f32, center: f32, east: f32, south: f32) -> vec3<f32> {
+    let delta = vec2<f32>(east - west, south - north);
+    let middle = vec2<f32>(center);
+    let step_size = max(abs(vec2<f32>(east, south) - middle), abs(middle - vec2<f32>(west, north)));
+    let consistency = clamp(
+        abs(delta) / max(step_size, vec2<f32>(1e-6)),
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
+    return vec3<f32>(delta, dot(consistency, consistency));
+}
+
+fn easu(uv: vec2<f32>) -> vec3<f32> {
+    let size = vec2<i32>(textureDimensions(in_tex));
+    let pos = uv * vec2<f32>(size) - vec2<f32>(0.5);
+    let base = vec2<i32>(floor(pos));
+    let part = fract(pos);
+    let inverse = vec2<f32>(1.0) - part;
+    //   b c
+    // e f g h
+    // i j k l
+    //   n o
+    let offsets = array<vec2<i32>, 12>(
+        vec2<i32>(0, -1), vec2<i32>(1, -1),
+        vec2<i32>(-1, 0), vec2<i32>(0, 0), vec2<i32>(1, 0), vec2<i32>(2, 0),
+        vec2<i32>(-1, 1), vec2<i32>(0, 1), vec2<i32>(1, 1), vec2<i32>(2, 1),
+        vec2<i32>(0, 2), vec2<i32>(1, 2),
+    );
+    var colors: array<vec3<f32>, 12>;
+    var luma: array<f32, 12>;
+    for (var i = 0u; i < 12u; i++) {
+        let texel = clamp(base + offsets[i], vec2<i32>(0), size - vec2<i32>(1));
+        colors[i] = clamp(textureLoad(in_tex, texel, 0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+        luma[i] = dot(colors[i], vec3<f32>(0.5, 1.0, 0.5));
+    }
+    let edge = easu_gradient(luma[0], luma[2], luma[3], luma[4], luma[7]) * inverse.x * inverse.y
+        + easu_gradient(luma[1], luma[3], luma[4], luma[5], luma[8]) * part.x * inverse.y
+        + easu_gradient(luma[3], luma[6], luma[7], luma[8], luma[10]) * inverse.x * part.y
+        + easu_gradient(luma[4], luma[7], luma[8], luma[9], luma[11]) * part.x * part.y;
+    let dir_sq = dot(edge.xy, edge.xy);
+    let dir = select(
+        vec2<f32>(1.0, 0.0),
+        edge.xy * inverseSqrt(max(dir_sq, 1.0 / 32768.0)),
+        dir_sq >= 1.0 / 32768.0,
+    );
+    let strength = edge.z * edge.z * 0.25;
+    let stretch = 1.0 / max(abs(dir.x), abs(dir.y));
+    let kernel = mix(vec2<f32>(1.0), vec2<f32>(stretch, 0.5), strength);
+    let lobe = mix(0.5, 0.21, strength);
+    var sum = vec3<f32>(0.0);
+    var weight_sum = 0.0;
+    for (var i = 0u; i < 12u; i++) {
+        let offset = vec2<f32>(offsets[i]) - part;
+        let tap = vec2<f32>(dot(offset, dir), dot(offset, vec2<f32>(-dir.y, dir.x))) * kernel;
+        let distance_sq = min(dot(tap, tap), 1.0 / lobe);
+        let base_weight = 0.4 * distance_sq - 1.0;
+        let window_weight = lobe * distance_sq - 1.0;
+        let weight = (1.5625 * base_weight * base_weight - 0.5625) * window_weight * window_weight;
+        sum += colors[i] * weight;
+        weight_sum += weight;
+    }
+    let lo = min(min(colors[3], colors[4]), min(colors[7], colors[8]));
+    let hi = max(max(colors[3], colors[4]), max(colors[7], colors[8]));
+    return clamp(sum / max(weight_sum, 1e-6), lo, hi);
+}
+#endif
+
 // Both combines, at the plain or the warped UV; `frag_coord` stays unwarped for the dither.
 fn combine_body(uv: vec2<f32>, frag_coord: vec2<f32>) -> vec4<f32> {
     let scene = textureSample(in_tex, in_samp, uv);
     // Clamped like the downsample taps: the screen term must saturate before the glow add.
-    let sg = clamp(scene.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    var sg = clamp(scene.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+#ifdef SURVIVORS_UPSCALE
+    if ffx.wave.z > 0.5 {
+        sg = easu(uv);
+    }
+#endif
     let bg = max(textureSample(blur_tex, in_samp, uv).rgb, vec3<f32>(0.0));
     // Scene alpha passes through; only the transparent-clear create booth reads it.
     if ffx.lane.y > 0.0 {

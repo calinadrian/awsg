@@ -26,13 +26,12 @@ pub(super) const HERO_RADIUS: f32 = 0.7;
 /// The fall back to the ground off the controller (`player/state.rs`'s `GRAVITY`).
 const GRAVITY: f32 = 19.291_105;
 
-/// The menu's and the auto-run's camera: the menu orbits the preview hero; an auto-run follows
+/// The menu's and the auto-run's camera: the menu frames the preview hero; an auto-run follows
 /// behind the driven hero. In play by hand the player controller's camera takes over
 /// ([`super::drive`]).
 #[derive(Resource)]
 pub(super) struct CamRig {
     pub dist: f32,
-    pub orbit: f32,
     /// Camera azimuth (radians) around the hero: 0 puts it on +Z, behind a hero facing −Z.
     pub yaw: f32,
     /// Elevation above the horizon (radians).
@@ -43,7 +42,6 @@ impl Default for CamRig {
     fn default() -> Self {
         Self {
             dist: 14.0,
-            orbit: 0.6,
             yaw: 0.0,
             pitch: 22.0 * std::f32::consts::PI / 180.0,
         }
@@ -285,9 +283,8 @@ pub(super) fn drop_stray_buttons(
 /// A slow orbit at the menu, and behind an auto-run's hero; in play by hand, the level-up pick,
 /// the pause and the results it leaves the camera where the controller put it.
 pub(super) fn place_camera(
-    time: Res<Time<Real>>,
     phase: Res<State<Phase>>,
-    mut rig: ResMut<CamRig>,
+    rig: Res<CamRig>,
     auto: Option<Res<super::auto::Auto>>,
     player: Res<crate::player::Player>,
     world: WorldPoint,
@@ -302,10 +299,11 @@ pub(super) fn place_camera(
     // With no hero yet, the focus `drive_hero` grounded.
     let focus = hero.single().map_or(player.pos, |t| t.translation);
     let (eye, look) = if menu {
-        rig.orbit += time.delta_secs() * 0.2;
+        // Keep the hero facing the viewer while the player chooses their appearance.
+        let angle = std::f32::consts::PI + 0.18;
         let d = 7.0;
         (
-            focus + Vec3::new(rig.orbit.sin() * d, 2.4, rig.orbit.cos() * d),
+            focus + Vec3::new(angle.sin() * d, 2.4, angle.cos() * d),
             focus + Vec3::Y * 1.1,
         )
     } else {
@@ -333,18 +331,27 @@ pub(super) fn place_camera(
     }
 }
 
-/// Damage the hero takes from one blow, after immunity, armour and the shield; returns what got
-/// through.
+/// Damage the hero takes from one blow, after immunity, damage reduction and the shield; returns
+/// what got through. Native intake 0x5be45e0 has no flat armour and no minimum.
 pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
-    if run.immune_t > 0.0 || run.dead_t.is_some() {
+    if run.coop_run && run.coop_unavailable.contains(&run.coop_target) { return 0.; }
+    if run.coop_target != 0 {
+        run.coop_damage.push((run.coop_target, raw));
+        return raw;
+    }
+    if run.immune_t > 0.0 || run.dead_t.is_some() || run.test_god {
         return 0.0;
     }
-    let mut dmg = (raw - run.stats().armor).max(1.0)
-        * (1.0 - run.talents.stat(5) - run.jewel_stat(5)).max(0.3);
+    // Native co-op damage intake (0x5be466b..0x5be46d4): +4.48% per extra living player.
+    let raw = raw * run.party_factor(0.064);
+    let mut dmg = raw * (1.0 - run.stats().reduction);
     if run.shield_t > 0.0 && run.shield > 0.0 {
         let absorbed = dmg.min(run.shield);
         run.shield -= absorbed;
         dmg -= absorbed;
+        if run.shield <= 0.0 {
+            run.talents.broken_shield = Some(run.shield_spell);
+        }
     }
     run.hp -= dmg;
     dmg
@@ -358,26 +365,52 @@ pub(super) fn hero_vitals(
     mut hero: Query<(Entity, &Guid, &mut ObjectStore, &mut Marks), With<Hero>>,
     mut fields: MessageWriter<FieldChanged>,
     mut fx: Fx,
-    selection: Res<super::Selection>,
     mut rng: ResMut<super::Rng>,
+    coop: Res<super::coop::Coop>,
 ) {
     let dt = time.delta_secs();
     let stats = run.stats();
-    if std::mem::take(&mut run.struck) {
-        super::talents::trigger(&mut run, &mut rng, 8, None);
+    let struck = std::mem::take(&mut run.struck);
+    let broken_shield = run.talents.broken_shield.take();
+    if run.hp > 0.0 && run.dead_t.is_none() {
+        use super::talents::{trigger, ProcTrigger};
+        if struck {
+            trigger(&mut run, &mut rng, ProcTrigger::MeleeTaken, 0, None);
+        }
+        if let Some(spell) = broken_shield {
+            trigger(&mut run, &mut rng, ProcTrigger::ShieldBreak, spell, None);
+        }
+        trigger(&mut run, &mut rng, ProcTrigger::LowHealth, 0, None);
     }
-    super::talents::low_health(&mut run, &mut rng);
     let Ok((entity, guid, mut store, mut marks)) = hero.single_mut() else {
         return;
     };
     if let Some(t) = run.dead_t.as_mut() {
         *t += dt;
-        if *t > 3.0 {
+        if *t > 3.0 && !coop.active() {
             next.set(Phase::GameOver);
+        }
+        run.hp = 0.0;
+        if coop.active() && !coop.guest() {
+            run.elapsed += dt;
         }
         return;
     }
     run.elapsed += dt;
+    // Venom refreshes one three-second effect; repeated bites do not stack slows or ticks.
+    let now = run.elapsed;
+    while run.brood_poison.next > 0.0 && run.brood_poison.next <= now
+        && run.brood_poison.next <= run.brood_poison.until {
+        let damage = run.brood_poison.damage;
+        run.brood_poison.next += 1.0;
+        let previous = run.coop_target;
+        run.coop_target = 0;
+        let taken = hurt_hero(&mut run, damage);
+        run.coop_target = previous;
+        if taken > 0.0 { fx.number(entity, taken, false, units::COLOR_HURT); }
+    }
+    if now >= run.brood_poison.until { run.brood_poison = Default::default(); }
+    super::morgan::tick_bleed(&mut run, entity, &mut fx, now);
     for buff in &mut run.buffs {
         buff.3 -= dt;
     }
@@ -391,12 +424,12 @@ pub(super) fn hero_vitals(
         heal += run.heal_rate * dt.min(run.heal_t);
         run.heal_t = (run.heal_t - dt).max(0.0);
     }
-    run.hp = (run.hp + heal).min(stats.max_hp);
+    run.heal(heal);
 
     // The buffs show as their own state kits: the shield bubble, the immunity glow, the orbs.
     let mut shown: Vec<u32> = Vec::new();
     if run.shield_t > 0.0 && run.shield > 0.0 {
-        shown.push(17);
+        if run.shield_spell != 0 { shown.push(run.shield_spell); }
     }
     if run.immune_t > 0.0 {
         shown.push(642);
@@ -415,6 +448,11 @@ pub(super) fn hero_vitals(
     if run.heal_t > 0.0 {
         shown.push(139);
     }
+    if run.brood_poison.until > now { shown.push(6917); }
+    if run.stunned() { shown.push(853); }
+    if run.morgan_bleed.until > now { shown.push(703); }
+    if run.morgan_mark_until > now { shown.push(1130); }
+    if run.healing_blocked_until > now { shown.push(12294); }
     marks.set(&shown);
     marks.flush(entity, guid.0, &mut store, &mut fields);
 
@@ -427,15 +465,24 @@ pub(super) fn hero_vitals(
     if run.hp <= 0.0 {
         run.hp = 0.0;
         run.dead_t = Some(0.0);
+        run.brood_poison = Default::default();
+        run.morgan_bleed = Default::default();
+        run.morgan_mark_until = 0.0;
+        run.morgan_bomb_slow_until = 0.0;
+        run.stun_until = 0.0;
+        run.healing_blocked_until = 0.0;
+        run.heal_t = 0.0;
+        if coop.active() {
+            run.banner = Some((
+                "Fallen: a teammate can revive you within 5 yards for 3 seconds".into(),
+                8.0,
+            ));
+        }
         units::kill_unit(&mut store);
         marks.clear();
         marks.flush(entity, guid.0, &mut store, &mut fields);
-    } else if if data::roster(selection.map).timed {
-        // The old ASR's battlegrounds are won by slaying their last boss.
-        run.slain_last
-    } else {
-        run.elapsed >= data::VICTORY_SECS
-    } {
+    } else if run.slain_last && !coop.guest() {
+        // Every battleground is won by slaying its last boss.
         run.won = true;
         // A last flourish before the results.
         fx.cast(entity, 642, &[entity], None);
@@ -496,5 +543,49 @@ mod tests {
         });
         world.run_system_once(drop_stray_buttons).unwrap();
         assert!(!left_held(&world));
+    }
+
+    #[test]
+    fn blows_follow_the_native_class_rows_and_level_curve() {
+        let mut run = Run::default();
+        assert_eq!(run.class.id, 1);
+        let stats = run.stats();
+        assert_eq!(
+            (stats.max_hp, stats.reduction, stats.might),
+            (230.0, 0.22, 1.0)
+        );
+        run.hp = stats.max_hp;
+        let taken = hurt_hero(&mut run, 100.0);
+        assert!((taken - 78.0).abs() < 1e-3, "{taken}");
+
+        run.level = 11;
+        let stats = run.stats();
+        assert_eq!(stats.max_hp, 320.0);
+        assert!((stats.might - 1.3).abs() < 1e-5);
+
+        run.gear[4] = 0.9;
+        assert_eq!(run.stats().reduction, 0.6, "reduction stops at 60%");
+    }
+
+    #[test]
+    fn move_speed_bonuses_stop_at_fifteen_percent_and_slows_still_apply() {
+        let mut run = Run::default();
+        assert_eq!(run.stats().speed, super::super::BASE_SPEED);
+
+        let carrot = super::super::jewelry::JEWELS
+            .iter()
+            .position(|jewel| jewel.name == "Carrot on a Stick")
+            .unwrap();
+        run.jewelry.push(super::super::jewelry::Jewel {
+            index: carrot,
+            strength: 0.40,
+            picks: 5,
+            rarity: super::super::rewards::Rarity::Legendary,
+        });
+        assert_eq!(run.stats().speed, super::super::MAX_SPEED);
+        assert!((super::super::MAX_SPEED / super::super::BASE_SPEED - 1.15).abs() < 1e-5);
+
+        run.morgan_bomb_slow_until = run.elapsed + 1.0;
+        assert_eq!(run.stats().speed, super::super::MAX_SPEED * 0.5);
     }
 }

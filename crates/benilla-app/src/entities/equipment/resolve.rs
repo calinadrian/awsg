@@ -506,6 +506,10 @@ pub(in crate::entities) fn resolve_equipment(
                 .map(|npc| (npc.equipment[0], npc.equipment[1], npc.race, npc.sex.min(1))),
             _ => None,
         };
+        #[cfg(not(target_os = "macos"))]
+        let head_shoulder = current_equipment.filter(|e| e.survivors_shoulders.is_some())
+            .map(|e| (e.helm, e.survivors_shoulders.unwrap_or(0), s.unit_race().unwrap_or(1), s.unit_gender().unwrap_or(0)))
+            .or(head_shoulder);
         if let Some((helm, shoulder, race, sex)) = head_shoulder {
             if helm != 0 {
                 let kind = ItemModelKind::Helm { race, sex };

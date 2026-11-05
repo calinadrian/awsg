@@ -6,37 +6,32 @@
 
 use bevy::prelude::*;
 
-use super::hud::{looks_for, rgb, start_run, HudFont, MenuRoot};
-use super::menu_icons::icon_button;
-use super::races::{race_name, race_tc, RACES};
+use super::front_end as skin;
+use super::hud::{looks_for, rgb, start_run};
+pub(super) use super::menu_layout::build_menu;
+use super::races::{race_name, race_tc};
 use super::{data, Phase, Rng, Run, Selection};
-use crate::glue::art::{class_tc, tc_rect, GlueArt, GOLD};
-use crate::glue::widgets::{
-    abs, glue_button, outlined_text, GlueBtnKind, GlueDisabled, GlueText, Hilight, HoverLabel,
-    LockHighlight,
-};
+use crate::glue::art::{tc_rect, GlueArt, GOLD};
+use crate::glue::widgets::{GlueDisabled, HoverLabel, LockHighlight};
 use crate::glue::GlueClicks;
-
-/// The tower ends under the class grid and Randomize, where the create screen's appearance dials
-/// would start: there is nothing to customise here.
-const TOWER_H: f32 = 340.0;
-
-/// The zone rows: the character-select row, compacted so every zone fits the 642-tall frame.
-const ROW_TOP: f32 = 0.0;
-const ROW_PITCH: f32 = 29.0;
-const ROW_H: f32 = 27.0;
-const ROW_W: f32 = 228.0;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum MenuAction {
     Race(u8),
     Sex(u8),
     Class(usize),
-    Map(usize),
     Randomize,
     Enter,
     /// Opens the talents screen ([`super::talents`]).
     Talents,
+    /// Opens the settings, as Escape does.
+    Settings,
+    /// Steps FEATURES dial `.0` (`[skin, face, hair style, hair colour, facial hair]`) back or on.
+    Feature(usize, bool),
+    /// Rolls every FEATURES dial.
+    RandomFeatures,
+    /// Starts a Test Grounds run ([`super::test_grounds`]) on Elwynn's ground.
+    TestGrounds,
 }
 
 /// On [`MenuRoot`] once the glue art is in and the screen is built.
@@ -45,10 +40,13 @@ pub(super) struct MenuBuilt;
 
 /// A race button's face, re-cropped to the picked gender.
 #[derive(Component)]
-pub(super) struct RaceFace(u8);
+pub(super) struct RaceFace(pub(super) u8);
 
 #[derive(Component)]
 pub(super) struct PickName;
+
+#[derive(Component)]
+pub(super) struct ClassSlot(pub usize);
 
 /// The saved pick, `benilla-config/survivors-pick.txt` (`localStorage` on the page):
 /// `class race sex map`, restored at the menu so a reload keeps the last hero and zone.
@@ -62,8 +60,13 @@ fn save_pick(sel: &Selection) {
         return;
     };
     if let Some(path) = pick_path() {
-        let _ =
-            crate::local_state::write_atomic(&path, &format!("{class} {race} {sex} {}", sel.map));
+        let mut text = format!("{class} {race} {sex} {}", sel.map);
+        let mut features: Vec<_> = sel.features.iter().collect();
+        features.sort_unstable_by_key(|(k, _)| **k);
+        for (&(c, r, s), f) in features {
+            text += &format!("\n{c} {r} {s} {} {} {} {} {}", f[0], f[1], f[2], f[3], f[4]);
+        }
+        let _ = crate::local_state::write_atomic(&path, &text);
     }
 }
 
@@ -84,17 +87,30 @@ pub(super) fn restore_pick(
     let Some(text) = pick_path().and_then(|p| crate::local_state::read_to_string(&p).ok()) else {
         return;
     };
-    let v: Vec<usize> = text
+    let mut lines = text.lines();
+    let first = lines.next().unwrap_or_default();
+    // Each later line is one hero's FEATURES: `class race sex skin face hair_style hair_color
+    // facial_hair`.
+    for line in lines {
+        let f: Vec<u8> = line
+            .split_whitespace()
+            .filter_map(|t| t.parse().ok())
+            .collect();
+        if let [class, race, sex, a, b, c, d, e] = f[..] {
+            selection
+                .features
+                .insert((usize::from(class), race, sex), [a, b, c, d, e]);
+        }
+    }
+    let v: Vec<usize> = first
         .split_whitespace()
         .filter_map(|t| t.parse().ok())
         .collect();
     let [class, race, sex, map] = v[..] else {
         return;
     };
-    if map < data::MAPS.len() {
-        selection.map = map;
-        selection.stage = map;
-        selection.version += 1;
+    if data::MAPS.get(map).is_some_and(super::dungeon::available) {
+        selection.select_map(map);
     }
     if class < data::CLASSES.len() {
         let all = all_looks(creatures);
@@ -105,7 +121,7 @@ pub(super) fn restore_pick(
 }
 
 /// Every class's looks, `(display, race, sex)`, indexed like [`data::CLASSES`].
-fn all_looks(creatures: &crate::entities::Creatures) -> Vec<Vec<(u32, u8, u8)>> {
+pub(super) fn all_looks(creatures: &crate::entities::Creatures) -> Vec<Vec<(u32, u8, u8)>> {
     data::CLASSES
         .iter()
         .map(|c| looks_for(c, creatures))
@@ -118,347 +134,24 @@ fn find(looks: &[(u32, u8, u8)], race: Option<u8>, sex: Option<u8>) -> Option<us
         .position(|&(_, r, s)| race.is_none_or(|x| x == r) && sex.is_none_or(|x| x == s))
 }
 
-fn set(sel: &mut Selection, all: &[Vec<(u32, u8, u8)>], class: usize, look: usize) {
+pub(super) fn set(sel: &mut Selection, all: &[Vec<(u32, u8, u8)>], class: usize, look: usize) {
+    if !sel.race_unlocked(all[class][look].1) { return; }
     sel.class = Some(class);
     sel.looks = all[class].clone();
     sel.look = Some(look);
     sel.version += 1;
-}
-
-/// Build the screen into [`MenuRoot`] once the archives are readable, so the glue art is there.
-pub(super) fn build_menu(
-    mut commands: Commands,
-    roots: Query<Entity, (With<MenuRoot>, Without<MenuBuilt>)>,
-    assets: Option<ResMut<benilla_assets::WorldAssets>>,
-    mut art: ResMut<GlueArt>,
-    mut images: ResMut<Assets<Image>>,
-    mut add_mats: ResMut<Assets<crate::glue::add_material::AddUiMaterial>>,
-    font: Res<HudFont>,
-) {
-    let Ok(root) = roots.single() else { return };
-    let Some(mut assets) = assets else { return };
-    art.ensure_loaded(&mut assets, &mut images, &mut add_mats);
-    let f = &font.0;
-    commands.entity(root).insert(MenuBuilt).with_children(|ui| {
-        tower(ui, &art, f);
-        zone_frame(ui, &art, f);
-
-        // Keep the hero's name and permanent progression above Enter World.
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(130.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
-        .with_children(|c| {
-            outlined_text(
-                c,
-                Node::default(),
-                (),
-                PickName,
-                GlueText {
-                    text: "",
-                    size: 22.0,
-                    color: GOLD,
-                    wrap: false,
-                },
-                f,
-                1.0,
-            );
-        });
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(108.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
-        .with_children(|c| {
-            c.spawn((
-                super::talents::MenuProgress,
-                Text::new(""),
-                TextFont {
-                    font: f.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(GOLD),
-            ));
-        });
-        // The talents screen, under the class tower.
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(56.0),
-            bottom: Val::Px(36.0),
-            ..default()
-        })
-        .with_children(|c| {
-            glue_button(
-                c,
-                &art,
-                f,
-                MenuAction::Talents,
-                "Talents",
-                150.0,
-                38.0,
-                GlueBtnKind::Small,
-                1.0,
-            );
-        });
-        // `CharSelectEnterWorldButton`, 200×60 at BOTTOM (0,30).
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(30.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
-        .with_children(|c| {
-            glue_button(
-                c,
-                &art,
-                f,
-                MenuAction::Enter,
-                "Enter World",
-                200.0,
-                60.0,
-                GlueBtnKind::Normal,
-                1.0,
-            );
-        });
-    });
-}
-
-/// `CharacterCreateConfigurationFrame`, 206×600 at TOPLEFT (28,-74): the race columns under the
-/// faction banners, the gender pair, the class grid, the class text and Randomize.
-fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
-    let px = Val::Px;
-    ui.spawn(Node {
-        position_type: PositionType::Absolute,
-        left: px(20.0),
-        top: px(20.0),
-        width: px(228.0),
-        height: px(TOWER_H),
-        ..default()
-    })
-    .with_children(|tower| {
-        for (faction, top) in [(0, 0.0), (1, 80.0), (2, 160.0)] {
-            tower
-                .spawn(Node {
-                    position_type: PositionType::Absolute,
-                    left: px(0.0),
-                    top: px(top),
-                    width: px(228.0),
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: px(3.0),
-                    row_gap: px(5.0),
-                    ..default()
-                })
-                .with_children(|col| {
-                    for def in RACES.iter().filter(|r| r.faction == faction) {
-                        let race = def.id;
-                        let face = art.races.as_ref().and_then(|(sheet, size)| {
-                            race_tc(race, 0).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
-                        });
-                        icon_button(
-                            col,
-                            f,
-                            MenuAction::Race(race),
-                            Some(RaceFace(race)),
-                            face,
-                            None::<()>,
-                            race_name(race),
-                            art,
-                            2.0 / 3.0,
-                        );
-                    }
-                });
-        }
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                left: px(53.0),
-                top: px(208.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: px(5.0),
-                ..default()
-            })
-            .with_children(|g| {
-                for (sex, label) in [(0u8, "Male"), (1u8, "Female")] {
-                    let face = art.gender.as_ref().map(|(sheet, size)| {
-                        let half = if sex == 0 {
-                            [0.0, 0.5, 0.0, 1.0]
-                        } else {
-                            [0.5, 1.0, 0.0, 1.0]
-                        };
-                        (sheet.clone(), tc_rect(*size, half))
-                    });
-                    icon_button(
-                        g,
-                        f,
-                        MenuAction::Sex(sex),
-                        None::<()>,
-                        face,
-                        None::<()>,
-                        label,
-                        art,
-                        1.0,
-                    );
-                }
-            });
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                // The gender pair's centre line: 53 + (2·48 + 5)/2 ≈ 103.
-                left: px(103.0 - (3.0 * 48.0 + 2.0 * 4.0) / 2.0),
-                width: px(3.0 * 48.0 + 2.0 * 4.0),
-                top: px(268.0),
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                justify_content: JustifyContent::Center,
-                column_gap: px(4.0),
-                row_gap: px(4.0),
-                ..default()
-            })
-            .with_children(|grid| {
-                for (i, class) in data::CLASSES.iter().enumerate() {
-                    let face = art.classes.as_ref().and_then(|(sheet, size)| {
-                        class_tc(class.id).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
-                    });
-                    icon_button(
-                        grid,
-                        f,
-                        MenuAction::Class(i),
-                        None::<()>,
-                        face,
-                        None::<()>,
-                        class.name,
-                        art,
-                        1.0,
-                    );
-                }
-            });
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                left: px(30.0),
-                top: px(TOWER_H + 60.0),
-                ..default()
-            })
-            .with_children(|r| {
-                glue_button(
-                    r,
-                    art,
-                    f,
-                    MenuAction::Randomize,
-                    "Randomize",
-                    146.0,
-                    30.0,
-                    GlueBtnKind::Small,
-                    1.0,
-                );
-            });
-    });
-}
-
-/// The zone list in `CharacterSelectCharacterFrame` (260×642 at TOPRIGHT (-5,-15)), one
-/// character-row per zone, lowest level first.
-fn zone_frame(ui: &mut ChildSpawnerCommands, _art: &GlueArt, f: &Handle<Font>) {
-    let px = Val::Px;
-    let mut order: Vec<(usize, u32, u32)> = (0..data::MAPS.len())
-        .map(|i| {
-            let levels = data::roster(i).enemies.iter().map(|e| e.level);
-            let lo = levels.clone().min().unwrap_or(1);
-            let hi = levels.max().unwrap_or(lo);
-            (i, lo, hi)
-        })
-        .collect();
-    order.sort_by_key(|&(i, lo, _)| (lo, data::MAPS[i].name));
-
-    ui.spawn(Node {
-        position_type: PositionType::Absolute,
-        right: px(5.0),
-        top: px(15.0),
-        width: px(260.0),
-        height: px(642.0),
-        ..default()
-    })
-    .with_children(|frame| {
-        for (row, &(i, lo, hi)) in order.iter().enumerate() {
-            let map = &data::MAPS[i];
-            frame
-                .spawn((
-                    MenuAction::Map(i),
-                    Button,
-                    LockHighlight::default(),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: px(24.0),
-                        top: px(ROW_TOP + row as f32 * ROW_PITCH),
-                        width: px(ROW_W),
-                        height: px(ROW_H),
-                        border: UiRect::all(px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.025, 0.03, 0.04, 0.8)),
-                    BorderColor::all(Color::srgb(0.3, 0.32, 0.35)),
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        Hilight,
-                        Visibility::Hidden,
-                        Node {
-                            border: UiRect::all(px(2.0)),
-                            ..crate::glue::widgets::overlay()
-                        },
-                        BorderColor::all(GOLD),
-                    ));
-                    outlined_text(
-                        b,
-                        abs(1.0, 0.0, 2.0, ROW_W, 16.0),
-                        (),
-                        (),
-                        GlueText {
-                            text: map.name,
-                            size: 13.0,
-                            color: GOLD,
-                            wrap: false,
-                        },
-                        f,
-                        1.0,
-                    );
-                    let levels = if lo == hi {
-                        format!("Level {lo}")
-                    } else {
-                        format!("Level {lo}-{hi}")
-                    };
-                    outlined_text(
-                        b,
-                        abs(1.0, 0.0, 15.0, ROW_W, 12.0),
-                        (),
-                        (),
-                        GlueText {
-                            text: &format!("{levels}  {}", map.zone),
-                            size: 10.0,
-                            color: Color::WHITE,
-                            wrap: false,
-                        },
-                        f,
-                        1.0,
-                    );
-                });
-        }
-    });
+    if !sel.can_visit(sel.map) {
+        let race = all[class][look].1;
+        let start = if super::races::RACES.iter().any(|r| r.id == race && r.faction == 1) { "Durotar" } else { "Elwynn Forest" };
+        if let Some(map) = data::MAPS.iter().position(|map| map.name == start) { sel.select_map(map); }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn menu_clicks(
-    options: Res<super::options::Options>,
+    inventory: Res<super::inventory::Equipment>,
+    coop: Res<super::coop::Coop>,
+    mut options: ResMut<super::options::Options>,
     clicks: Res<GlueClicks>,
     actions: Query<(Entity, &MenuAction)>,
     phase: Res<State<Phase>>,
@@ -467,8 +160,9 @@ pub(super) fn menu_clicks(
     mut run: ResMut<Run>,
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
+    appearances: Option<Res<super::appearance::Appearances>>,
 ) {
-    if options.open || *phase.get() != Phase::Menu {
+    if inventory.open || coop.open || coop.in_room() || options.open || *phase.get() != Phase::Menu {
         return;
     }
     let Some(creatures) = creatures.as_deref() else {
@@ -488,15 +182,52 @@ pub(super) fn menu_clicks(
         .map(|&(_, r, s)| (r, s));
     let (race, sex) = (cur.map(|c| c.0), cur.map_or(0, |c| c.1));
     match action {
-        MenuAction::Map(i) => {
-            if selection.map != i {
-                selection.map = i;
+        MenuAction::Talents => {}
+        MenuAction::Feature(dial, forward) => {
+            if let Some((key, mut f, ranges)) =
+                super::appearance::current(&selection, creatures, appearances.as_deref())
+            {
+                let opts = ranges.options(dial, &f);
+                let at = opts.iter().position(|&v| v == f[dial]).unwrap_or(0);
+                let n = opts.len();
+                f[dial] = opts[if forward { (at + 1) % n } else { (at + n - 1) % n }];
+                if dial == 0 {
+                    ranges.fit_face(&mut f);
+                }
+                selection.features.insert(key, f);
                 selection.version += 1;
             }
         }
-        MenuAction::Talents => {}
+        MenuAction::RandomFeatures => {
+            if let Some((key, mut f, ranges)) =
+                super::appearance::current(&selection, creatures, appearances.as_deref())
+            {
+                for dial in 0..super::appearance::DIALS {
+                    let opts = ranges.options(dial, &f);
+                    f[dial] = opts[rng.index(opts.len())];
+                }
+                ranges.fit_face(&mut f);
+                selection.features.insert(key, f);
+                selection.version += 1;
+            }
+        }
+        // What Escape does on this screen.
+        MenuAction::Settings => {
+            options.open = true;
+            options.settings = true;
+        }
         MenuAction::Enter => {
+            if selection.unlocked(selection.map) && start_run(&mut run, &mut selection) {
+                next.set(Phase::Playing);
+            }
+        }
+        MenuAction::TestGrounds => {
+            if let Some(elwynn) = data::MAPS.iter().position(|m| m.name == "Elwynn Forest") {
+                selection.map = elwynn;
+            }
             if start_run(&mut run, &mut selection) {
+                run.test = true;
+                run.test_god = true;
                 next.set(Phase::Playing);
             }
         }
@@ -505,25 +236,25 @@ pub(super) fn menu_clicks(
                 .iter()
                 .enumerate()
                 .flat_map(|(c, looks)| (0..looks.len()).map(move |l| (c, l)))
+                .filter(|&(class, look)| selection.race_unlocked(all[class][look].1))
                 .collect();
             if !picks.is_empty() {
                 let (c, l) = picks[rng.index(picks.len())];
                 set(&mut selection, &all, c, l);
             }
         }
-        // The class keeps the race and gender where it can.
+        // A class choice must keep the selected race.
         MenuAction::Class(c) => {
             let looks = &all[c];
             let l = find(looks, race, Some(sex))
-                .or_else(|| find(looks, race, None))
-                .or_else(|| find(looks, None, Some(sex)))
-                .or_else(|| find(looks, None, None));
+                .or_else(|| find(looks, race, None));
             if let Some(l) = l {
                 set(&mut selection, &all, c, l);
             }
         }
         // The race keeps the class where it can, else takes the first class it has.
         MenuAction::Race(r) => {
+            if !selection.race_unlocked(r) { return; }
             let classes = selection.class.into_iter().chain(0..all.len());
             for c in classes {
                 let l = find(&all[c], Some(r), Some(sex)).or_else(|| find(&all[c], Some(r), None));
@@ -557,12 +288,13 @@ pub(super) fn refresh_menu_ui(
         &Children,
         Option<&mut LockHighlight>,
         Option<&mut GlueDisabled>,
-        &mut Node,
         &mut Visibility,
     )>,
     mut labels: Query<&mut Visibility, (With<HoverLabel>, Without<MenuAction>)>,
     mut faces: Query<(&RaceFace, &mut ImageNode)>,
     mut name: Query<(&mut Text, &mut TextColor), With<PickName>>,
+    mut styles: Query<(&MenuAction, &mut skin::Control)>,
+    mut class_slots: Query<(&ClassSlot, &mut Node)>,
     mut cache: Local<(Option<u32>, bool, Vec<Vec<(u32, u8, u8)>>)>,
 ) {
     let have = creatures.is_some();
@@ -579,13 +311,30 @@ pub(super) fn refresh_menu_ui(
         .and_then(|i| selection.looks.get(i))
         .map(|&(_, r, s)| (r, s));
 
-    for (action, interaction, children, lock, disabled, mut node, mut vis) in &mut buttons {
+    for (slot, mut node) in &mut class_slots {
+        let available = cur.is_none_or(|(race, _)| {
+            all.get(slot.0)
+                .is_some_and(|looks| find(looks, Some(race), None).is_some())
+        });
+        node.display = if available {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
+    for (action, interaction, children, lock, disabled, mut vis) in &mut buttons {
         let selected = match *action {
             MenuAction::Race(r) => cur.is_some_and(|c| c.0 == r),
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == s),
             MenuAction::Class(i) => selection.class == Some(i),
-            MenuAction::Map(i) => selection.map == i,
-            MenuAction::Randomize | MenuAction::Enter | MenuAction::Talents => false,
+            MenuAction::Randomize
+            | MenuAction::Feature(..)
+            | MenuAction::RandomFeatures
+            | MenuAction::Enter
+            | MenuAction::TestGrounds
+            | MenuAction::Talents
+            | MenuAction::Settings => false,
         };
         if let Some(mut lock) = lock {
             if lock.0 != selected {
@@ -593,22 +342,16 @@ pub(super) fn refresh_menu_ui(
             }
         }
         if let Some(mut disabled) = disabled {
-            let off = *action == MenuAction::Enter && cur.is_none();
+            let off = match *action {
+                MenuAction::Enter => cur.is_none() || !selection.can_visit(selection.map) || !selection.unlocked(selection.map) || !super::dungeon::available(&data::MAPS[selection.map]),
+                MenuAction::Race(r) => !selection.race_unlocked(r),
+                _ => false,
+            };
             if disabled.0 != off {
                 disabled.0 = off;
             }
         }
         match *action {
-            // As on the create screen, a class the race cannot be leaves the grid.
-            MenuAction::Class(i) => {
-                let ok = cur.is_none_or(|(r, _)| {
-                    all.get(i).is_some_and(|l| find(l, Some(r), None).is_some())
-                });
-                let display = if ok { Display::Flex } else { Display::None };
-                if node.display != display {
-                    node.display = display;
-                }
-            }
             MenuAction::Race(r) => {
                 let ok = all.is_empty() || all.iter().any(|l| find(l, Some(r), None).is_some());
                 let want = if ok {
@@ -648,6 +391,27 @@ pub(super) fn refresh_menu_ui(
         }
     }
 
+    for (action, mut style) in &mut styles {
+        // Painted by [`super::features_ui::refresh`] from the dials' ranges.
+        if matches!(action, MenuAction::Feature(..) | MenuAction::RandomFeatures) {
+            continue;
+        }
+        let selected = match action {
+            MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == *s),
+            _ => false,
+        };
+        let enabled = match action {
+            MenuAction::Enter => {
+                cur.is_some() && selection.can_visit(selection.map) && selection.unlocked(selection.map) && super::dungeon::available(&data::MAPS[selection.map])
+            }
+            MenuAction::Race(race) => selection.race_unlocked(*race),
+            _ => true,
+        };
+        if style.selected != selected || style.enabled != enabled {
+            style.selected = selected;
+            style.enabled = enabled;
+        }
+    }
     let class = selection.class_def();
     if let Ok((mut t, mut color)) = name.single_mut() {
         let want = match (class, cur) {

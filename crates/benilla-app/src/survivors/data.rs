@@ -10,6 +10,9 @@ pub(crate) struct ClassDef {
     pub name: &'static str,
     /// `RAID_CLASS_COLORS`, 0xRRGGBB.
     pub color: u32,
+    /// Outgoing damage tuning for the damage-only six-spell benchmark (L1 Common and L8 Legendary,
+    /// one and ten targets); class talent procs are outside that baseline.
+    pub damage_scale: f32,
     /// `UNIT_FIELD_BYTES_0` byte 3.
     pub power: u8,
     pub start: &'static str,
@@ -182,10 +185,32 @@ static LEGACY_ABILITIES: &[AbilityDef] = &[
     ),
 ];
 
-pub(crate) fn ability(key: &str) -> &'static AbilityDef {
+// Racial procs the original names in its race rows but has no spell row for.
+static RACIAL_ABILITIES: &[AbilityDef] = &[ability!(
+    "arcane_torrent",
+    28730,
+    Nova {
+        damage: 6.0,
+        cooldown: 20.0,
+        range: 0.0,
+        radius: 8.0,
+        count: 0,
+        school: 6,
+        native_kind: 2,
+        effect: Effect::Stun(2.0),
+        mark: 20549
+    }
+)];
+
+pub(crate) fn every_ability() -> impl Iterator<Item = &'static AbilityDef> {
     ABILITIES
         .iter()
         .chain(LEGACY_ABILITIES.iter())
+        .chain(RACIAL_ABILITIES.iter())
+}
+
+pub(crate) fn ability(key: &str) -> &'static AbilityDef {
+    every_ability()
         .find(|a| a.key == key)
         .unwrap_or_else(|| panic!("survivors: no ability {key:?}"))
 }
@@ -198,6 +223,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 1,
         name: "Warrior",
         color: 0xC79C6E,
+        damage_scale: 0.81,
         power: 1,
         start: "cleave",
         pool: &[
@@ -225,6 +251,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 2,
         name: "Paladin",
         color: 0xF58CBA,
+        damage_scale: 1.05,
         power: 0,
         start: "consecration",
         pool: &[
@@ -250,6 +277,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 3,
         name: "Hunter",
         color: 0xABD473,
+        damage_scale: 0.86,
         power: 0,
         start: "auto_shot",
         pool: &[
@@ -258,7 +286,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
             "multi_shot",
             "serpent_sting",
             "volley",
-            "explosive_trap",
+            "mending",
             "concussive_shot",
             "aimed_shot",
             "immolation_trap",
@@ -277,6 +305,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 4,
         name: "Rogue",
         color: 0xFFF569,
+        damage_scale: 1.11,
         power: 3,
         start: "sinister_strike",
         pool: &[
@@ -285,7 +314,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
             "blade_flurry",
             "rupture",
             "kidney_shot",
-            "gouge",
+            "recuperate",
             "ghostly_strike",
             "adrenaline_rush",
             "backstab",
@@ -303,6 +332,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 5,
         name: "Priest",
         color: 0xFFFFFF,
+        damage_scale: 1.11,
         power: 0,
         start: "smite",
         pool: &[
@@ -330,6 +360,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 7,
         name: "Shaman",
         color: 0x0070DE,
+        damage_scale: 0.95,
         power: 0,
         start: "lightning_bolt",
         pool: &[
@@ -355,6 +386,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 8,
         name: "Mage",
         color: 0x69CCF0,
+        damage_scale: 1.01,
         power: 0,
         start: "fireball",
         pool: &[
@@ -367,7 +399,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
             "flamestrike",
             "fire_blast",
             "cone_of_cold",
-            "blast_wave",
+            "evocation",
             "pyroblast",
             "ice_barrier",
             "polymorph",
@@ -384,6 +416,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 9,
         name: "Warlock",
         color: 0x9482C9,
+        damage_scale: 1.37,
         power: 0,
         start: "shadow_bolt",
         pool: &[
@@ -411,6 +444,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         id: 11,
         name: "Druid",
         color: 0xFF7D0A,
+        damage_scale: 0.93,
         power: 0,
         start: "wrath",
         pool: &[
@@ -448,6 +482,8 @@ pub(crate) struct EnemyDef {
     pub level: u32,
     /// A great beast, which takes more room in the crowd.
     pub big: bool,
+    /// An elite row that may join the horde independently of the lair.
+    pub roaming_elite: bool,
     /// Seconds between swings; 0 for the mode's own pace.
     pub attack: f32,
     /// On a timed roster, the run second it first joins the horde (a boss: the second it comes).
@@ -460,9 +496,21 @@ pub(crate) struct EnemyDef {
     pub phases: &'static [BossPhase],
     /// A boss's entrance line, or a guardian's when it wakes; empty for the mode's own.
     pub intro: &'static str,
+    /// A horde row's price in the spawner's budget; 0 for bosses and elites.
+    pub cost: f32,
+    /// The guardian kit it fights with as an elite (see `guardian_behavior`); 0 for none.
+    pub kit: u8,
+    /// A lair lord keeps a boss row's numbers and holds its lair once, from its own minute.
+    pub lord: bool,
+    /// Its battleground's tier, 1 (a starting zone) to 5 (where the roads meet).
+    pub tier: u8,
+    /// A boss's script from the mechanics library, past Elwynn's native kits.
+    pub script: Option<&'static super::mechanics::Kit>,
+    /// How many affixes it rolls as an elite; Elwynn's roll none.
+    pub affixes: u8,
 }
 
-/// A caster's bolt: the `Spell.dbc` row it looks like, how far it reaches and how often it flies.
+/// A caster's spell: the `Spell.dbc` row it uses, its reach and how often it casts.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Ranged {
     pub spell: u32,
@@ -481,6 +529,8 @@ pub(crate) struct BossPhase {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BossAction {
+    /// Eggs must be crushed by a player before their thirty-second hatch deadline.
+    Eggs { count: u32, every: f32 },
     /// Every `every` seconds, strikes everything within `radius` for `damage` (scaled with the run).
     Stomp {
         spell: u32,
@@ -535,12 +585,19 @@ pub(super) const fn en(
         xp,
         level,
         big: false,
+        roaming_elite: false,
         attack: 0.0,
         from: 0.0,
         ranged: None,
         last: false,
         phases: &[],
         intro: "",
+        cost: 0.0,
+        kit: 0,
+        lord: false,
+        tier: 1,
+        script: None,
+        affixes: 0,
     }
 }
 
@@ -614,41 +671,12 @@ pub(crate) static BOSSES: &[EnemyDef] = &[
     },
 ];
 
-/// Survive this long to win.
-pub(crate) const VICTORY_SECS: f32 = 900.0;
-/// A boss every two and a quarter minutes, the last of six at 13:30, a fight before the bell.
-pub(crate) const BOSS_EVERY_SECS: f32 = 135.0;
 /// Original ASR stops awarding levels at 99 (RVA 0x5bfb6e0).
 pub(crate) const MAX_LEVEL: u32 = 99;
 
-/// How far through the run, 0 at the start and 1 at [`VICTORY_SECS`].
-pub(crate) fn progress(elapsed: f32) -> f32 {
-    (elapsed / VICTORY_SECS).max(0.0)
-}
-
-/// The pool of roster indices at a point in the run, from a roster `tiers` long.
-pub(crate) fn wave_pool(elapsed: f32, tiers: usize) -> [usize; 3] {
-    // The roster spread over thirty steps of the run, the last three from step 28: on The
-    // Barrens' thirty tiers, one newer every step.
-    let step = (progress(elapsed) * 30.0) as usize;
-    let span = tiers.saturating_sub(3);
-    let lo = (step.saturating_sub(1) * span / 27).min(span);
-    [lo, lo + 1, lo + 2]
-}
-
-/// How many enemies the spawner keeps alive at a point in the run.
-pub(crate) fn target_alive(elapsed: f32) -> usize {
-    ((14.0 + progress(elapsed) * 225.0) as usize).min(220)
-}
-
-/// Enemy health grows on top of the tiers, so a late kill takes several spells.
-pub(crate) fn hp_scale(elapsed: f32) -> f32 {
-    1.0 + progress(elapsed) * 0.75
-}
-
-/// Enemy damage grows the same way.
+/// A boss's scripted moves hit harder as the run goes on: +90% by fifteen minutes.
 pub(crate) fn damage_scale(elapsed: f32) -> f32 {
-    1.0 + progress(elapsed) * 0.9
+    1.0 + (elapsed / 900.0).max(0.0) * 0.9
 }
 
 /// Original ASR's rounded quadratic threshold (RVA 0x5bfb69c..0x5bfb6c7).
@@ -659,6 +687,7 @@ pub(crate) fn xp_to_next(level: u32) -> f32 {
 
 /// A creature on a battleground's roster: who it is, its pace and its size. Its health, damage
 /// and experience come from its place on the roster, read off The Barrens' tuned ladder.
+#[derive(Clone, Copy)]
 pub(crate) struct Foe {
     name: &'static str,
     display: u32,
@@ -689,6 +718,7 @@ const fn giant(name: &'static str, display: u32, level: u32, speed: f32, scale: 
 }
 
 /// Where a run is fought.
+#[derive(Clone, Copy)]
 pub(crate) struct MapDef {
     pub name: &'static str,
     /// The zone or continent under the name on the menu.
@@ -707,17 +737,36 @@ pub(crate) struct MapDef {
     bosses: &'static [Foe],
 }
 
-/// The collaboration build currently ships only the Elwynn arena. Keep the other
-/// definitions available for later packs without requesting their runtime assets.
-pub(crate) static MAPS: std::sync::LazyLock<&'static [MapDef]> = std::sync::LazyLock::new(|| {
-    let index = ALL_MAPS
-        .iter()
-        .position(|map| map.name == "Elwynn Forest")
-        .expect("Elwynn arena definition");
-    &ALL_MAPS[index..index + 1]
+impl MapDef {
+    /// The boss line-up, by name, for a battleground that may not be playable yet.
+    pub(crate) fn boss_names(&self) -> impl Iterator<Item = &'static str> {
+        self.bosses.iter().map(|b| b.name)
+    }
+}
+
+/// Every battleground defined, playable or not: the adventure atlas lists the locked ones too.
+pub(crate) fn all_maps() -> &'static [MapDef] {
+    &ALL_MAPS
+}
+
+static STORY_MAPS: &[MapDef] = include!("story_maps.rs");
+static ALL_MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::new(|| {
+    ORIGINAL_MAPS.iter().chain(STORY_MAPS).copied().collect()
 });
 
-static ALL_MAPS: &[MapDef] = &[
+/// Stable menu/save/co-op indices: append new maps so existing picks keep their meaning.
+pub(crate) static MAPS: std::sync::LazyLock<Vec<MapDef>> = std::sync::LazyLock::new(|| {
+    asr_coop::story::ARENAS.iter().copied()
+        .map(|name| {
+            *ALL_MAPS
+                .iter()
+                .find(|map| map.name == name)
+                .expect("arena definition")
+        })
+        .collect()
+});
+
+static ORIGINAL_MAPS: &[MapDef] = &[
     MapDef {
         name: "The Barrens",
         zone: "Kalimdor",
@@ -799,7 +848,7 @@ static ALL_MAPS: &[MapDef] = &[
         ],
     },
     MapDef {
-        name: "Fire Plume Ridge",
+        name: "Un'Goro Crater",
         zone: "Un'Goro Crater",
         map: 1,
         // The summit plateau, its lava lake on the west rim; the crater floor's canopy would
@@ -1382,86 +1431,209 @@ static ALL_MAPS: &[MapDef] = &[
             foe("Kel'Thuzad", 15945, 63, 4.4, 2.1),
         ],
     },
+    MapDef {
+        name: "Hall of Thanes",
+        zone: "Forever / Dungeon",
+        map: 3065,
+        // A safe floor cell in the first great burial hall, from the local import.
+        center: [45.5, 0.5, 501.57],
+        leash: 32.0,
+        victory: "The ancient thanes rest once more.",
+        // Survivors adaptation: existing classic displays stand in for Forever NPCs.
+        foes: &[
+            foe("Restless Dead", 200, 13, 3.6, 1.0),
+            foe("Tormented Soul", 9534, 13, 3.8, 1.0),
+            foe("Dark Iron Intruder", 825, 14, 4.2, 1.0),
+            foe("Dark Iron Engineer", 870, 14, 3.8, 1.0),
+            foe("Dark Iron Summoner", 2871, 15, 3.8, 1.0),
+            foe("Tomb Guardian", 2280, 16, 3.6, 1.0),
+            foe("Enraged Apparition", 9534, 16, 4.2, 1.3),
+            foe("Dark Iron Veteran", 8807, 18, 4.2, 1.1),
+        ],
+        bosses: &[
+            foe("Faldrim Anvilmar", 8807, 15, 4.0, 1.6),
+            giant("Magmatus", 14517, 16, 3.8, 0.75),
+            giant("Plunder", 2280, 17, 3.6, 1.5),
+            foe("Durgen Dirgehammer", 8807, 18, 4.2, 1.8),
+        ],
+    },
 ];
 
-/// A battleground's horde and bosses with their numbers.
+/// A battleground's horde, bosses and elites with their numbers. Each foe joins at its `from`
+/// second, each boss comes at its own, and the last boss's death wins the run.
 pub(crate) struct Roster {
     pub enemies: Vec<EnemyDef>,
     pub bosses: Vec<EnemyDef>,
-    /// The old ASR's clock: each foe joins at its `from` second, each boss comes at its own,
-    /// and the last boss's death wins the run; otherwise the mode's ladder and fixed boss beat.
-    pub timed: bool,
     /// The elites holding the battleground's four lairs, north, east, south and west.
     pub guardians: Vec<EnemyDef>,
+    /// How many enemies the battleground holds at once, against open ground's 1.
+    pub crowd: f32,
 }
 
 static ROSTERS: std::sync::LazyLock<Vec<Roster>> = std::sync::LazyLock::new(|| {
     MAPS.iter()
-        .map(|m| {
-            if let Some(r) = super::elwynn::roster(m) {
-                r
-            } else if m.foes.is_empty() {
-                Roster {
-                    enemies: ENEMIES.to_vec(),
-                    bosses: BOSSES.to_vec(),
-                    timed: false,
-                    guardians: Vec::new(),
-                }
-            } else {
-                Roster {
-                    enemies: ladder(m.foes, ENEMIES),
-                    bosses: ladder(m.bosses, BOSSES),
-                    timed: false,
-                    guardians: Vec::new(),
-                }
-            }
-        })
+        .map(|m| super::elwynn::roster(m).unwrap_or_else(|| zone_roster(m)))
         .collect()
 });
+
+impl Foe {
+    /// The Barrens' hand-tuned rows as plain creatures, for its roster on Elwynn's tables.
+    fn of(def: &EnemyDef) -> Self {
+        Foe {
+            name: def.name,
+            display: def.display,
+            level: def.level,
+            speed: def.speed,
+            scale: def.scale,
+            big: def.big,
+        }
+    }
+}
+
+/// A battleground's creatures on Elwynn's tables. Each horde row takes the numbers, price and
+/// minute at its place along Elwynn's horde; each boss its place along Elwynn's boss clock, with
+/// that Elwynn boss's moves; four local rows hold Elwynn's four elite slots. The zone's tier
+/// scales them all at spawn.
+fn zone_roster(map: &MapDef) -> Roster {
+    let tier = super::difficulty::tier(map.name).unwrap_or(1);
+    let (foes, bosses): (Vec<Foe>, Vec<Foe>) = if map.foes.is_empty() {
+        (ENEMIES.iter().map(Foe::of).collect(), BOSSES.iter().map(Foe::of).collect())
+    } else {
+        (map.foes.to_vec(), map.bosses.to_vec())
+    };
+    let plain = |foe: &Foe| EnemyDef {
+        scale: foe.scale,
+        big: foe.big,
+        tier,
+        ..en(foe.name, foe.display, 0.0, foe.speed, 0.0, 0, foe.level)
+    };
+
+    let horde = super::elwynn::horde();
+    let enemies = foes
+        .iter()
+        .enumerate()
+        .map(|(i, foe)| {
+            let (lo, hi, k) = rung(&horde, i, foes.len());
+            let mix = |a: f32, b: f32| a + (b - a) * k;
+            let ranged = bolt(foe.name);
+            let swing = mix(lo.attack, hi.attack);
+            EnemyDef {
+                hp: mix(lo.hp, hi.hp).round(),
+                damage: mix(lo.damage, hi.damage),
+                speed: mix(lo.speed, hi.speed) * (foe.speed / 4.2).clamp(0.9, 1.15),
+                // A caster throws on Elwynn's caster beat, whatever its place on the ladder.
+                attack: if ranged.is_some() { swing.max(3.2) } else { swing },
+                xp: mix(lo.xp as f32, hi.xp as f32).round() as u32,
+                from: mix(lo.from, hi.from).round(),
+                cost: mix(lo.cost, hi.cost),
+                ranged,
+                ..plain(foe)
+            }
+        })
+        .collect();
+
+    // Elwynn's boss clock, its lair lord included: (second, health, damage, experience).
+    let mut clock: Vec<_> = super::elwynn::bosses()
+        .iter()
+        .chain(super::elwynn::guardians().iter().filter(|d| d.lord))
+        .map(|d| (d.from, d.hp, d.damage, d.xp as f32, d.speed))
+        .collect();
+    clock.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (first, end) = (clock[0].0, clock[clock.len() - 1].0);
+    let kits = super::elwynn::bosses();
+    let count = bosses.len();
+    let bosses = bosses
+        .iter()
+        .enumerate()
+        .map(|(i, foe)| {
+            let share = if bosses.len() > 1 { i as f32 / (bosses.len() - 1) as f32 } else { 1.0 };
+            let at = first + (end - first) * share;
+            let upper = clock.iter().position(|c| c.0 >= at).unwrap_or(clock.len() - 1).max(1);
+            let (lo, hi) = (clock[upper - 1], clock[upper]);
+            let k = ((at - lo.0) / (hi.0 - lo.0)).clamp(0.0, 1.0);
+            let mix = |a: f32, b: f32| a + (b - a) * k;
+            let kit = &kits[(share * (kits.len() - 1) as f32).round() as usize];
+            EnemyDef {
+                hp: mix(lo.1, hi.1).round(),
+                damage: mix(lo.2, hi.2),
+                xp: mix(lo.3, hi.3).round() as u32,
+                speed: mix(lo.4, hi.4),
+                attack: kit.attack,
+                from: at.round(),
+                last: i + 1 == count,
+                // Its own moves from the mechanics library, not the Elwynn boss's at its place.
+                script: Some(super::boss_scripts::kit(map.name, foe.name, i, count, tier)),
+                ..plain(foe)
+            }
+        })
+        .collect();
+
+    // The Barrens keeps its first four great beasts; elsewhere the biggest, highest rows.
+    let mut rows: Vec<Foe> = if map.foes.is_empty() {
+        foes.iter().filter(|f| f.big).take(4).copied().collect()
+    } else {
+        let mut rows = foes.clone();
+        rows.sort_by(|a, b| b.big.cmp(&a.big).then_with(|| b.level.cmp(&a.level)));
+        rows.truncate(4);
+        rows
+    };
+    rows.sort_by_key(|foe| foe.level);
+    let guardians = rows
+        .iter()
+        .zip(super::elwynn::guardians())
+        .map(|(foe, slot)| EnemyDef {
+            name: foe.name,
+            display: foe.display,
+            level: foe.level,
+            big: foe.big,
+            // Elwynn's elites stand about twice their kin's size; a golem or giant is big already,
+            // and twice it walls off the camera.
+            scale: foe.scale * if foe.big { 1.25 } else { 1.8 },
+            intro: "",
+            tier,
+            affixes: super::mechanics::affix_count(tier),
+            ..*slot
+        })
+        .collect();
+
+    Roster {
+        enemies,
+        bosses,
+        guardians,
+        crowd: super::difficulty::crowd(map.leash),
+    }
+}
+
+/// The two rows of `ladder` around position `i` of `n`, and how far between them it falls.
+fn rung(ladder: &[EnemyDef], i: usize, n: usize) -> (EnemyDef, EnemyDef, f32) {
+    let top = (ladder.len() - 1) as f32;
+    let at = if n > 1 { i as f32 / (n - 1) as f32 * top } else { 0.0 };
+    (ladder[at.floor() as usize], ladder[at.ceil() as usize], at.fract())
+}
+
+/// A caster's bolt, read from its name; Elwynn's casters throw Fireball and Frostbolt.
+fn bolt(name: &str) -> Option<Ranged> {
+    const KINDS: [(&[&str], u32); 4] = [
+        // Lightning Bolt.
+        (&["Shaman", "Mystic", "Stormer", "Squallshaper", "Augur", "Druid of", "Stonecaller", "Geomancer"], 403),
+        // Shadow Bolt.
+        (&["Necromancer", "Bonecaster", "Shadow Weaver", "Shadowcaster", "Summoner", "Cultist", "Evoker", "Seer", "Neophyte"], 686),
+        // Frostbolt.
+        (&["Mage", "Wizard"], 116),
+        // Fireball.
+        (&["Missionary", "Zealot"], 133),
+    ];
+    KINDS
+        .iter()
+        .find(|(words, _)| words.iter().any(|w| name.contains(w)))
+        .map(|&(_, spell)| Ranged {
+            spell,
+            range: 18.0,
+            cooldown: 1.7,
+        })
+}
 
 pub(crate) fn roster(map: usize) -> &'static Roster {
     &ROSTERS[map.min(ROSTERS.len() - 1)]
 }
 
-/// Number a roster off a tuned ladder: each creature takes the health, damage and experience at
-/// its own place along it, from the ladder's running peak so no later tier comes out softer.
-fn ladder(foes: &[Foe], tuned: &[EnemyDef]) -> Vec<EnemyDef> {
-    let mut peak = (0.0f32, 0.0f32, 0.0f32);
-    let rungs: Vec<(f32, f32, f32)> = tuned
-        .iter()
-        .map(|d| {
-            peak = (
-                peak.0.max(d.hp),
-                peak.1.max(d.damage),
-                peak.2.max(d.xp as f32),
-            );
-            peak
-        })
-        .collect();
-    let top = (rungs.len() - 1) as f32;
-    foes.iter()
-        .enumerate()
-        .map(|(i, f)| {
-            let t = if foes.len() > 1 {
-                i as f32 / (foes.len() - 1) as f32 * top
-            } else {
-                0.0
-            };
-            let (lo, hi) = (rungs[t.floor() as usize], rungs[t.ceil() as usize]);
-            let k = t.fract();
-            let mix = |a: f32, b: f32| (a + (b - a) * k).round();
-            EnemyDef {
-                name: f.name,
-                display: f.display,
-                hp: mix(lo.0, hi.0),
-                speed: f.speed,
-                damage: mix(lo.1, hi.1),
-                scale: f.scale,
-                xp: mix(lo.2, hi.2) as u32,
-                level: f.level,
-                big: f.big,
-                ..en(f.name, f.display, 0.0, 0.0, 0.0, 0, 0)
-            }
-        })
-        .collect()
-}

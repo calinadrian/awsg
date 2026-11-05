@@ -236,14 +236,28 @@ fn retarget_world_camera(
 fn claim_backdrop(
     cameras: Query<(Entity, &Camera), With<WorldCamera>>,
     mut ui: Query<&mut FfxBackdrop, With<PlayerUiCamera>>,
+    #[cfg(not(target_os = "macos"))] cvars: Option<Res<crate::cvars::Cvars>>,
+    #[cfg(not(target_os = "macos"))] world: Option<Res<WorldBackdrop>>,
+    #[cfg(not(target_os = "macos"))] windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     let source = cameras
         .iter()
         .find_map(|(entity, camera)| camera.is_active.then_some(entity));
+    #[cfg(not(target_os = "macos"))]
+    let fsr_easu = crate::survivors::active()
+        && cvars.is_some_and(|cvars| cvars.num("SurvivorUpscaler") == Some(1.0))
+        && world.zip(windows.single().ok()).is_some_and(|(world, window)| {
+            let output = window_physical_size(window);
+            world.size.cmple(output).all() && world.size != output
+        });
     for mut backdrop in &mut ui {
         // Compare first: a write would trip change detection for nothing.
         if backdrop.source != source {
             backdrop.source = source;
+        }
+        #[cfg(not(target_os = "macos"))]
+        if backdrop.fsr_easu != fsr_easu {
+            backdrop.fsr_easu = fsr_easu;
         }
     }
 }

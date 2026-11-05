@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nameplate Design</title>
+<style>
+  :root {
+    --steel: #9aa3b8; --steel-lo: #5d6679; --text-hi: #e8eaf0; --text-dim: #b8bdca;
+    --wine: #8a1f33; --wine-hi: #b83a50; --well-red: #1b0a11;
+  }
+  body { margin: 0; background: #0c0b08; color: var(--text-dim); font: 13px Georgia, "Times New Roman", serif; }
+  .page { max-width: 760px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { font-weight: normal; font-size: 18px; color: var(--text-hi); margin: 0 0 4px; }
+  .lead { margin: 0 0 12px; font: 12px Arial, sans-serif; color: #8a8572; }
+  .bar-ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font: 12px Arial, sans-serif; margin-bottom: 12px; }
+  select { background: #1a1914; color: var(--text-hi); border: 1px solid var(--steel-lo); padding: 3px 6px; font: inherit; }
+  .key { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font: 12px Arial, sans-serif; margin: 0 0 14px; }
+  .key .ic { width: 18px; height: 18px; font-size: 11px; display: inline-grid; }
+  .stage { background: radial-gradient(ellipse at 50% 60%, #4e4a1c, #2e2d12); border-radius: 4px; box-shadow: inset 0 0 0 1px #2a281c; }
+  .cell { height: 100px; display: grid; grid-template-columns: 150px 1fr; align-items: center; border-top: 1px solid rgba(0,0,0,.25); padding: 0 12px; }
+  .cell:first-child { border-top: 0; }
+  .what { font: 11px Arial, sans-serif; color: rgba(255,255,255,.65); }
+  .z { justify-self: center; transform: scale(3); }
+
+  /* One plate as the game draws it: an 11px bar in the boss bars' frame, the level, name and
+     health text in it; one row of 9px icons on its top edge, 2px off. */
+  .np { position: relative; }
+  .bar { position: relative; box-sizing: border-box; width: 100px; height: 11px; padding: 1px; background: rgba(13,21,23,.92);
+         border-radius: 1px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .sel .bar { box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000, 0 0 4px rgba(184,58,80,.6); }
+  .well { position: relative; height: 100%; overflow: hidden; display: flex; align-items: center; gap: 2px; padding: 0 2px; background: var(--well-red); }
+  .well > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--wine); box-shadow: inset 0 1px 0 var(--wine-hi); }
+  .t { position: relative; white-space: nowrap; color: var(--text-hi); text-shadow: 0 .5px 1px rgba(0,0,0,.95); }
+  .lv { font: 4.5px Arial, sans-serif; color: var(--steel); }
+  .nm { font-size: 6px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; padding-right: 3px; }
+  .hp { font: 4.5px Arial, sans-serif; }
+  .row { position: absolute; left: 0; right: 0; bottom: calc(100% + 2px); display: flex; gap: 1px; }
+  .row .sp { flex: 1; }
+  .ic { position: relative; flex: none; width: 9px; height: 9px; display: grid; place-items: center; font-size: 5.5px; line-height: 1; color: #fff; }
+  .ic.b { box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .ic.d { box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .ic s { position: absolute; right: 0; bottom: -1px; text-decoration: none; font: bold 4.5px Arial, sans-serif; color: #fff;
+          text-shadow: 0 0 1px #000, 0 0 1px #000, 0 0 1px #000; }
+  .ic.more { font: bold 4.5px Arial, sans-serif; color: var(--text-hi); background: rgba(13,21,23,.95); box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .key .ic s { font-size: 8px; }
+  .c1 { background: #3c2050; } .c2 { background: #1c3358; } .c3 { background: #4a1418; } .c4 { background: #5a1a10; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Nameplate: compact, with auras</h1>
+  <p class="lead">Drawn at 3×. The level, name and health sit in one 11px bar; one row of icons sits on its top edge: your debuffs from the left, the mob's important buffs from the right. Every plate is the same 100px. A name that does not fit shrinks a little (6px down to 5px), and only past that shortens with "…".</p>
+  <div class="bar-ctl">Health text (Interface settings):
+    <select id="fmt">
+      <option value="0">Cur / Max · %</option><option value="1">Cur / Max</option><option value="2" selected>Cur · %</option>
+      <option value="3">Current</option><option value="4">Percent</option><option value="5">None</option>
+    </select>
+  </div>
+  <p class="key"><span class="ic d c1">☠<s>3</s></span> poison ×3 &nbsp; <span class="ic d c2">❄</span> chilled &nbsp; <span class="ic d c3">🩸</span> bleeding: your debuffs, crimson edge
+    &nbsp;&nbsp; <span class="ic b c4">⚡</span> enraged: the mob's buff, grey edge</p>
+  <div class="stage" id="stage"></div>
+</div>
+<script>
+  // [what, name, level, hp, max, debuffs [glyph class, glyph, stacks], buff glyph or '', selected]
+  const plates = [
+    ['A plain mob', 'Young Wolf', 1, 52, 52, [], [], false],
+    ['Your debuffs on it', 'Young Wolf', 1, 31, 52, [['c1', '☠', 3], ['c2', '❄', 0]], [], false],
+    ['Selected, enraged', 'Young Wolf', 1, 23, 52, [['c1', '☠', 2], ['c3', '🩸', 0], ['c2', '❄', 0]], ['⚡'], true],
+    ['7 debuffs and 8 buffs', 'Young Wolf', 1, 40, 52,
+      [['c1', '☠', 3], ['c2', '❄', 0], ['c3', '🩸', 0], ['c1', '✦', 0], ['c2', '☄', 0], ['c3', '✖', 2], ['c1', '☣', 0]],
+      ['⚡', '🛡', '✚', '⬆', '☀', '✧', '♦', '❖'], false],
+    ['Elite, long name, big numbers', 'Hogger the Unbroken', 11, 15400, 17000, [['c1', '☠', 5]], [], false],
+  ];
+  const compact = n => n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  const text = (f, hp, max) => {
+    const cur = compact(hp), top = compact(max), pct = Math.ceil(hp / max * 100) + '%';
+    return [`${cur} / ${top} · ${pct}`, `${cur} / ${top}`, `${cur} · ${pct}`, cur, pct, ''][f];
+  };
+  const icon = (c, cls, g, n) => `<div class="ic ${cls} ${c}">${g}${n > 1 ? `<s>${n}</s>` : ''}</div>`;
+  const SLOTS = 10, BUFFS = 3;
+  // Fit n auras into k slots: when they overflow, the last slot says how many are hidden.
+  const fit = (list, k, draw) => list.length <= k ? list.map(draw)
+    : [...list.slice(0, k - 1).map(draw), `<div class="ic more">+${list.length - k + 1}</div>`];
+  function draw() {
+    const f = +document.getElementById('fmt').value;
+    document.getElementById('stage').innerHTML = plates.map(([what, name, lv, hp, max, deb, buff, sel]) => `
+      <div class="cell"><span class="what">${what}</span><div class="z"><div class="np${sel ? ' sel' : ''}"><div class="bar">
+        <div class="row">${(() => { const nb = Math.min(buff.length, Math.max(BUFFS, SLOTS - deb.length)), nd = SLOTS - nb;
+          return fit(deb, nd, ([c, g, n]) => icon(c, 'd', g, n)).join('') + '<span class="sp"></span>'
+            + fit(buff, nb, g => icon('c4', 'b', g, 0)).reverse().join(''); })()}</div>
+        <div class="well"><i style="width:${hp / max * 100}%"></i><span class="t lv">${lv}</span><span class="t nm">${name}</span><span class="t hp">${text(f, hp, max)}</span></div>
+      </div></div></div></div>`).join('');
+  }
+  // A name that overflows its space steps down to 5px before the ellipsis takes over.
+  const shrink = () => document.querySelectorAll('.nm').forEach(n => {
+    for (let px = 6; px >= 5 && n.scrollWidth > n.clientWidth; px -= .25) n.style.fontSize = px + 'px';
+  });
+  document.getElementById('fmt').addEventListener('change', () => { draw(); shrink(); });
+  draw(); shrink();
+</script>
+</body>
+</html>

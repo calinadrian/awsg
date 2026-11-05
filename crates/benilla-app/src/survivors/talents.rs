@@ -4,19 +4,18 @@
 //! prerequisite needs it maxed; respecs are free.
 //!
 //! In a run the talents count through [`Build`]: stat bonuses, spell and school modifiers, the
-//! spells a run starts with and the procs that ready a spell again. The milestones and capstones
-//! whose mechanics the mode has no counterpart for yet (`Eff::Other`) are shown, not applied.
+//! starting spells and triggered casts. The talent tooltip identifies effects still being ported.
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
 
 use super::data::{AbilityDef, Kind};
-use super::hud::{HudFont, MenuRoot};
+use super::damage_meter::Source;
+use super::menu_skin as skin;
+use super::hud::{rgb, HudFont, MenuRoot};
 use super::menu::MenuAction;
 use super::{Phase, Run, Selection};
-use crate::glue::art::{GlueArt, GOLD};
-use crate::glue::widgets::{glue_button, GlueBtnKind};
 use crate::glue::GlueClicks;
 
 /// One talent, as the old tables hold it.
@@ -53,26 +52,43 @@ pub(super) enum Eff {
     /// chance, 4 critical damage, 5 damage taken, 6 health a second, 7 movement speed, 13 a
     /// spell striking twice, 14 leech, 15 health a kill, 18-21 damage against the crowd
     /// controlled, elites and bosses, the wounded and the afflicted, 22 melee thorns, 24 health
-    /// a second as a share of the maximum. Others (pets, buffs, luck) have no counterpart yet.
+    /// a second as a share of the maximum. Stat 12 is luck and 23 strengthens buffs.
     Stat(u32, f32),
     /// A modifier on the spells `target` picks: `what` 0 damage, 1 cooldown, 2 targets, 3 area,
     /// 4 duration, 5 extra damage as a share of the hero's maximum health.
     Mod { target: Target, what: u32, per: f32 },
     /// The run starts with this spell.
     Grant(&'static str),
-    /// A `chance` (per `every` seconds at most) to ready `cast` again when `trigger` happens:
-    /// 2 a critical strike, 3 or 4 a cast of a spell `on`, 7 any cast, 8 a melee blow taken,
-    /// 9 health falling below `arg`.
+    /// Replace the class's normal starting spell.
+    Starter(&'static str),
+    /// A free cast, at most once per cooldown. With an empty `cast`, repeat the triggering spell.
     Proc {
         chance: f32,
         every: f32,
         cast: &'static str,
-        trigger: u32,
+        trigger: ProcTrigger,
         on: &'static [&'static str],
         arg: f32,
     },
+    CastEvery { cast: &'static str, seconds: f32 },
+    CastOnKills { cast: &'static str, count: u32 },
+    FollowUp { on: &'static [&'static str], share: f32 },
     /// A milestone mechanic of the old game's, by its tag: not ported.
     Other(u32),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProcTrigger {
+    Hit,
+    Crit,
+    CastCrit,
+    DotTick,
+    Cast,
+    MeleeTaken,
+    LowHealth,
+    ShieldBreak,
+    PetHit,
+    FatalHit,
 }
 
 pub(super) enum Target {
@@ -91,12 +107,34 @@ pub(super) const MAX_POINTS: u32 = 51;
 
 /// Talent experience the `n`th point costs.
 fn point_cost(n: u32) -> f32 {
-    100.0 + 25.0 * n as f32
+    // Move 4,650 XP from the first 31 points to the last 20. The 51-point total stays 36,975.
+    if n < 31 {
+        100.0 + 15.0 * n as f32
+    } else {
+        332.5 + 25.0 * n as f32
+    }
 }
 
 /// The class's three trees.
 pub(super) fn trees(class: u8) -> Option<&'static [TreeDef; 3]> {
     TREES.iter().find(|(c, _)| *c == class).map(|(_, t)| t)
+}
+
+const EXCLUSIVE_PAIRS: [(&str, &str); 2] = [
+    ("pact_of_the_annihilan", "butcher"),
+    ("leader_of_pack", "cat_form"),
+];
+
+fn exclusive_with(key: &str) -> Option<&'static str> {
+    EXCLUSIVE_PAIRS.iter().find_map(|&(first, second)| {
+        if key == first {
+            Some(second)
+        } else if key == second {
+            Some(first)
+        } else {
+            None
+        }
+    })
 }
 
 /// The old game's spell keys where the mode names the spell otherwise.
@@ -109,11 +147,35 @@ fn canonical(key: &str) -> &str {
     }
 }
 
+fn spell(key: &str) -> Option<&'static AbilityDef> {
+    super::data::ABILITIES.iter().find(|def| def.key == canonical(key))
+}
+
+impl Eff {
+    fn implemented(&self) -> bool {
+        match self {
+            Self::Stat(stat, _) => matches!(*stat, 0..=7 | 12..=15 | 18..=24),
+            Self::Mod { target, what, .. } => {
+                *what <= 5 && super::data::ABILITIES.iter().any(|def| target.picks(def))
+            }
+            Self::Grant(key) | Self::Starter(key) => spell(key).is_some(),
+            Self::Proc { cast, trigger, on, .. } => {
+                !matches!(*trigger, ProcTrigger::PetHit | ProcTrigger::FatalHit)
+                    && (cast.is_empty() || spell(cast).is_some())
+                    && (on.is_empty() && !cast.is_empty() || on.iter().any(|key| spell(key).is_some()))
+            }
+            Self::CastEvery { cast, .. } | Self::CastOnKills { cast, .. } => spell(cast).is_some(),
+            Self::FollowUp { on, .. } => on.iter().any(|key| spell(key).is_some()),
+            Self::Other(_) => false,
+        }
+    }
+}
+
 /// A spell's school, by the mode's key.
 fn school(key: &str) -> u8 {
     match key {
-        "fireball" | "flamestrike" | "fire_blast" | "blast_wave" | "pyroblast" | "immolate"
-        | "rain_of_fire" | "hellfire" | "searing_pain" | "explosive_trap" | "flame_shock"
+        "fireball" | "flamestrike" | "fire_blast" | "pyroblast" | "immolate"
+        | "rain_of_fire" | "hellfire" | "searing_pain" | "flame_shock"
         | "searing_totem" | "magma_totem" => 2,
         "frostbolt" | "frost_nova" | "blizzard" | "cone_of_cold" | "frost_shock" => 4,
         "arcane_missiles" | "arcane_explosion" | "arcane_shot" | "volley" | "moonfire"
@@ -171,7 +233,8 @@ pub(super) fn text_at(t: &TalentDef, rank: u8) -> String {
 #[derive(Default, Clone)]
 pub(super) struct ClassBook {
     pub exp: f32,
-    pub ranks: HashMap<&'static str, u8>,
+    specs: [HashMap<&'static str, u8>; 3],
+    active_spec: usize,
 }
 
 impl ClassBook {
@@ -185,18 +248,14 @@ impl ClassBook {
     }
 
     pub fn progress_text(&self) -> String {
+        let points = super::front_end::plural(self.available(), "talent point");
         if self.earned() >= MAX_POINTS {
-            format!(
-                "Class level {} (MAX) | {} talent points available",
-                self.level(),
-                self.available()
-            )
+            format!("Class level {} (max)  ·  {points} to spend", self.level())
         } else {
             let (xp, next) = self.toward_next();
             format!(
-                "Class level {} | {xp:.0} / {next:.0} XP | {} talent points available",
-                self.level(),
-                self.available()
+                "Class level {}  ·  {xp:.0} / {next:.0} XP  ·  {points} to spend",
+                self.level()
             )
         }
     }
@@ -222,11 +281,30 @@ impl ClassBook {
     }
 
     pub fn spent(&self) -> u32 {
-        self.ranks.values().map(|&r| u32::from(r)).sum()
+        self.specs[self.active_spec]
+            .values()
+            .map(|&r| u32::from(r))
+            .sum()
     }
 
     pub fn rank(&self, key: &str) -> u8 {
-        self.ranks.get(key).copied().unwrap_or(0)
+        self.specs[self.active_spec].get(key).copied().unwrap_or(0)
+    }
+
+    fn ranks_mut(&mut self) -> &mut HashMap<&'static str, u8> {
+        &mut self.specs[self.active_spec]
+    }
+
+    fn switch_spec(&mut self, spec: usize) -> bool {
+        if spec >= self.specs.len() || spec == self.active_spec {
+            return false;
+        }
+        self.active_spec = spec;
+        true
+    }
+
+    fn active_spec(&self) -> usize {
+        self.active_spec
     }
 
     fn tree_spent(&self, tree: &TreeDef, below: u8) -> u32 {
@@ -237,12 +315,13 @@ impl ClassBook {
             .sum()
     }
 
-    /// Whether every bought rank stands: its row open and its prerequisite maxed.
+    /// Whether every bought rank satisfies its row, prerequisite and exclusivity rules.
     fn valid(&self, trees: &[TreeDef; 3]) -> bool {
         trees.iter().all(|tree| {
             tree.talents.iter().all(|t| {
                 self.rank(t.key) == 0
-                    || (self.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5
+                    || (exclusive_with(t.key).is_none_or(|other| self.rank(other) == 0)
+                        && self.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5
                         && t.prereq.is_none_or(|p| {
                             tree.talents
                                 .iter()
@@ -253,12 +332,26 @@ impl ClassBook {
         }) && self.spent() <= self.earned()
     }
 
+    /// Old builds could buy both capstones. Refund both so the player can pick again.
+    fn refund_conflicting_picks(&mut self) {
+        for spec in &mut self.specs {
+            for (first, second) in EXCLUSIVE_PAIRS {
+                if spec.get(first).copied().unwrap_or(0) > 0
+                    && spec.get(second).copied().unwrap_or(0) > 0
+                {
+                    spec.remove(first);
+                    spec.remove(second);
+                }
+            }
+        }
+    }
+
     /// Buy a rank if the rules allow it.
     pub fn learn(&mut self, trees: &[TreeDef; 3], t: &'static TalentDef) -> bool {
         if self.spent() >= self.earned() || self.rank(t.key) >= t.ranks {
             return false;
         }
-        *self.ranks.entry(t.key).or_default() += 1;
+        *self.ranks_mut().entry(t.key).or_default() += 1;
         if self.valid(trees) {
             true
         } else {
@@ -276,23 +369,24 @@ impl ClassBook {
         if self.valid(trees) {
             true
         } else {
-            *self.ranks.entry(t.key).or_default() += 1;
+            *self.ranks_mut().entry(t.key).or_default() += 1;
             false
         }
     }
 
     fn unlearn_raw(&mut self, key: &str) {
-        if let Some(r) = self.ranks.get_mut(key) {
+        let ranks = self.ranks_mut();
+        if let Some(r) = ranks.get_mut(key) {
             *r -= 1;
             if *r == 0 {
-                self.ranks.remove(key);
+                ranks.remove(key);
             }
         }
     }
 }
 
 /// Every class's talents, kept in `benilla-config/survivors-talents.txt`, one class a line:
-/// `class exp key=rank key=rank ...`.
+/// `class exp active=n S0:key=rank,... S1:key=rank,... S2:key=rank,...`.
 #[derive(Resource, Default)]
 pub(super) struct TalentBook {
     pub classes: HashMap<u8, ClassBook>,
@@ -313,6 +407,45 @@ fn key_of(class: u8, key: &str) -> Option<&'static str> {
 }
 
 impl TalentBook {
+    pub(super) fn export_offline(&mut self, values: &mut std::collections::BTreeMap<String, u64>) {
+        self.load();
+        for (class, book) in &self.classes {
+            values.insert(format!("xp:{class}"), (book.exp.max(0.) as f64 * 1000.).round() as u64);
+            values.insert(format!("active:{class}"), book.active_spec as u64);
+            if let Some(trees) = trees(*class) {
+                for spec in 0..3 {
+                    for talent in trees.iter().flat_map(|tree| tree.talents) {
+                        values.insert(format!("spec:{class}:{spec}:{}", talent.key), u64::from(book.specs[spec].get(talent.key).copied().unwrap_or(0)));
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn import_offline(&mut self, values: &std::collections::BTreeMap<String, u64>) {
+        self.load();
+        for (class, trees) in &TREES {
+            let Some(exp) = values.get(&format!("xp:{class}")) else { continue };
+            let book = self.classes.entry(*class).or_default();
+            book.exp = book.exp.max((*exp as f64 / 1000.).min(1_000_000.) as f32);
+            let mut candidate = book.clone();
+            for spec in 0..3 {
+                for talent in trees.iter().flat_map(|tree| tree.talents) {
+                    if let Some(rank) = values.get(&format!("spec:{class}:{spec}:{}", talent.key)) {
+                        candidate.specs[spec].insert(talent.key, (*rank).min(u64::from(talent.ranks)) as u8);
+                    }
+                }
+            }
+            candidate.refund_conflicting_picks();
+            let active = values.get(&format!("active:{class}")).copied().unwrap_or(book.active_spec as u64).min(2) as usize;
+            if (0..3).all(|spec| { candidate.active_spec = spec; candidate.valid(trees) }) {
+                candidate.active_spec = active;
+                *book = candidate;
+            }
+        }
+        self.save();
+    }
+
     pub fn class(&mut self, class: u8) -> &mut ClassBook {
         self.load();
         self.classes.entry(class).or_default()
@@ -337,15 +470,35 @@ impl TalentBook {
             };
             let mut book = ClassBook {
                 exp,
-                ranks: HashMap::new(),
+                ..Default::default()
             };
             for w in words {
-                if let Some((k, r)) = w.split_once('=') {
+                if let Some(spec) = w
+                    .strip_prefix("active=")
+                    .and_then(|s| s.parse::<usize>().ok())
+                {
+                    book.active_spec = spec.min(2);
+                } else if let Some((spec, entries)) = w.split_once(':') {
+                    if let Some(i) = spec
+                        .strip_prefix('S')
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .filter(|&i| i < 3)
+                    {
+                        for entry in entries.split(',') {
+                            if let Some((k, r)) = entry.split_once('=') {
+                                if let (Some(k), Ok(r)) = (key_of(class, k), r.parse::<u8>()) {
+                                    book.specs[i].insert(k, r);
+                                }
+                            }
+                        }
+                    }
+                } else if let Some((k, r)) = w.split_once('=') {
                     if let (Some(k), Ok(r)) = (key_of(class, k), r.parse::<u8>()) {
-                        book.ranks.insert(k, r);
+                        book.specs[0].insert(k, r);
                     }
                 }
             }
+            book.refund_conflicting_picks();
             self.classes.insert(class, book);
         }
     }
@@ -356,10 +509,19 @@ impl TalentBook {
             .classes
             .iter()
             .map(|(c, b)| {
-                let mut ranks: Vec<String> =
-                    b.ranks.iter().map(|(k, r)| format!("{k}={r}")).collect();
-                ranks.sort();
-                format!("{c} {} {}", b.exp, ranks.join(" "))
+                let specs = b
+                    .specs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ranks)| {
+                        let mut entries: Vec<_> =
+                            ranks.iter().map(|(k, r)| format!("{k}={r}")).collect();
+                        entries.sort();
+                        format!("S{i}:{}", entries.join(","))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("{c} {} active={} {specs}", b.exp, b.active_spec)
             })
             .collect();
         lines.sort();
@@ -368,24 +530,49 @@ impl TalentBook {
 }
 
 /// A proc in a run, with the run second it may fire again.
-pub(super) struct ProcState {
-    pub chance: f32,
-    pub every: f32,
-    pub cast: &'static str,
-    pub trigger: u32,
-    pub on: &'static [&'static str],
-    pub arg: f32,
-    pub ready_at: f32,
+struct ProcState {
+    source: &'static str,
+    chance: f32,
+    every: f32,
+    cast: Option<&'static AbilityDef>,
+    trigger: ProcTrigger,
+    on: Vec<&'static AbilityDef>,
+    arg: f32,
+    ready_at: f32,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct FreeCast {
+    pub def: &'static AbilityDef,
+    pub source: &'static str,
+}
+
+struct ScheduledCast {
+    cast: FreeCast,
+    when: CastSchedule,
+}
+
+enum CastSchedule {
+    Time { every: f32, next: f32 },
+    Kills { every: u32, paid: u32 },
 }
 
 /// The hero's talents as a run counts them.
 #[derive(Default)]
 pub(super) struct Build {
+    pub granted_by: HashMap<&'static str, &'static str>,
+    pub sources: Vec<(&'static str, u32, f32)>,
     /// [`Eff::Stat`] totals, by the old game's stat number.
     pub stats: HashMap<u32, f32>,
     mods: Vec<(&'static Target, u32, f32)>,
+    starter: Option<FreeCast>,
     pub grants: Vec<&'static str>,
-    pub procs: Vec<ProcState>,
+    procs: Vec<ProcState>,
+    scheduled: Vec<ScheduledCast>,
+    follow_ups: Vec<(&'static str, Vec<u32>, f32)>,
+    pending: Vec<FreeCast>,
+    health_share: Option<f32>,
+    pub broken_shield: Option<u32>,
 }
 
 impl Build {
@@ -400,9 +587,41 @@ impl Build {
             let r = f32::from(rank);
             for e in t.effects {
                 match e {
-                    Eff::Stat(s, per) => *b.stats.entry(*s).or_default() += per * r,
+                    Eff::Stat(s, per) => {
+                        *b.stats.entry(*s).or_default() += per * r;
+                        b.sources.push((t.key, *s, per * r));
+                    }
                     Eff::Mod { target, what, per } => b.mods.push((target, *what, per * r)),
-                    Eff::Grant(k) => b.grants.push(canonical(k)),
+                    Eff::Grant(k) => {
+                        b.grants.push(canonical(k));
+                        b.granted_by.insert(canonical(k), t.key);
+                    }
+                    Eff::Starter(key) => {
+                        if let Some(def) = spell(key) {
+                            b.starter = Some(FreeCast { def, source: t.key });
+                        }
+                    }
+                    Eff::CastEvery { cast, seconds } => {
+                        if let Some(def) = spell(cast) {
+                            b.scheduled.push(ScheduledCast {
+                                cast: FreeCast { def, source: t.key },
+                                when: CastSchedule::Time { every: *seconds, next: *seconds },
+                            });
+                        }
+                    }
+                    Eff::CastOnKills { cast, count } => {
+                        if let Some(def) = spell(cast) {
+                            b.scheduled.push(ScheduledCast {
+                                cast: FreeCast { def, source: t.key },
+                                when: CastSchedule::Kills { every: *count, paid: 0 },
+                            });
+                        }
+                    }
+                    Eff::FollowUp { on, share } => b.follow_ups.push((
+                        t.key,
+                        on.iter().filter_map(|key| spell(key).map(|def| def.spell)).collect(),
+                        *share,
+                    )),
                     Eff::Proc {
                         chance,
                         every,
@@ -410,16 +629,17 @@ impl Build {
                         trigger,
                         on,
                         arg,
-                    } => b.procs.push(ProcState {
+                    } if e.implemented() => b.procs.push(ProcState {
+                        source: t.key,
                         chance: chance * if t.ranks > 1 { r } else { 1.0 },
                         every: *every,
-                        cast: canonical(cast),
+                        cast: spell(cast),
                         trigger: *trigger,
-                        on,
+                        on: on.iter().filter_map(|key| spell(key)).collect(),
                         arg: *arg,
                         ready_at: 0.0,
                     }),
-                    Eff::Other(_) => {}
+                    Eff::Proc { .. } | Eff::Other(_) => {}
                 }
             }
         }
@@ -440,46 +660,88 @@ impl Build {
     }
 }
 
-/// Fire the procs a `trigger` sets off (`spell` the key cast, for the cast trigger 3, which also
-/// answers the old game's 4): each that rolls readies its spell again, if the hero has it.
-pub(super) fn trigger(run: &mut Run, rng: &mut super::Rng, trigger: u32, spell: Option<&str>) {
-    let now = run.elapsed;
-    let mut ready = Vec::new();
-    for p in &mut run.talents.procs {
-        let hit = match p.trigger {
-            3 | 4 => trigger == 3 && spell.is_some_and(|k| p.on.iter().any(|o| canonical(o) == k)),
-            t => t == trigger,
+const MAX_PENDING_CASTS: usize = 32;
+
+/// Collect talent casts without touching the equipped spell's cooldown or reserving a bar slot.
+pub(super) fn take_casts(run: &mut Run) -> Vec<FreeCast> {
+    let mut ready = std::mem::take(&mut run.talents.pending);
+    for entry in &mut run.talents.scheduled {
+        let count = match &mut entry.when {
+            CastSchedule::Time { every, next } if run.elapsed >= *next => {
+                *next += ((run.elapsed - *next) / *every).floor() * *every + *every;
+                1
+            }
+            CastSchedule::Time { .. } => 0,
+            CastSchedule::Kills { every, paid } => {
+                let groups = run.kills / *every;
+                let count = groups.saturating_sub(*paid);
+                *paid = (*paid).max(groups);
+                count as usize
+            }
         };
-        if !hit || now < p.ready_at || rng.f32() >= p.chance {
-            continue;
-        }
-        p.ready_at = now + p.every;
-        ready.push(p.cast);
+        ready.extend(std::iter::repeat_n(entry.cast, count.min(MAX_PENDING_CASTS - ready.len())));
     }
-    for key in ready {
-        if let Some(o) = run.abilities.iter_mut().find(|o| o.def.key == key) {
-            o.cd = o.cd.min(0.0);
-        }
-    }
+    ready
 }
 
-/// The health-share trigger (9): fired once the hero's health falls below a proc's `arg`.
-pub(super) fn low_health(run: &mut Run, rng: &mut super::Rng) {
-    let share = run.hp / run.stats().max_hp;
-    let due = run
-        .talents
-        .procs
-        .iter()
-        .any(|p| p.trigger == 9 && share < p.arg && run.elapsed >= p.ready_at);
-    if due {
-        trigger(run, rng, 9, None);
+pub(super) fn follow_up(run: &Run, spell: u32) -> Option<(Source, f32)> {
+    run.talents.follow_ups.iter().find_map(|(source, on, share)| {
+        on.contains(&spell).then_some((Source::Talent(source), *share))
+    })
+}
+
+pub(super) fn trigger(
+    run: &mut Run,
+    rng: &mut super::Rng,
+    trigger: ProcTrigger,
+    spell: u32,
+    source: Option<Source>,
+) {
+    if run.talents.procs.is_empty() {
+        return;
+    }
+    let now = run.elapsed;
+    let health = if trigger == ProcTrigger::LowHealth {
+        if !run.talents.procs.iter().any(|proc| proc.trigger == trigger) {
+            return;
+        }
+        let current = run.hp / run.stats().max_hp;
+        let previous = run.talents.health_share.replace(current).unwrap_or(1.0);
+        (previous, current)
+    } else {
+        (1.0, 1.0)
+    };
+    let build = &mut run.talents;
+    for proc in &mut build.procs {
+        if build.pending.len() == MAX_PENDING_CASTS {
+            break;
+        }
+        if proc.trigger != trigger || now < proc.ready_at || source == Some(Source::Talent(proc.source)) {
+            continue;
+        }
+        if trigger == ProcTrigger::LowHealth && (health.0 < proc.arg || health.1 >= proc.arg) {
+            continue;
+        }
+        let matched = proc.on.iter().copied().find(|def| def.spell == spell);
+        if !proc.on.is_empty() && matched.is_none() {
+            continue;
+        }
+        let Some(def) = proc.cast.or(matched) else { continue };
+        if rng.f32() < proc.chance {
+            proc.ready_at = now + proc.every;
+            build.pending.push(FreeCast { def, source: proc.source });
+        }
     }
 }
 
 /// Talent experience a finished run pays its class: time survived, kills, bosses, guardians and
-/// a win, more in a harder zone.
+/// a win, 15% more for each tier along the road.
 pub(super) fn run_pay(run: &Run, guardians: u32, map: usize) -> f32 {
-    let zone = 1.0 + map as f32 * 0.02;
+    let tier = super::data::MAPS
+        .get(map)
+        .and_then(|m| super::difficulty::tier(m.name))
+        .unwrap_or(1);
+    let zone = 1.0 + 0.15 * f32::from(tier - 1);
     let base = run.elapsed / 6.0
         + run.kills as f32 / 20.0
         + run.bosses as f32 * 25.0
@@ -500,7 +762,7 @@ pub(super) fn pay_run(
 
 /// Shared by defeat/victory and returning to the menu; each run pays only once.
 pub(super) fn settle_run(run: &mut Run, book: &mut TalentBook, guardians: u32, map: usize) {
-    if run.talent_paid {
+    if run.talent_paid || run.test {
         return;
     }
     let pay = run_pay(run, guardians, map);
@@ -517,11 +779,19 @@ pub(super) fn settle_run(run: &mut Run, book: &mut TalentBook, guardians: u32, m
 #[derive(Component)]
 pub(super) struct MenuProgress;
 
+/// The results screen's reward headline: the class XP the run paid and any points it earned.
 #[derive(Component)]
 pub(super) struct ResultsProgress;
+/// The class level line under the results screen's XP bar.
+#[derive(Component)]
+pub(super) struct ResultsLevel;
+/// The results screen's class XP bar fill.
+#[derive(Component)]
+pub(super) struct ResultsXpFill;
 
 /// Keep the reward receipt and the selected class's saved progress visible between runs.
 pub(super) fn refresh_progress(
+    progress: Res<super::progress::Progress>,
     phase: Res<State<Phase>>,
     selection: Res<Selection>,
     run: Res<Run>,
@@ -529,13 +799,21 @@ pub(super) fn refresh_progress(
     mut texts: ParamSet<(
         Query<&mut Text, With<MenuProgress>>,
         Query<&mut Text, With<ResultsProgress>>,
+        Query<&mut Text, With<ResultsLevel>>,
     )>,
+    mut fills: Query<&mut Node, With<ResultsXpFill>>,
 ) {
     match phase.get() {
         Phase::Menu => {
-            let value = selection
+            let mut value = selection
                 .class_def()
                 .map_or_else(String::new, |class| book.class(class.id).progress_text());
+            if let Some(class) = selection.class_def() {
+                value.push_str(&format!(
+                    "\n{}",
+                    progress.summary(class.id, selection.stage_def().name)
+                ));
+            }
             for mut text in &mut texts.p0() {
                 if text.0 != value {
                     text.0 = value.clone();
@@ -545,20 +823,34 @@ pub(super) fn refresh_progress(
         Phase::GameOver => {
             let page = book.class(run.class.id);
             let (xp, points) = run.talent_pay;
-            let earned = if points > 0 {
-                format!("Level up! +{points} talent points")
-            } else if page.earned() >= MAX_POINTS {
-                "Maximum class level reached".into()
-            } else {
-                "Earn class XP each run to unlock talent points".into()
-            };
-            let value = format!(
-                "+{xp:.0} {} class XP | {earned}\n{}\nSpend your points in Talents from the main menu.",
-                run.class.name, page.progress_text()
-            );
+            let mut value = format!("+{xp:.0} {} class XP", run.class.name);
+            if points > 0 {
+                value.push_str(&format!(
+                    "  ·  Level up! +{}",
+                    super::front_end::plural(points, "talent point")
+                ));
+            }
             for mut text in &mut texts.p1() {
                 if text.0 != value {
                     text.0 = value.clone();
+                }
+            }
+            let line = if page.available() > 0 {
+                format!("{}  ·  spend them in Talents", page.progress_text())
+            } else {
+                page.progress_text()
+            };
+            for mut text in &mut texts.p2() {
+                if text.0 != line {
+                    text.0 = line.clone();
+                }
+            }
+            let (have, next) = page.toward_next();
+            let fraction = if page.earned() >= MAX_POINTS { 1. } else { (have / next.max(1.)).clamp(0., 1.) };
+            for mut fill in &mut fills {
+                let want = Val::Percent(fraction * 100.);
+                if fill.width != want {
+                    fill.width = want;
                 }
             }
         }
@@ -570,6 +862,12 @@ pub(super) fn refresh_progress(
 pub(super) fn begin_run(mut run: ResMut<Run>, mut book: ResMut<TalentBook>) {
     let class = run.class.id;
     run.talents = Build::of(class, book.class(class));
+    if let Some(starter) = run.talents.starter {
+        if let Some(first) = run.abilities.first_mut() {
+            *first = super::Owned::new(starter.def, super::rewards::Rarity::Common);
+            first.damage_source = Some(Source::Talent(starter.source));
+        }
+    }
     let grants = run.talents.grants.clone();
     for key in grants {
         let Some(def) = super::data::ABILITIES.iter().find(|a| a.key == key) else {
@@ -578,10 +876,19 @@ pub(super) fn begin_run(mut run: ResMut<Run>, mut book: ResMut<TalentBook>) {
         if run.abilities.len() < super::data::MAX_ABILITIES
             && !run.abilities.iter().any(|o| o.def.key == key)
         {
-            run.abilities
-                .push(super::Owned::new(def, super::rewards::Rarity::Common));
+            let mut owned = super::Owned::new(def, super::rewards::Rarity::Common);
+            owned.damage_source = run.talents.granted_by.get(key).map(|&key| super::damage_meter::Source::Talent(key));
+            run.abilities.push(owned);
         }
     }
+    run.racial = super::races::racial(run.race)
+        .and_then(|r| r.proc)
+        .map(|(_, key, _)| {
+            super::Owned::new(super::data::ability(key), super::rewards::Rarity::Common)
+        });
+    info!("survivors: run start class={} race={} abilities={:?} racial={:?} shield={:.0} shield_spell={}",
+        run.class.name, run.race, run.abilities.iter().map(|o| o.def.key).collect::<Vec<_>>(),
+        run.racial.as_ref().map(|o| o.def.key), run.shield, run.shield_spell);
     run.hp = run.stats().max_hp;
     run.version += 1;
 }
@@ -593,6 +900,9 @@ pub(super) struct CloseTalents;
 
 #[derive(Component, Clone, Copy)]
 pub(super) struct ResetTalents;
+
+#[derive(Component, Clone, Copy)]
+pub(super) struct SelectSpec(usize);
 
 /// The open screen.
 #[derive(Component)]
@@ -629,13 +939,13 @@ pub(super) fn talent_screen(
     selection: Res<Selection>,
     mut screen: ResMut<TalentScreen>,
     mut book: ResMut<TalentBook>,
-    art: Res<GlueArt>,
     font: Res<HudFont>,
     roots: Query<Entity, With<MenuRoot>>,
     panels: Query<Entity, With<TalentPanel>>,
     opens: Query<(Entity, &MenuAction)>,
     closes: Query<Entity, With<CloseTalents>>,
     resets: Query<Entity, With<ResetTalents>>,
+    spec_buttons: Query<(Entity, &SelectSpec)>,
     cells: Query<(&Cell, &Interaction)>,
 ) {
     let in_menu = *phase.get() == Phase::Menu;
@@ -656,9 +966,15 @@ pub(super) fn talent_screen(
     let trees_now = class.and_then(trees);
     if let (Some(class), Some(trees_now)) = (class, trees_now) {
         if resets.iter().any(|e| clicks.hit(e)) {
-            book.class(class).ranks.clear();
+            book.class(class).ranks_mut().clear();
             book.save();
             screen.version += 1;
+        }
+        if let Some((_, spec)) = spec_buttons.iter().find(|(e, _)| clicks.hit(*e)) {
+            if book.class(class).switch_spec(spec.0) {
+                book.save();
+                screen.version += 1;
+            }
         }
         let hovered = cells
             .iter()
@@ -707,7 +1023,7 @@ pub(super) fn talent_screen(
     let page = book.class(class).clone();
     let f = font.0.clone();
     commands.entity(root).with_children(|ui| {
-        build_panel(ui, &art, &f, class, trees_now, &page, hovered);
+        build_panel(ui, &f, class, trees_now, &page, hovered);
     });
 }
 
@@ -717,32 +1033,43 @@ fn text(
     s: impl Into<String>,
     size: f32,
     color: Color,
+) -> Entity {
+    skin::label(ui, f, s, size, color)
+}
+
+/// Centred text: a label that fills its row and centres its lines.
+fn centred(
+    ui: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    s: impl Into<String>,
+    size: f32,
+    color: Color,
 ) {
-    ui.spawn((
-        Text::new(s),
-        TextFont {
-            font: f.clone(),
-            font_size: size,
+    let e = text(ui, f, s, size, color);
+    ui.commands().entity(e).insert((
+        Node {
+            width: Val::Percent(100.0),
             ..default()
         },
-        TextColor(color),
+        TextLayout::new_with_justify(Justify::Center),
     ));
 }
 
+/// Green marks invested ranks, crimson a completed talent, steel an available one.
+const LEARNING: Color = Color::srgb(0.38, 0.82, 0.42);
+const LOCKED: Color = Color::srgb(0.16, 0.19, 0.22);
+const SIDE_W: f32 = 250.0;
+const GAP: f32 = 14.0;
+
 fn build_panel(
     ui: &mut ChildSpawnerCommands,
-    art: &GlueArt,
     f: &Handle<Font>,
     class: u8,
     trees: &'static [TreeDef; 3],
     page: &ClassBook,
     hovered: Option<(usize, usize)>,
 ) {
-    let class_name = super::data::CLASSES
-        .iter()
-        .find(|c| c.id == class)
-        .map_or("Hero", |c| c.name);
-    let (into, next) = page.toward_next();
+    let class_def = super::data::CLASSES.iter().find(|c| c.id == class);
     ui.spawn((
         TalentPanel,
         Node {
@@ -751,100 +1078,296 @@ fn build_panel(
             right: Val::Px(0.0),
             top: Val::Px(0.0),
             bottom: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(12.0),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+        BackgroundColor(skin::INK),
         Interaction::default(),
         bevy::ui::FocusPolicy::Block,
-        GlobalZIndex(40),
+        GlobalZIndex(1000),
     ))
     .with_children(|back| {
-        back.spawn((
+        back.spawn(Node {
+            width: Val::Px(3.0 * (TREE_W + 2.0) + 3.0 * GAP + SIDE_W),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        }).with_children(|head| {
+            text(head, f, "Talents", 22.0, skin::TEXT);
+            text(head, f, "Learn / left-click    Refund / right-click    Free respecs", 10.0, skin::MUTED);
+        });
+        back.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            min_height: Val::Px(520.0),
+            align_items: AlignItems::Stretch,
+            column_gap: Val::Px(GAP),
+            ..default()
+        })
+        .with_children(|row| {
+            for (ti, tree) in trees.iter().enumerate() {
+                tree_column(row, f, ti, tree, page);
+            }
+            side_panel(row, f, class_def, trees, page, hovered);
+        });
+    });
+}
+
+/// The points to spend, the experience toward the next one, and the hovered talent.
+fn side_panel(
+    row: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    class_def: Option<&super::data::ClassDef>,
+    trees: &'static [TreeDef; 3],
+    page: &ClassBook,
+    hovered: Option<(usize, usize)>,
+) {
+    let (into, next) = page.toward_next();
+    let class_name = class_def.map_or("Hero", |c| c.name);
+    row.spawn(skin::panel(Node {
+        width: Val::Px(SIDE_W),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        padding: UiRect::all(Val::Px(16.0)),
+        row_gap: Val::Px(8.0),
+        ..default()
+    }))
+    .with_children(|p| {
+        centred(
+            p,
+            f,
+            class_name.to_uppercase(),
+            13.0,
+            class_def.map_or(skin::GOLD, |c| rgb(c.color)),
+        );
+        centred(p, f, format!("ACTIVE BUILD / SPEC {}", page.active_spec() + 1), 10.0, skin::MUTED);
+        p.spawn(Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|tabs| {
+            for spec in 0..3 {
+                let selected = page.active_spec() == spec;
+                tabs.spawn((
+                    Button,
+                    SelectSpec(spec),
+                    skin::MenuControl,
+                    skin::Control { primary: false, selected, enabled: true },
+                    Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        min_height: Val::Px(28.0),
+                        border: UiRect::all(Val::Px(1.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(skin::SURFACE),
+                    BorderColor::all(if selected { skin::GOLD } else { skin::EDGE }),
+                ))
+                .with_children(|button| {
+                    text(button, f, format!("Spec {}", spec + 1), 12.0, if selected { skin::TEXT } else { skin::MUTED });
+                });
+            }
+        });
+        centred(p, f, "AVAILABLE POINTS", 10.0, skin::MUTED);
+        skin::rule(p);
+        centred(p, f, page.available().to_string(), 32.0, skin::TEXT);
+        centred(
+            p,
+            f,
+            format!(
+                "Class level {}  ·  {} / {} earned",
+                page.level(),
+                page.earned(),
+                MAX_POINTS
+            ),
+            12.0,
+            skin::TEXT,
+        );
+        let done = page.earned() >= MAX_POINTS;
+        let share = if done || next <= 0.0 {
+            1.0
+        } else {
+            (into / next).clamp(0.0, 1.0)
+        };
+        p.spawn((
             Node {
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(16.0)),
-                row_gap: Val::Px(10.0),
-                border: UiRect::all(Val::Px(2.0)),
-                align_items: AlignItems::Center,
+                width: Val::Percent(100.0),
+                height: Val::Px(6.0),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+                overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.04, 0.03, 0.95)),
-            BorderColor::all(Color::srgb(0.55, 0.45, 0.25)),
+            BackgroundColor(skin::SURFACE),
         ))
-        .with_children(|frame| {
-            text(
-                frame,
-                f,
-                format!(
-                    "{class_name} | Class level {} | {} / {} talent points ({} to spend)",
-                    page.level(), page.earned(), MAX_POINTS, page.available()
-                ),
-                20.0,
-                GOLD,
-            );
-            text(
-                frame,
-                f,
-                if page.earned() >= MAX_POINTS {
-                    "Every talent point earned.".to_string()
-                } else {
-                    format!("Talent experience {into:.0} / {next:.0} to the next point")
+        .with_children(|bar| {
+            bar.spawn((
+                Node {
+                    width: Val::Percent(share * 100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
                 },
-                14.0,
-                Color::srgb(0.85, 0.85, 0.85),
-            );
-            frame
+                BackgroundColor(skin::GOLD),
+            ));
+        });
+        centred(
+            p,
+            f,
+            if done {
+                "Every talent point earned.".to_string()
+            } else {
+                format!("{into:.0} / {next:.0} experience to the next point")
+            },
+            11.0,
+            skin::MUTED,
+        );
+        skin::rule(p);
+        info(p, f, trees, page, hovered);
+        p.spawn(Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(8.0),
+            ..default()
+        });
+        p.spawn(Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|buttons| {
+            buttons
                 .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(14.0),
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
                     ..default()
                 })
-                .with_children(|row| {
-                    for (ti, tree) in trees.iter().enumerate() {
-                        tree_column(row, f, ti, tree, page);
-                    }
+                .with_children(|p| {
+                    skin::button(p, f, "Reset spec", "", ResetTalents, false, false, true);
                 });
-            let info = hovered
-                .and_then(|(t, i)| trees.get(t).and_then(|tr| tr.talents.get(i)))
-                .map(|t| {
-                    let rank = page.rank(t.key);
-                    let mut s = format!("{}  (Rank {rank}/{})\n{}", t.name, t.ranks, text_at(t, rank));
-                    if rank > 0 && rank < t.ranks {
-                        s += &format!("\nNext rank: {}", text_at(t, rank + 1));
-                    }
-                    if t.tier > 0 {
-                        s += &format!("\nRequires {} points in the tree.", u32::from(t.tier) * 5);
-                    }
-                    if let Some(p) = t.prereq {
-                        if let Some(q) = trees.iter().flat_map(|tr| tr.talents.iter()).find(|q| q.key == p) {
-                            s += &format!("\nRequires {} maxed.", q.name);
-                        }
-                    }
-                    s
-                })
-                .unwrap_or_else(|| {
-                    "Point at a talent to read it. Click to spend a point, right-click to take one back. A row opens at 5 points spent in its tree. Every run pays your class talent experience: time survived, kills, bosses, guardians and a win. Respecs are free.".into()
-                });
-            frame
+            buttons
                 .spawn(Node {
-                    width: Val::Px(3.0 * TREE_W + 28.0),
-                    min_height: Val::Px(84.0),
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
                     ..default()
                 })
-                .with_children(|b| text(b, f, info, 14.0, Color::srgb(1.0, 0.95, 0.8)));
-            frame
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(20.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    glue_button(row, art, f, ResetTalents, "Reset", 140.0, 36.0, GlueBtnKind::Small, 1.0);
-                    glue_button(row, art, f, CloseTalents, "Close", 140.0, 36.0, GlueBtnKind::Small, 1.0);
+                .with_children(|p| {
+                    skin::button(p, f, "Done", "", CloseTalents, true, false, true);
                 });
         });
+    });
+}
+
+/// The hovered talent's name, ranks and requirements, or how the screen works.
+fn info(
+    p: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    trees: &'static [TreeDef; 3],
+    page: &ClassBook,
+    hovered: Option<(usize, usize)>,
+) {
+    p.spawn(Node {
+        width: Val::Percent(100.0),
+        min_height: Val::Px(150.0),
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(5.0),
+        ..default()
+    })
+    .with_children(|b| {
+        let Some((ti, t)) =
+            hovered.and_then(|(t, i)| trees.get(t).and_then(|tr| tr.talents.get(i)).map(|x| (t, x)))
+        else {
+            text(b, f, "Choose a talent to inspect", 14.0, skin::TEXT);
+            text(
+                b,
+                f,
+                "Click to learn, right-click to unlearn. A row opens at 5 points spent in its tree. Every run pays your class talent experience: time survived, kills, bosses, guardians and a win. Respecs are free.",
+                11.0,
+                skin::MUTED,
+            );
+            return;
+        };
+        let rank = page.rank(t.key);
+        b.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(10.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                ImageNode::default(),
+                IconPath(t.icon),
+                Node {
+                    width: Val::Px(36.0),
+                    height: Val::Px(36.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(skin::EDGE),
+            ));
+            row.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                ..default()
+            })
+            .with_children(|c| {
+                text(c, f, t.name, 15.0, skin::TEXT);
+                text(c, f, format!("Rank {rank} / {}", t.ranks), 11.0, skin::MUTED);
+            });
+        });
+        let tree = &trees[ti];
+        let row_open = page.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5;
+        if t.tier > 0 && !row_open {
+            text(
+                b,
+                f,
+                format!("Requires {} points in {}", u32::from(t.tier) * 5, tree.name),
+                11.0,
+                Color::srgb(0.9, 0.45, 0.35),
+            );
+        }
+        if let Some(q) = t
+            .prereq
+            .and_then(|p| trees.iter().flat_map(|tr| tr.talents.iter()).find(|q| q.key == p))
+            .filter(|q| page.rank(q.key) < q.ranks)
+        {
+            text(
+                b,
+                f,
+                format!("Requires {} maxed", q.name),
+                11.0,
+                Color::srgb(0.9, 0.45, 0.35),
+            );
+        }
+        if let Some(other) = exclusive_with(t.key)
+            .and_then(|key| tree.talents.iter().find(|talent| talent.key == key))
+        {
+            let blocked = page.rank(other.key) > 0;
+            let label = if blocked {
+                format!("Unlearn {} first", other.name)
+            } else {
+                format!("Exclusive with {}", other.name)
+            };
+            text(b, f, label, 11.0, if blocked { LEARNING } else { skin::MUTED });
+        }
+        text(b, f, text_at(t, rank.max(1)), 12.0, skin::TEXT);
+        let active = t.effects.iter().filter(|effect| effect.implemented()).count();
+        if active < t.effects.len() {
+            let status = if active == 0 {
+                "Inactive in this version"
+            } else {
+                "Some effects are inactive in this version"
+            };
+            text(b, f, status, 11.0, LEARNING);
+        }
+        if rank > 0 && rank < t.ranks {
+            text(b, f, format!("Next rank: {}", text_at(t, rank + 1)), 12.0, LEARNING);
+        }
     });
 }
 
@@ -856,86 +1379,143 @@ fn tree_column(
     page: &ClassBook,
 ) {
     let spent = page.tree_spent(tree, 7);
-    row.spawn((
-        Node {
-            width: Val::Px(TREE_W),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            padding: UiRect::all(Val::Px(8.0)),
-            row_gap: Val::Px(6.0),
-            border: UiRect::all(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.12, 0.1, 0.08, 0.9)),
-        BorderColor::all(Color::srgb(0.35, 0.3, 0.2)),
-    ))
+    row.spawn(skin::panel(Node {
+        width: Val::Px(TREE_W + 2.0),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        padding: UiRect::all(Val::Px(12.0)),
+        row_gap: Val::Px(6.0),
+        ..default()
+    }))
     .with_children(|col| {
-        text(col, f, format!("{}  ({spent})", tree.name), 17.0, GOLD);
         col.spawn(Node {
-            width: Val::Px(4.0 * CELL),
-            height: Val::Px(7.0 * CELL),
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
             ..default()
         })
+        .with_children(|head| {
+            text(head, f, tree.name, 16.0, skin::TEXT);
+            text(
+                head,
+                f,
+                format!("{spent} points"),
+                12.0,
+                if spent > 0 { skin::TEXT } else { skin::MUTED },
+            );
+        });
+        skin::rule(col);
+        col.spawn((
+            Node {
+                width: Val::Px(4.0 * CELL),
+                height: Val::Px(7.0 * CELL),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.018, 0.023, 0.028)),
+        ))
         .with_children(|grid| {
             for (i, t) in tree.talents.iter().enumerate() {
-                let rank = page.rank(t.key);
-                let open = page.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5;
-                let tint = if rank > 0 {
-                    Color::WHITE
-                } else if open {
-                    Color::srgb(0.75, 0.75, 0.75)
-                } else {
-                    Color::srgb(0.3, 0.3, 0.3)
-                };
-                let edge = if rank >= t.ranks {
-                    GOLD
-                } else if rank > 0 {
-                    Color::srgb(0.3, 0.9, 0.3)
-                } else {
-                    Color::srgb(0.25, 0.25, 0.25)
-                };
-                grid.spawn((
-                    Cell(ti, i),
-                    Button,
-                    Interaction::default(),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(f32::from(t.col) * CELL + (CELL - ICON) / 2.0),
-                        top: Val::Px(f32::from(t.tier) * CELL + (CELL - ICON) / 2.0),
-                        width: Val::Px(ICON),
-                        height: Val::Px(ICON),
-                        border: UiRect::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BorderColor::all(edge),
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        ImageNode {
-                            color: tint,
-                            ..default()
-                        },
-                        IconPath(t.icon),
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                    ));
-                    b.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            right: Val::Px(-4.0),
-                            bottom: Val::Px(-6.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
-                    ))
-                    .with_children(|r| {
-                        text(r, f, format!("{rank}/{}", t.ranks), 11.0, edge);
-                    });
-                });
+                cell(grid, f, ti, i, t, tree, page);
             }
+        });
+    });
+}
+
+fn cell(
+    grid: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    ti: usize,
+    i: usize,
+    t: &'static TalentDef,
+    tree: &'static TreeDef,
+    page: &ClassBook,
+) {
+    let rank = page.rank(t.key);
+    let open = page.tree_spent(tree, t.tier) >= u32::from(t.tier) * 5
+        && exclusive_with(t.key).is_none_or(|other| page.rank(other) == 0);
+    let tint = if rank > 0 {
+        Color::WHITE
+    } else if open {
+        Color::srgb(0.72, 0.72, 0.72)
+    } else {
+        Color::srgb(0.28, 0.28, 0.28)
+    };
+    let edge = if rank >= t.ranks {
+        skin::GOLD
+    } else if rank > 0 {
+        LEARNING
+    } else if open {
+        skin::EDGE
+    } else {
+        LOCKED
+    };
+    grid.spawn((
+        Cell(ti, i),
+        Button,
+        Interaction::default(),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(f32::from(t.col) * CELL + (CELL - ICON) / 2.0),
+            top: Val::Px(f32::from(t.tier) * CELL + (CELL - ICON) / 2.0),
+            width: Val::Px(ICON),
+            height: Val::Px(ICON),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(2.0)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(skin::INK),
+        BorderColor::all(edge),
+    ))
+    .with_children(|b| {
+        b.spawn((
+            ImageNode {
+                color: tint,
+                ..default()
+            },
+            IconPath(t.icon),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+        ));
+        if t.effects.iter().any(|effect| !effect.implemented()) {
+            let badge = text(b, f, "!", 11.0, LEARNING);
+            b.commands().entity(badge).insert((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    padding: UiRect::horizontal(Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(skin::INK),
+                Pickable::IGNORE,
+            ));
+        }
+        // The rank sits inside the icon's corner, clear of its neighbours.
+        b.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                padding: UiRect::horizontal(Val::Px(3.0)),
+                border_radius: BorderRadius::top_left(Val::Px(3.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.82)),
+        ))
+        .with_children(|r| {
+            text(
+                r,
+                f,
+                format!("{rank}/{}", t.ranks),
+                10.0,
+                if rank > 0 { edge } else { skin::MUTED },
+            );
         });
     });
 }

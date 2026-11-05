@@ -1,8 +1,9 @@
-# Elwynn player package
+# Player data package
 
-The collaboration build currently offers **Elwynn Forest only**, retaining all
-current races and classes. The other arena definitions remain in the source for
-future packs, but are not offered by the menu.
+The player package carries **every arena** defined in the survivors' `ALL_MAPS`
+(`crates/benilla-app/src/survivors/data.rs`), playable or still locked, with all
+current races and classes. The script and output keep their historical
+`elwynn` names so existing build paths keep working.
 
 From the repository root, with Rust, Windows C++ Build Tools and Python 3.10+:
 
@@ -18,15 +19,21 @@ patch chain, and produces `out/elwynn-playable/` and `out/elwynn-playable.zip`.
 Extract the ZIP and run `Play.cmd`; no Rust installation is needed to play.
 The original data folder is kept intact. Controls are in `CONTROLS.md`.
 
-The pack keeps nine detailed terrain tiles around the arena, nearby coarse
-horizon heights, referenced scenery, current character appearances and
-equipment, class spell effects, audio, and shared UI. Other detailed zones,
-dungeons, cinematics, and the full world-map UI are excluded. Shared spell/UI
-libraries remain conservative; this is not a byte-minimal pack.
+For each arena the pack keeps the 3×3 detailed terrain tiles around its centre
+(read from `Map.dbc` and the arena's `center`), coarse horizon heights five
+tiles further out, and the minimap tiles for the packed terrain. A dungeon map
+with no terrain tiles ships its tile index whole, which carries its WMO. Each
+arena's foes and bosses, referenced scenery, character appearances and
+equipment, class spell effects, area audio and shared UI are included. The rest
+of each continent, cinematics and the full world-map UI are excluded. Shared
+spell/UI libraries remain conservative; this is not a byte-minimal pack.
 
-`asset-manifest.json` records included files, hashes, and references already
-missing from the original data. In the current data set, these include the
-Lightwell display and some older effect/audio references. Building and packaging
+**Adding an arena to `ALL_MAPS` needs a rebuilt pack.** Without it the new
+zone has no ground (a blue sky-only world on a continent already shipped) or
+never finishes loading (a map not shipped at all).
+
+`asset-manifest.json` records included files, hashes, the packed tiles per map,
+and references already missing from the original data. Building and packaging
 do not verify gameplay; manual gameplay testing remains necessary.
 
 Generated output stays ignored under `out/`. The shared player ZIP is stored

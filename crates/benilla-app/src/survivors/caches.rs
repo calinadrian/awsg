@@ -1,10 +1,32 @@
-//! Caches require contact, never magnet pickup. Boss/guardian spoils are free;
+//! Caches require contact, never magnet pickup. Elite/boss/guardian drops are free;
 //! arena caches spend gold once and advance the original 1.3x + 5 price curve.
 use super::{
-    hero::{self, Hero},
     Phase, Run, RunEntity, Selection,
+    hero::{self, Hero},
 };
 use bevy::prelude::*;
+#[derive(Resource)]
+pub(super) struct Spawner(f32);
+impl Default for Spawner {
+    fn default() -> Self {
+        Self(70.0)
+    }
+}
+
+fn random_spot(
+    center: Vec3,
+    selection: &Selection,
+    ground: &super::dungeon::Ground,
+    rng: &mut super::Rng,
+) -> Vec3 {
+    let angle = rng.range(0.0, std::f32::consts::TAU);
+    let radius = rng.range(18.0, 50.0);
+    let wanted = center + Vec3::new(angle.cos(), 0.0, angle.sin()) * radius;
+    let arena = hero::arena(selection.stage_def());
+    let offset = super::units::flat(wanted - arena).clamp_length_max(selection.stage_def().leash);
+    ground.spawn_spot(arena + offset, center.y)
+}
+
 #[derive(Component)]
 pub(super) struct Cache {
     paid: bool,
@@ -18,12 +40,39 @@ pub(super) fn place(
     selection: Res<Selection>,
     mut run: ResMut<Run>,
     ground: super::dungeon::Ground,
+    mut rng: ResMut<super::Rng>,
+    mut spawner: ResMut<Spawner>,
 ) {
     let center = hero::arena(selection.stage_def());
-    for offset in [Vec3::X, Vec3::NEG_X, Vec3::Z, Vec3::NEG_Z] {
-        let at = ground.spawn_spot(center + offset * 18., center.y);
+    spawner.0 = 70.0;
+    // Native 0x5bf8386: two entry caches, each 18–50 yards from the hero.
+    for _ in 0..2 {
+        let at = random_spot(center, &selection, &ground, &mut rng);
         spawn(&mut commands, run.guid(), at, true);
     }
+}
+
+pub(super) fn replenish(
+    mut commands: Commands,
+    selection: Res<Selection>,
+    mut run: ResMut<Run>,
+    ground: super::dungeon::Ground,
+    mut rng: ResMut<super::Rng>,
+    mut spawner: ResMut<Spawner>,
+    hero: Query<&Transform, With<Hero>>,
+    caches: Query<&Cache>,
+) {
+    if run.elapsed < spawner.0 || run.dead_t.is_some() {
+        return;
+    }
+    let Ok(hero) = hero.single() else { return };
+    // Native 0x5c1798a: check every 70 seconds, with at most three paid caches.
+    spawner.0 = run.elapsed + 70.0;
+    if caches.iter().filter(|cache| cache.paid).count() >= 3 {
+        return;
+    }
+    let at = random_spot(hero.translation, &selection, &ground, &mut rng);
+    spawn(&mut commands, run.guid(), at, true);
 }
 pub(super) fn collect(
     mut commands: Commands,

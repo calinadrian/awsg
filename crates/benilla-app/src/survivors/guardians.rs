@@ -1,7 +1,7 @@
 //! The four guardians: each sleeps in a lair at the battleground's
 //! edge, north, east, south and west, wakes when the hero comes near and goes home when he runs.
-//! A slain guardian's lair yields its treasure (a free jewelry choice) and its
-//! strength (the others grow tougher); a while later another guardian claims it once more.
+//! A slain guardian drops a free cache and lends its strength to the others; after a while another
+//! guardian claims the lair again.
 
 use bevy::prelude::*;
 
@@ -51,10 +51,14 @@ pub(super) fn keep_lairs(
     ground: super::dungeon::Ground,
     hero: Query<&Transform, With<Hero>>,
     guardians: Query<&Enemy>,
-    mut next: ResMut<NextState<super::Phase>>,
+    coop: Res<super::coop::Coop>,
 ) {
     let roster = data::roster(selection.map);
-    if roster.guardians.is_empty() || run.dead_t.is_some() {
+    if roster.guardians.is_empty()
+        || run.test
+        || super::dungeon::is_dungeon(selection.stage_def())
+        || (run.dead_t.is_some() && !coop.living_guests())
+    {
         return;
     }
     if hero.single().is_err() {
@@ -69,15 +73,22 @@ pub(super) fn keep_lairs(
             .zip(SIDES)
             .map(|(def, side)| Lair {
                 def,
-                pos: center + side * map.leash * OUT,
+                // Native 0x5bf9543/0x5bf960f: the arena heading plus a diagonal,
+                // then quarter turns. Elwynn and Durotar both use heading 1.6.
+                pos: center
+                    + if matches!(map.name, "Elwynn Forest" | "Durotar") {
+                        let slot = SIDES.iter().position(|s| *s == side).unwrap_or(0);
+                        let angle = 1.6
+                            + std::f32::consts::FRAC_PI_4
+                            + slot as f32 * std::f32::consts::FRAC_PI_2;
+                        super::units::wow_to_bevy([angle.cos(), angle.sin(), 0.0]) * map.leash * OUT
+                    } else {
+                        side * map.leash * OUT
+                    },
                 held: None,
                 spawned: false,
-                // Fedfennel keeps the source boss's 9:00 entrance in the elite slot.
-                refill_at: if def.name == "Fedfennel" {
-                    def.from
-                } else {
-                    FIRST
-                },
+                // A lair lord (Elwynn's Fedfennel) keeps its boss row's entrance minute.
+                refill_at: if def.lord { def.from } else { FIRST },
             })
             .collect();
     }
@@ -93,7 +104,7 @@ pub(super) fn keep_lairs(
                     continue;
                 }
                 lair.held = None;
-                lair.refill_at = if lair.def.name == "Fedfennel" {
+                lair.refill_at = if lair.def.lord {
                     f32::INFINITY // The source encounter occurs once per run.
                 } else {
                     now + REFILL
@@ -133,7 +144,5 @@ pub(super) fn keep_lairs(
             ),
             5.0,
         ));
-        run.pending_chests += 1;
-        next.set(super::Phase::LevelUp);
     }
 }

@@ -1,7 +1,7 @@
 pub(super) const RACES: &[Race] = &[
 Race { id: 1, name: "Human", faction: 0, classes: &[1, 2, 4, 5, 8, 9], portrait: (0, 0) },
 Race { id: 2, name: "Orc", faction: 1, classes: &[1, 3, 4, 7, 9], portrait: (0, 64) },
-Race { id: 3, name: "Dwarf", faction: 0, classes: &[1, 2, 3, 4, 5], portrait: (64, 0) },
+Race { id: 3, name: "Dwarf", faction: 0, classes: &[1, 2, 3, 4, 5, 8], portrait: (64, 0) },
 Race { id: 4, name: "Night Elf", faction: 0, classes: &[1, 3, 4, 5, 11], portrait: (128, 0) },
 Race { id: 5, name: "Undead", faction: 1, classes: &[1, 4, 5, 8, 9], portrait: (64, 64) },
 Race { id: 6, name: "Tauren", faction: 1, classes: &[1, 3, 7, 11], portrait: (128, 64) },
@@ -25,4 +25,6 @@ Race { id: 31, name: "Zandalari Troll", faction: 1, classes: &[1, 3, 4, 5, 7, 8]
 Race { id: 35, name: "Vulpera", faction: 1, classes: &[1, 3, 4, 5, 7, 8], portrait: (448, 64) },
 Race { id: 24, name: "Pandaren", faction: 2, classes: &[1, 2, 4, 5, 8, 9], portrait: (512, 64) },
 Race { id: 9, name: "Goblin", faction: 1, classes: &[1, 4, 8, 9], portrait: (576, 64) },
+Race { id: 95, name: "High Order Skyborne", faction: 0, classes: &[1, 3, 4, 8, 11], portrait: (640, 64) },
+Race { id: 96, name: "Windshaper Skyborne", faction: 1, classes: &[1, 3, 4, 7, 11], portrait: (704, 64) },
 ];

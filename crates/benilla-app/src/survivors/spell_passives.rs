@@ -162,10 +162,12 @@ pub(super) fn on_hit(
             .is_some_and(|m| m.faerie && run.elapsed >= m.arc_at)
     {
         if let Some(p) = numbers(run, "faerie_fire") {
+            // The arc gets Full Belly when it lands, like the hit that triggered it.
+            let damage = (damage / run.full_belly_multiplier() * 0.8).min(p.dmg);
             run.passives.bursts.push(Burst {
                 center: pos,
                 radius: p.radius,
-                damage: (damage * 0.8).min(p.dmg),
+                damage,
                 spell: 770,
                 depth: 1,
                 exclude: Some(target),
@@ -257,7 +259,7 @@ pub(super) fn tick(
     run: &mut Run,
     dt: f32,
     hero: Vec3,
-    targets: &[(Entity, Vec3, f32, f32, bool)],
+    targets: &[(Entity, Vec3, f32, f32, u8)],
 ) -> Vec<Hit> {
     run.passives.rage_budget = (run.passives.rage_budget + dt * 10.0).min(2.0);
     run.passives.combo_budget = (run.passives.combo_budget + dt * 5.0).min(2.0);
@@ -276,9 +278,9 @@ pub(super) fn tick(
                         && super::units::flat(t.1 - origin).length() <= p.radius
                 })
                 .min_by(|a, b| {
-                    super::units::flat(a.1 - origin)
+                    b.4.cmp(&a.4).then_with(|| super::units::flat(a.1 - origin)
                         .length_squared()
-                        .total_cmp(&super::units::flat(b.1 - origin).length_squared())
+                        .total_cmp(&super::units::flat(b.1 - origin).length_squared()))
                 });
             if let Some(t) = next {
                 run.passives.marks.entry(t.0).or_default().faerie = true;
@@ -383,9 +385,9 @@ pub(super) fn tick(
             })
             .collect();
         near.sort_by(|a, b| {
-            super::units::flat(a.1 - burst.center)
+            b.4.cmp(&a.4).then_with(|| super::units::flat(a.1 - burst.center)
                 .length_squared()
-                .total_cmp(&super::units::flat(b.1 - burst.center).length_squared())
+                .total_cmp(&super::units::flat(b.1 - burst.center).length_squared()))
         });
         for t in near.into_iter().take(burst.targets) {
             let mut hit = Hit::direct(t.0, burst.damage, false);

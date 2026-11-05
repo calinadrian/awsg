@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Action Bar Design</title>
+<style>
+  :root {
+    --steel: #9aa3b8; --steel-hi: #d4d9e4; --steel-lo: #5d6679; --ink: rgba(13,21,23,.92);
+    --wine: #8a1f33; --wine-hi: #b83a50; --text-hi: #e8eaf0;
+    --xp: #6a2d8f; --xp-hi: #9a5cc0; --xp-well: #120a1a;
+  }
+  body { margin: 0; background: #0c0b08; color: #b8bdca; font: 13px Georgia, "Times New Roman", serif; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { font-weight: normal; font-size: 18px; color: var(--text-hi); margin: 0 0 4px; }
+  .lead { margin: 0 0 14px; font: 12px Arial, sans-serif; color: #8a8572; }
+  .card { margin-bottom: 16px; border-radius: 4px; overflow: hidden; box-shadow: inset 0 0 0 1px #2a281c;
+          background: radial-gradient(ellipse at 50% 120%, #5e5a22, #3a3816 60%, #24230e); }
+  .card h2 { margin: 0; padding: 10px 12px 0; font-weight: normal; font-size: 15px; color: var(--text-hi); }
+  .card p { margin: 2px 12px 0; font: 11px Arial, sans-serif; color: rgba(255,255,255,.65); }
+  .stage { height: 150px; display: grid; place-items: end center; padding-bottom: 14px; }
+  .z { transform: scale(2); transform-origin: 50% 100%; }
+
+  /* The frame every HUD panel shares: ink, a grey edge, a black line outside. */
+  .plate { position: relative; background: var(--ink); border-radius: 2px;
+           box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 5px rgba(0,0,0,.55); }
+  .row { display: flex; gap: 3px; align-items: center; }
+  .btn { position: relative; width: 32px; height: 32px; flex: none; display: grid; place-items: center; font-size: 17px; line-height: 1;
+         box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .btn::after { content: ""; position: absolute; inset: 1px; box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -6px 8px rgba(0,0,0,.35); }
+  .btn b { position: absolute; right: 2px; bottom: 0; z-index: 1; font: bold 10px Arial, sans-serif; color: #fff;
+           text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 1px #000; }
+  .btn.empty { background: #07090c; box-shadow: inset 0 0 0 1px #2c323d, 0 0 0 1px #000; }
+  .btn.cd::before { content: ""; position: absolute; inset: 1px; z-index: 1; background: conic-gradient(rgba(0,0,0,0) 0 62%, rgba(0,0,0,.6) 62% 100%); }
+  .btn.ready { box-shadow: inset 0 0 0 1px var(--steel-hi), 0 0 0 1px #000, 0 0 5px rgba(212,217,228,.45); }
+  .sep { width: 1px; height: 26px; margin: 0 3px; background: var(--steel-lo); box-shadow: 1px 0 0 #000; }
+  .s1 { background: #24203a; } .s2 { background: #5a2412; } .s3 { background: #1e3a16; } .s4 { background: #4a3a20; }
+  .s5 { background: #5a1a10; } .s6 { background: #3a1a22; } .s7 { background: #6a4a2a; } .s8 { background: #4a3218; }
+
+  .xp { position: relative; height: 12px; overflow: hidden; background: var(--xp-well); box-shadow: 0 0 0 1px #000; }
+  .xp > i { position: absolute; left: 0; top: 0; bottom: 0; width: 89%; background: var(--xp); box-shadow: inset 0 1px 0 var(--xp-hi); }
+  .xp span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px;
+             font: bold 10px Arial, sans-serif; letter-spacing: .2px; color: #fff;
+             text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000, 0 1px 2px #000; }
+  .xp span em { font-style: normal; color: var(--steel-hi); }
+
+  /* A: one plate; the XP well along its top, the buttons under it. */
+  .A .plate { padding: 3px; display: flex; flex-direction: column; gap: 3px; }
+
+  /* B: the boss bars' caps: a diamond at each end; the XP a thin line on the plate's top edge. */
+  .B .plate { padding: 4px 8px; }
+  .B .xp { position: absolute; left: 8px; right: 8px; top: -6px; height: 4px; }
+  .B .xp span { display: none; }
+  .B .lbl { position: absolute; left: 0; right: 0; top: -21px; text-align: center; font: bold 10px Arial, sans-serif; color: #fff;
+           text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000, 0 1px 2px #000; }
+  .B .lbl em { font-style: normal; color: var(--steel-hi); margin-right: 5px; }
+  .B .cap { position: absolute; top: 50%; width: 9px; height: 9px; margin-top: -5px; transform: rotate(45deg);
+            background: var(--ink); box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .B .cap.l { left: -5px; } .B .cap.r { right: -5px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Action bar in the HUD's style</h1>
+  <p class="lead">Your six spells with their levels, then the character and talents buttons, drawn at 2×. The lions and the WoW art go; the frame matches the unit frames, the boss bars and the minimap. In both versions one spell is on cooldown (the dark sweep) and one is ready to cast (the light edge).</p>
+
+  <div class="card A"><h2>A · XP inside</h2><p>One plate: the XP well across its top with the level and numbers in it; the buttons under it.</p>
+    <div class="stage"><div class="z"><div class="plate">
+      <div class="xp"><i></i><span><em>Level 6</em>71 / 80</span></div>
+      <div class="row" id="rowA"></div>
+    </div></div></div></div>
+
+  <div class="card B"><h2>B · XP on the edge</h2><p>A slimmer plate with the boss bars' diamond caps; the XP a thin line on its top edge, the numbers over it.</p>
+    <div class="stage"><div class="z"><div class="plate"><span class="cap l"></span><span class="cap r"></span>
+      <div class="lbl"><em>Level 6</em>71 / 80</div>
+      <div class="xp"><i></i><span></span></div>
+      <div class="row" id="rowB"></div>
+    </div></div></div></div>
+</div>
+<script>
+  // [glyph, level, state]: the screenshot's six spells, then the character and talents buttons.
+  const spells = [['✺', 1, ''], ['🔥', 2, 'cd'], ['☣', 2, ''], ['🗡', 3, 'ready'], ['♨', 2, ''], ['🐉', 1, '']];
+  const html = spells.map(([g, n, st], i) => `<div class="btn s${i + 1} ${st}">${g}<b>${n}</b></div>`).join('')
+    + '<div class="sep"></div><div class="btn s7">👤</div><div class="btn s8">📖</div>';
+  document.getElementById('rowA').innerHTML = html;
+  document.getElementById('rowB').innerHTML = html;
+</script>
+</body>
+</html>

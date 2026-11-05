@@ -81,7 +81,7 @@ pub(crate) fn stamp() -> String {
 
 /// `[month, day, hour, minute, second, millisecond]` of now, from the reference's `GetLocalTime`.
 #[cfg(windows)]
-fn local_now() -> [u32; 6] {
+pub(crate) fn local_now() -> [u32; 6] {
     use windows_sys::Win32::{Foundation::SYSTEMTIME, System::SystemInformation::GetLocalTime};
     // SAFETY: `GetLocalTime` fully writes the out-param and reads nothing from it; zeroed is
     // valid for a struct of plain integers.
@@ -105,7 +105,7 @@ fn local_now() -> [u32; 6] {
 /// `[month, day, hour, minute, second, millisecond]` of now, in the browser's time zone: wasm32
 /// has neither `GetLocalTime` nor `localtime_r`, and std's clock panics there.
 #[cfg(target_arch = "wasm32")]
-fn local_now() -> [u32; 6] {
+pub(crate) fn local_now() -> [u32; 6] {
     let d = js_sys::Date::new_0();
     [
         d.get_month() + 1,
@@ -118,7 +118,7 @@ fn local_now() -> [u32; 6] {
 }
 
 #[cfg(unix)]
-fn local_now() -> [u32; 6] {
+pub(crate) fn local_now() -> [u32; 6] {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();

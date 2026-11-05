@@ -75,6 +75,8 @@ impl ItemDisplays {
 /// template answer, so the first composite is dressed rather than naked for a frame.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub(crate) struct Equipment {
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) survivors_shoulders: Option<u32>,
     pub(crate) bodyslots: [u32; 8],
     /// A geoset and a runtime cape texture, no body region.
     pub(crate) cloak: u32,

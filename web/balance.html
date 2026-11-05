@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101319">
+<title>Azeroth Survivors — Balance Lab</title>
+<style>
+  :root { color-scheme: dark; --bg:#101319; --panel:#181d26; --line:#2b3341; --muted:#98a2b3; --text:#edf1f7; --gold:#f2bf64; --blue:#7daafc; --green:#8bcf9e; }
+  * { box-sizing:border-box }
+  body { margin:0; background:radial-gradient(ellipse at 20% -20%,#283143 0,transparent 42%),var(--bg); color:var(--text); font:14px/1.5 Manrope,system-ui,sans-serif; }
+  header, main { width:min(1180px,calc(100% - 36px)); margin:auto }
+  header { padding:32px 0 22px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:flex-end; gap:18px }
+  .eyebrow { color:var(--gold); font:500 11px 'DM Mono',monospace; letter-spacing:.14em; text-transform:uppercase }
+  h1 { margin:5px 0 4px; font-size:clamp(25px,4vw,38px); letter-spacing:-.045em; line-height:1.15 }
+  header p { margin:0; max-width:680px; color:var(--muted) }
+  main { padding:24px 0 50px; display:grid; grid-template-columns:minmax(330px,.92fr) minmax(400px,1.08fr); gap:18px; align-items:start }
+  .panel { background:linear-gradient(145deg,#1c222d,#161b23); border:1px solid var(--line); border-radius:15px; padding:19px; box-shadow:0 15px 45px #0002 }
+  .panel h2 { margin:0 0 4px; font-size:16px; letter-spacing:-.02em }
+  .sub { color:var(--muted); font-size:12px; margin:0 0 17px }
+  label { display:block; font-size:12px; color:#c4cbd6; font-weight:700; margin-bottom:6px }
+  select,input[type=number] { min-width:0; width:100%; color:var(--text); background:#10141b; border:1px solid #384252; border-radius:8px; padding:9px 10px; font:inherit; outline:none }
+  select:focus,input:focus { border-color:var(--blue); box-shadow:0 0 0 2px #7daafc22 }
+  .controls { display:grid; grid-template-columns:1fr 1fr; gap:13px; margin:12px 0 19px }
+  .range-label { display:flex; justify-content:space-between; gap:10px; align-items:center }
+  .range-label output { color:var(--gold); font:12px 'DM Mono',monospace }
+  input[type=range] { width:100%; accent-color:var(--gold) }
+  .spells { display:grid; gap:8px }
+  .spell-row { display:grid; grid-template-columns:minmax(100px,1fr) 48px minmax(80px,.8fr) 70px 60px; gap:6px; padding:9px; border:1px solid #303948; border-radius:10px; background:#12171f; align-items:end }
+  .spell-row select,.spell-row input { font-size:12px; padding:8px 7px }
+  .spell-row label { margin:0 0 5px; color:var(--muted); font:10px 'DM Mono',monospace; text-transform:uppercase; letter-spacing:.06em }
+  .slot-head { display:flex; align-items:center; justify-content:space-between; margin:5px 0 7px }
+  .slot-head span { font-size:11px; color:var(--muted) }
+  .summary { display:grid; grid-template-columns:1fr 1fr 1fr; gap:9px; margin:15px 0 }
+  .metric { border:1px solid var(--line); background:#11161e; border-radius:10px; padding:11px }
+  .metric small { display:block; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.08em }
+  .metric strong { display:block; margin-top:2px; font:500 21px 'DM Mono',monospace; letter-spacing:-.04em }
+  .chart { width:100%; height:178px; display:block; border:1px solid var(--line); border-radius:10px; background:#11161e }
+  .table-wrap { overflow-x:auto; margin-top:13px }
+  table { width:100%; border-collapse:collapse; font-size:12px; min-width:400px }
+  th { color:var(--muted); font:10px 'DM Mono',monospace; text-transform:uppercase; letter-spacing:.06em; text-align:right; padding:8px 7px; border-bottom:1px solid var(--line) }
+  th:first-child,td:first-child { text-align:left }
+  td { padding:9px 7px; border-bottom:1px solid #272e39; text-align:right; font-family:'DM Mono',monospace }
+  .barcell { width:26%; min-width:80px }
+  .bar { height:6px; border-radius:99px; background:linear-gradient(90deg,var(--blue),#9d8dfb); min-width:2px }
+  .footnote { margin:15px 0 0; color:var(--muted); font-size:11px; line-height:1.65 }
+  .button { border:1px solid #4a5464; border-radius:9px; color:var(--text); background:#242c38; font:700 12px Manrope,sans-serif; padding:9px 12px; cursor:pointer }
+  .button:hover { border-color:var(--gold); color:var(--gold) }
+  .actions { display:flex; justify-content:flex-end; margin:13px 0 0 }
+  .tag { display:inline-block; border:1px solid #485265; border-radius:99px; padding:1px 6px; color:#c3cada; font:10px 'DM Mono',monospace; margin-left:5px }
+  @media(max-width:850px) { main { grid-template-columns:1fr } header { align-items:flex-start; flex-direction:column } }
+  @media(max-width:480px) { header,main { width:calc(100% - 22px) } .panel { padding:14px } .controls { grid-template-columns:1fr 1fr } .spell-row { grid-template-columns:minmax(78px,1fr) 42px minmax(65px,.8fr) 60px 52px; gap:3px; padding:6px } }
+</style>
+<body>
+<header>
+  <div><div class="eyebrow">Azeroth Survivors · balance tools</div><h1>Class Balance Lab</h1><p>Build a six spell bar, tune upgrade ranks, and compare estimated damage across classes. Change enemy density and trigger rates to explore different runs.</p></div>
+  <div><button class="button" id="reset">Reset scenario</button></div>
+</header>
+<main>
+  <section class="panel">
+    <h2>Run setup</h2><p class="sub">All spells cast automatically in the game. Changing class preloads its start spell and strongest estimated damage spells; swap any slot to explore utility picks.</p>
+    <div class="controls">
+      <div><label for="class">Class</label><select id="class"></select></div>
+      <div><label for="rarity">Upgrade rarity</label><select id="rarity"><option value="0">Common</option><option value="1">Uncommon</option><option value="2">Rare</option><option value="3">Epic</option><option value="4">Legendary</option></select></div>
+      <div><label class="range-label" for="enemies"><span>Enemies alive</span><output id="enemies-out"></output></label><input id="enemies" type="range" min="1" max="30" value="10"></div>
+      <div><label class="range-label" for="density"><span>Area spell coverage</span><output id="density-out"></output></label><input id="density" type="range" min="10" max="100" value="60"></div>
+      <div><label class="range-label" for="might"><span>Damage stat multiplier</span><output id="might-out"></output></label><input id="might" type="range" min="75" max="250" value="100"></div>
+      <div><label class="range-label" for="bonus"><span>Other damage bonuses</span><output id="bonus-out"></output></label><input id="bonus" type="range" min="0" max="100" value="0"></div>
+    </div>
+    <div class="slot-head"><h2>Spell bar</h2><span>Up to 6 spells · levels 1–8</span></div>
+    <div class="spells" id="spell-slots"></div>
+    <p class="footnote">“Rate” is activations per minute; passive defaults are starting assumptions. “Damage” is a per spell tuning factor, so you can compare proposed buffs and nerfs.</p>
+  </section>
+  <section class="panel">
+    <h2>Estimated damage</h2><p class="sub" id="subtitle">Sustained estimate at the current settings.</p>
+    <div class="summary"><div class="metric"><small>Total DPS</small><strong id="total-dps">0</strong></div><div class="metric"><small>Damage / minute</small><strong id="dpm">0</strong></div><div class="metric"><small>Active spells</small><strong id="active-count">0 / 6</strong></div></div>
+    <canvas class="chart" id="chart" aria-label="Estimated accumulated damage over time"></canvas>
+    <div class="table-wrap"><table><thead><tr><th>Spell</th><th>Damage / cast</th><th>Est. DPS</th><th class="barcell">Share</th></tr></thead><tbody id="results"></tbody></table></div>
+    <p class="footnote"><strong>How to read this:</strong> direct and periodic spell damage use the shipped values, native damage factors, upgrade rarity, and level progression. Area spells use your coverage setting; execute bonus and special talent interactions are omitted. This is a comparison model, not a full game simulation. Passive proc rates and enemy uptime are especially run dependent.</p>
+  </section>
+</main>
+<script src="./balance-data.js"></script><script src="./balance.js"></script>
+</body>
+</html>

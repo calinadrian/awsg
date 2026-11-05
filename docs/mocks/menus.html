@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings Menu</title>
+<style>
+  :root {
+    --ink: rgba(13,21,23,.96); --side: rgba(9,13,15,.97); --surface: #141a22; --row: #10161c; --well: #07090c;
+    --edge: #5d6679; --edge-dim: #2c323d; --steel: #9aa3b8; --steel-hi: #d4d9e4;
+    --text: #e8eaf0; --muted: #8b93a6;
+    --wine: #8a1f33; --wine-hi: #b83a50; --wine-lo: #2a0d16;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0c0b08; color: var(--text); font: 13px Georgia, "Times New Roman", serif; }
+  .page { max-width: 1060px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { font-weight: normal; font-size: 18px; margin: 0 0 4px; }
+  .lead { margin: 0 0 14px; font: 12px Arial, sans-serif; color: #8a8572; }
+  .scene { border-radius: 4px; padding: 26px; box-shadow: inset 0 0 0 1px #2a281c;
+           background: radial-gradient(ellipse at 50% 70%, #4b5a2a, #2a3518 50%, #121a0c); }
+
+  /* The window: the HUD's frame, a sidebar of topics and the topic's page. */
+  .win { position: relative; height: 540px; display: grid; grid-template-columns: 220px 1fr; border-radius: 2px;
+         background: var(--ink); box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000, 0 6px 24px rgba(0,0,0,.6); overflow: hidden; }
+  .x { position: absolute; right: 8px; top: 8px; width: 20px; height: 20px; display: grid; place-items: center; z-index: 2; cursor: pointer;
+       background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000; }
+  .x::before, .x::after { content: ""; position: absolute; width: 10px; height: 1.5px; background: var(--steel-hi); transform: rotate(45deg); }
+  .x::after { transform: rotate(-45deg); }
+  .x:hover { box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+
+  .side { background: var(--side); box-shadow: inset -1px 0 0 var(--edge-dim); padding: 12px 0; display: flex; flex-direction: column; min-height: 0; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 0 14px 10px; font-size: 16px; color: var(--steel-hi); letter-spacing: .5px; }
+  .gem { width: 22px; height: 22px; transform: rotate(45deg) scale(.72); background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--steel), 0 0 0 1px #000; }
+  .search { margin: 0 12px 10px; height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: var(--well); box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; }
+  .search:focus-within { box-shadow: inset 0 0 0 1px var(--steel), 0 0 0 1px #000; }
+  .search i { width: 9px; height: 9px; border: 1.5px solid var(--muted); border-radius: 50%; position: relative; flex: none; }
+  .search i::after { content: ""; position: absolute; right: -4px; bottom: -3px; width: 4px; height: 1.5px; background: var(--muted); transform: rotate(45deg); }
+  .search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text); font: 12px Arial, sans-serif; }
+  .search input::placeholder { color: var(--muted); }
+  .topics { overflow-y: auto; flex: 1; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  .group { padding: 10px 14px 4px; font: 10px Arial, sans-serif; letter-spacing: 1.2px; text-transform: uppercase; color: var(--steel); }
+  .topic { display: flex; align-items: center; gap: 9px; height: 28px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; border-left: 2px solid transparent; }
+  .topic:hover { color: var(--text); background: rgba(255,255,255,.03); }
+  .topic.on { color: var(--text); background: var(--wine-lo); border-left-color: var(--wine-hi); }
+  .ico { width: 18px; height: 18px; flex: none; display: grid; place-items: center; font-size: 11px; line-height: 1;
+         background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000; }
+  .topic.on .ico { box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+
+  .main { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .title { display: flex; align-items: center; gap: 12px; }
+  .title .ico { width: 34px; height: 34px; font-size: 18px; }
+  .title h2 { margin: 0; font-weight: normal; font-size: 19px; }
+  .title p { margin: 2px 0 0; font: 11px Arial, sans-serif; color: var(--muted); }
+  .tabs { display: flex; gap: 4px; box-shadow: inset 0 -1px 0 var(--edge-dim); }
+  .tab { padding: 6px 12px 8px; font-size: 12px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab:hover { color: var(--text); }
+  .tab.on { color: var(--text); border-bottom-color: var(--wine-hi); }
+  .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; align-content: start; }
+  .r { height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 10px;
+       background: var(--row); box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; }
+  .r:hover { box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000; }
+  .r .lbl { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .r .lbl small { display: block; font: 9.5px Arial, sans-serif; color: var(--muted); }
+  .r mark { background: none; color: var(--wine-hi); }
+  .where { grid-column: 1 / -1; font: 10px Arial, sans-serif; letter-spacing: 1.2px; text-transform: uppercase; color: var(--steel); margin-top: 6px; }
+  .empty { grid-column: 1 / -1; font: 12px Arial, sans-serif; color: var(--muted); }
+
+  /* A switch: a well with a knob, crimson when on. */
+  .sw { width: 34px; height: 16px; flex: none; position: relative; cursor: pointer; border-radius: 8px; background: var(--well); box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; }
+  .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--steel); transition: left .12s; }
+  .sw.on { background: var(--wine); box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .sw.on::after { left: 20px; background: #fff; }
+  /* A choice: the value between arrows, as the cyclers work today. */
+  .pick { display: flex; align-items: center; height: 22px; flex: none; background: var(--well); box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; }
+  .pick span { min-width: 84px; padding: 0 4px; text-align: center; font: 11.5px Arial, sans-serif; }
+  .pick b { width: 16px; height: 100%; display: grid; place-items: center; cursor: pointer; font: normal 11px Arial, sans-serif; color: var(--steel); }
+  .pick b:hover { color: #fff; background: var(--wine-lo); }
+
+  /* Previews: the setting's element over a patch of the world, drawn with the row's live value. */
+  .variants { display: flex; gap: 6px; margin: 0 0 12px; font: 12px Arial, sans-serif; }
+  .variants button { background: var(--surface); color: var(--muted); border: 0; padding: 6px 12px; cursor: pointer;
+                     box-shadow: inset 0 0 0 1px var(--edge-dim), 0 0 0 1px #000; font: inherit; }
+  .variants button.on { color: var(--text); background: var(--wine-lo); box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .ground { background: radial-gradient(ellipse at 50% 60%, #44521f, #2c3a16 55%, #18210d); box-shadow: inset 0 0 0 1px #000, 0 0 0 1px var(--edge-dim); }
+  .strip { position: relative; min-height: 104px; padding-top: 18px; padding-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 22px; padding: 0 14px; flex: none; }
+  .cap { font: 9px Arial, sans-serif; letter-spacing: 1px; text-transform: uppercase; color: rgba(255,255,255,.45); position: absolute; left: 8px; top: 6px; }
+  .win.b { height: 660px; }
+  .win.b .rows { overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  .r.has { height: auto; flex-direction: column; align-items: stretch; padding: 6px; gap: 6px; }
+  .r.has .line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 4px 2px; }
+  .r.has .ground { height: 64px; display: flex; align-items: center; justify-content: center; gap: 14px; position: relative; }
+  .hl { outline: 1px solid var(--wine-hi); outline-offset: 3px; }
+
+  .uf { width: 170px; padding: 2px; display: flex; flex-direction: column; gap: 2px; border-radius: 2px; background: var(--ink); box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000; }
+  .well { position: relative; overflow: hidden; background: #07120a; box-shadow: 0 0 0 1px #000; }
+  .well .fill { position: absolute; left: 0; top: 0; bottom: 0; background: #2e8c33; box-shadow: inset 0 1px 0 #5cbd5c; }
+  .well.foe { background: var(--well); } .well.foe .fill { background: var(--wine); box-shadow: inset 0 1px 0 var(--wine-hi); }
+  .well .t { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 5px;
+             font: 10px Georgia, serif; white-space: nowrap; text-shadow: 0 1px 0 #000; }
+  .well .t i { font-style: normal; font-size: 8px; color: var(--steel); margin-right: 4px; }
+  .well .t b { font-weight: normal; font-size: 9px; }
+  .pw { height: 4px; background: #05060b; }
+  .pw .fill { background: #b0261a; box-shadow: none; }
+  .np { width: 100px; height: 12px; }
+  .np .t { font-size: 8px; padding: 0 3px; } .np .t b { font-size: 7.5px; }
+  /* As in the game: the health text stays whole and the name gives way, clipped at its box. */
+  .np .t { gap: 3px; } .np .t span { flex: 1 1 auto; min-width: 0; overflow: hidden; } .np .t b { flex: none; }
+  .classic { display: flex; flex-direction: column; align-items: center; gap: 2px; font: 10px Georgia, serif; text-shadow: 0 1px 0 #000; }
+  .classic .bar { display: flex; align-items: center; gap: 5px; }
+  .classic .bar div { width: 96px; height: 8px; background: #200; box-shadow: 0 0 0 1px #000, 0 0 0 2px #8a8a8a; position: relative; }
+  .classic .bar div i { position: absolute; inset: 0 auto 0 0; background: #e00; }
+  .classic .bar span { color: #ffd100; font-size: 9px; }
+  .hero { display: flex; align-items: center; gap: 8px; }
+  .hero .well { width: 84px; height: 8px; box-shadow: 0 0 0 1px #000, inset 0 0 0 1px var(--edge-dim); }
+  .hero span { color: #ffd100; font: 9px Georgia, serif; text-shadow: 0 1px 0 #000; }
+  .off { opacity: .28; filter: grayscale(1); }
+  .gone { font: 10px Arial, sans-serif; color: rgba(255,255,255,.5); padding: 3px 8px; border: 1px dashed rgba(255,255,255,.25); }
+  .nm { font: 11px Georgia, serif; text-align: center; text-shadow: 0 1px 0 #000, 0 0 2px #000; line-height: 1.25; }
+  /* Aura rows: buffs edged in steel, debuffs in crimson, as in the game. */
+  .ar { display: flex; gap: 2px; min-height: 0; }
+  .ar.split { justify-content: space-between; }
+  .ar .kind { display: flex; gap: 1px; }
+  .au { position: relative; flex: none; box-shadow: inset 0 0 0 1px var(--edge), 0 0 0 1px #000; }
+  .au.debuff { box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .au::after { content: ""; position: absolute; inset: 1px; background: var(--c); opacity: .85; }
+  .au b { position: absolute; z-index: 1; left: 0; right: 0; bottom: 0; text-align: center; font: 600 7px Arial, sans-serif; color: #fff; text-shadow: 0 1px 0 #000; }
+  .stack { display: flex; flex-direction: column; gap: 4px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Settings, in our design</h1>
+  <p class="lead">Topics down the left under a search box, the topic's page on the right with its sub-tabs and two columns of rows. Every setting the game has today is here, grouped. Search matches across all topics. Click around: topics, tabs, switches and the arrows all work.</p>
+  <div class="variants" id="variants"><button data-v="a" class="on">A · One preview strip for the page</button><button data-v="b">B · A preview above each setting</button></div>
+  <div class="scene">
+    <div class="win">
+      <div class="x" title="Close"></div>
+      <aside class="side">
+        <div class="brand"><span class="gem"></span>Settings</div>
+        <label class="search"><i></i><input id="q" placeholder="Search settings…" autocomplete="off"></label>
+        <nav class="topics" id="topics"></nav>
+      </aside>
+      <main class="main">
+        <div class="title"><span class="ico" id="ticon"></span><div><h2 id="tname"></h2><p id="tdesc"></p></div></div>
+        <div class="tabs" id="tabs"></div>
+        <div class="strip ground" id="strip"></div>
+        <div class="rows" id="rows"></div>
+      </main>
+    </div>
+  </div>
+</div>
+<script>
+  const SIZES = ['80%', '90%', '100%', '110%', '120%', '135%', '150%'];
+  const VOL = ['0%', '10%', '20%', '30%', '40%', '50%', '60%', '70%', '80%', '90%', '100%'];
+  const POS = ['Above', 'Below', 'Hidden'];
+  const FRAME_AURA = ['10 px', '12 px', '14 px', '16 px', '18 px', '22 px'];
+  const PLATE_AURA = ['7 px', '9 px', '11 px', '13 px', '16 px'];
+  const HP = ['Cur / Max · %', 'Cur / Max', 'Cur · %', 'Current', 'Percent', 'None'];
+  const sw = (label, on, hint) => ({ label, hint, on });
+  const pick = (label, values, at, hint) => ({ label, hint, values, at });
+  // Groups of topics; each topic its sub-tabs; each tab its rows. All of today's settings.
+  const TREE = [
+    ['Game', [
+      ['Graphics', '▣', 'How the world is drawn.', [
+        ['Display', [pick('Display mode', ['Windowed', 'Borderless', 'Fullscreen'], 1), sw('Vertical sync', true, 'Caps frames to the screen'), pick('Render scale', ['50%', '75%', '100%', '125%'], 2, 'Lower runs faster')]],
+        ['World', [pick('View distance', ['Near', 'Fair', 'Far', 'Max'], 2), pick('Grass and flowers', ['Off', 'Low', 'High'], 2), sw('Bloom', true)]],
+      ]],
+      ['Audio', '♪', 'Volume and sound.', [
+        ['Volume', [sw('Sound', true), pick('Master volume', VOL, 8), pick('Effects volume', VOL, 10), pick('Music volume', VOL, 6), pick('Ambience volume', VOL, 7)]],
+      ]],
+    ]],
+    ['Interface', [
+      ['HUD layout', '◫', 'Sizes of the panels round the screen.', [
+        ['Sizes', [pick('Minimap size', SIZES, 2), pick('Run tracker size', SIZES, 2), pick('Damage meter size', SIZES, 2), pick('Action bar size', SIZES, 2)]],
+      ]],
+      ['Unit frames', '▭', 'Your frame and your target\'s.', [
+        ['Health', [pick('Health text', HP, 0, 'On the player and target frames'), pick('Health bar height', ['11 px','13 px','15 px','17 px','20 px','24 px','28 px'], 1)]],
+        ['Auras', [pick('Frame buffs', POS, 0), pick('Frame debuffs', POS, 1), pick('Frame buff size', FRAME_AURA, 2), pick('Frame debuff size', FRAME_AURA, 2)]],
+      ]],
+      ['Nameplates', '▬', 'The bars over units\' heads.', [
+        ['Plates', [sw('Enemy nameplates', true, 'V'), sw('Friendly nameplates', false, 'Shift-V'), sw('Compact nameplates', true), sw('Your health bar', true), pick('Nameplate health', [HP[2], HP[0], HP[1], HP[3], HP[4], HP[5]], 0)]],
+        ['Auras', [pick('Plate debuffs', POS, 0, 'From the left'), pick('Plate buffs', POS, 0, 'From the right; 3 at most on a shared row'), pick('Plate debuff size', PLATE_AURA, 1), pick('Plate buff size', PLATE_AURA, 1)]],
+        ['Names', [sw('Player names', true), sw('NPC names', true), sw('Your name', false), sw('Guild names', true)]],
+      ]],
+    ]],
+  ];
+  const topics = TREE.flatMap(([, ts]) => ts);
+  const all = topics.flatMap(([, , , tabs]) => tabs.flatMap(([, rows]) => rows));
+  const get = label => all.find(r => r.label === label);
+  const on = label => get(label).on;
+  const value = label => { const r = get(label); return r.values[r.at]; };
+  let variant = 'a';
+
+  // The pieces a preview is made of, each drawn from the rows' current values.
+  const fmt = (format, cur, max) => {
+    const pct = Math.ceil(cur / max * 100) + '%';
+    return { 'Cur / Max · %': `${cur} / ${max} · ${pct}`, 'Cur / Max': `${cur} / ${max}`, 'Cur · %': `${cur} · ${pct}`,
+             'Current': `${cur}`, 'Percent': pct, 'None': '' }[format];
+  };
+  const COLORS = ['#c08a2a', '#4f7fd0', '#7a3fb0', '#3f9a5a', '#b04a2a', '#2a8aa0'];
+  const icons = (n, size, debuff, from = 0) => Array.from({ length: n }, (_, i) =>
+    `<i class="au${debuff ? ' debuff' : ''}" style="--c:${COLORS[(i + from) % COLORS.length]};width:${size}px;height:${size}px">${size >= 12 ? `<b>${[12, 4, 27, 8][i % 4]}</b>` : ''}</i>`).join('');
+  // The rows a frame or a plate wears: each kind where its setting puts it.
+  const wear = (body, kinds, split, align) => {
+    const row = where => {
+      const here = kinds.filter(k => k.at === where && k.n > 0);
+      if (!here.length) return '';
+      if (split) return `<div class="ar split" style="width:100px">${here.map(k => `<div class="kind" style="${k.debuff ? '' : 'margin-left:auto'}">${icons(k.n, k.size, k.debuff, k.from)}</div>`).join('')}</div>`;
+      return here.map(k => `<div class="ar" style="justify-content:${align}">${icons(k.n, k.size, k.debuff, k.from)}</div>`).join('');
+    };
+    return `<div class="stack" style="align-items:${align}">${row('Above')}${body}${row('Below')}</div>`;
+  };
+  const frameAuras = (target, body) => wear(body, [
+    { at: value('Frame buffs'), n: target ? 1 : 3, size: parseInt(value('Frame buff size')), debuff: false, from: 0 },
+    { at: value('Frame debuffs'), n: target ? 4 : 1, size: parseInt(value('Frame debuff size')), debuff: true, from: 2 },
+  ], false, target ? 'flex-end' : 'flex-start');
+  const plateAuras = (friend, body) => wear(body, [
+    { at: value('Plate debuffs'), n: friend ? 0 : 3, size: parseInt(value('Plate debuff size')), debuff: true, from: 2 },
+    { at: value('Plate buffs'), n: friend ? 2 : 1, size: parseInt(value('Plate buff size')), debuff: false, from: 0 },
+  ], true, 'center');
+  const frame = (target, hl) => frameAuras(target, frameBar(target, hl));
+  const frameBar = (target, hl) => {
+    const h = parseInt(value('Health bar height'));
+    const [name, lvl, cur, max] = target ? ['Kobold Vermin', 6, 132, 176] : ['Warrior', 6, 230, 257];
+    return `<div class="uf${hl ? ' hl' : ''}"><div class="well${target ? ' foe' : ''}" style="height:${h}px">
+      <div class="fill" style="width:${cur / max * 100}%"></div>
+      <div class="t"><span><i>${lvl}</i>${name}</span><b>${fmt(value('Health text'), cur, max)}</b></div></div>
+      <div class="well pw"><div class="fill" style="width:${target ? 0 : 60}%"></div></div></div>`;
+  };
+  const plate = (hl, friend) => {
+    const [name, cur, max] = friend ? ['Thrall', 410, 520] : ['Kobold Miner', 98, 152];
+    const text = fmt(value('Nameplate health'), cur, max);
+    const body = on('Compact nameplates')
+      ? `<div class="well np${friend ? '' : ' foe'}"><div class="fill" style="width:${cur / max * 100}%"></div>
+          <div class="t"><span><i>5</i>${name}</span><b>${text}</b></div></div>`
+      : `<div class="classic">${name}<div class="bar"><div><i style="width:${cur / max * 100}%;${friend ? 'background:#0c0' : ''}"></i></div><span>5</span></div></div>`;
+    const shown = on(friend ? 'Friendly nameplates' : 'Enemy nameplates');
+    const worn = plateAuras(friend, body);
+    return `<div class="${hl ? 'hl' : ''}">${shown ? worn : `<div class="off">${worn}</div>`}</div>`;
+  };
+  const hero = hl => on('Your health bar')
+    ? `<div class="hero${hl ? ' hl' : ''}"><div class="well"><div class="fill" style="width:89%"></div></div><span>6</span></div>`
+    : `<div class="gone${hl ? ' hl' : ''}">No bar under your hero</div>`;
+  const name = (label, html) => `<div class="nm${on(label) ? '' : ' off'}">${html}</div>`;
+  const guild = () => on('Guild names') ? '<br><span style="color:#3f8cff">&lt;Kirin Tor&gt;</span>' : '';
+  const names = only => [
+    !only || only === 'Player names' || only === 'Guild names' ? name(only === 'Guild names' ? 'Guild names' : 'Player names', `<span style="color:#3f8cff">Jaina</span>${guild()}`) : '',
+    !only || only === 'NPC names' ? name('NPC names', '<span style="color:#ffd100">Marshal Dughan</span>') : '',
+    !only || only === 'Your name' ? name('Your name', '<span style="color:#3f8cff">Warrior</span>') : '',
+  ].join('');
+  // The preview of one row, or of a whole tab; rows with nothing to show (graphics, audio, HUD sizes) have none.
+  const previewOf = label => ({
+    'Health text': () => frame(false, true), 'Health bar height': () => frame(false, true),
+    'Enemy nameplates': () => plate(true, false), 'Friendly nameplates': () => plate(true, true),
+    'Compact nameplates': () => plate(true, false), 'Nameplate health': () => plate(true, false),
+    'Your health bar': () => hero(true),
+    'Frame buffs': () => frame(false, true), 'Frame debuffs': () => frame(false, true),
+    'Frame buff size': () => frame(false, true), 'Frame debuff size': () => frame(false, true),
+    'Plate debuffs': () => plate(true, false), 'Plate buffs': () => plate(true, false),
+    'Plate debuff size': () => plate(true, false), 'Plate buff size': () => plate(true, false),
+    'Player names': () => names('Player names'), 'NPC names': () => names('NPC names'),
+    'Your name': () => names('Your name'), 'Guild names': () => names('Guild names'),
+  }[label] || (() => ''))();
+  const stripOf = (topic, tab) => tab === 'Auras'
+    ? (topic === 'Unit frames' ? frame(false) + frame(true) : plate(false, false) + plate(false, true))
+    : ({
+    Health: () => frame(false) + frame(true),
+    Plates: () => plate(false, false) + plate(false, true) + hero(false), Names: () => names(),
+  }[tab] || (() => ''))();
+  let at = [0, 0];
+  const $ = id => document.getElementById(id);
+  const row = (r, hit) => {
+    const lbl = hit ? r.label.replace(new RegExp(`(${hit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i'), '<mark>$1</mark>') : r.label;
+    const ctl = r.values
+      ? `<div class="pick"><b data-d="-1">‹</b><span>${r.values[r.at]}</span><b data-d="1">›</b></div>`
+      : `<div class="sw${r.on ? ' on' : ''}"></div>`;
+    const line = `<div class="lbl">${lbl}${r.hint ? `<small>${r.hint}</small>` : ''}</div>${ctl}`;
+    const pv = variant === 'b' && previewOf(r.label);
+    return pv ? `<div class="r has"><div class="ground">${pv}</div><div class="line">${line}</div></div>` : `<div class="r">${line}</div>`;
+  };
+  function bind(list) {
+    document.querySelectorAll('#rows .r').forEach((el, i) => {
+      const r = list[i];
+      el.querySelectorAll('.pick b').forEach(b => b.onclick = () => { r.at = (r.at + +b.dataset.d + r.values.length) % r.values.length; draw(); });
+      const s = el.querySelector('.sw'); if (s) s.onclick = () => { r.on = !r.on; draw(); };
+    });
+  }
+  function draw() {
+    const q = $('q').value.trim().toLowerCase();
+    document.querySelector('.win').classList.toggle('b', variant === 'b');
+    const strip = !q && variant === 'a' ? stripOf(topics[at[0]][0], topics[at[0]][3][at[1]][0]) : '';
+    $('strip').style.display = strip ? '' : 'none';
+    $('strip').innerHTML = strip ? '<span class="cap">Preview</span>' + strip : '';
+    $('topics').innerHTML = TREE.map(([g, ts]) => `<div class="group">${g}</div>` + ts.map(([n, ic]) => {
+      const k = topics.findIndex(t => t[0] === n);
+      return `<div class="topic${!q && k === at[0] ? ' on' : ''}" data-k="${k}"><span class="ico">${ic}</span>${n}</div>`;
+    }).join('')).join('');
+    document.querySelectorAll('.topic').forEach(el => el.onclick = () => { $('q').value = ''; at = [+el.dataset.k, 0]; draw(); });
+    if (q) {
+      // Search: every matching row, under its topic and tab.
+      $('ticon').textContent = '⌕'; $('tname').textContent = 'Search'; $('tdesc').textContent = `Settings matching “${$('q').value.trim()}”`;
+      $('tabs').innerHTML = '';
+      const list = [];
+      let html = '';
+      for (const [n, , , tabs] of topics) for (const [tn, rows] of tabs) {
+        const hits = rows.filter(r => r.label.toLowerCase().includes(q) || (r.hint || '').toLowerCase().includes(q));
+        if (hits.length) { html += `<div class="where">${n} · ${tn}</div>` + hits.map(r => row(r, q)).join(''); list.push(...hits); }
+      }
+      $('rows').innerHTML = html || '<div class="empty">No setting matches.</div>';
+      bind(list.filter(Boolean));
+      return;
+    }
+    const [n, ic, desc, tabs] = topics[at[0]];
+    $('ticon').textContent = ic; $('tname').textContent = n; $('tdesc').textContent = desc;
+    $('tabs').innerHTML = tabs.map(([tn], i) => `<div class="tab${i === at[1] ? ' on' : ''}" data-i="${i}">${tn}</div>`).join('');
+    document.querySelectorAll('.tab').forEach(el => el.onclick = () => { at[1] = +el.dataset.i; draw(); });
+    const rows = tabs[at[1]][1];
+    $('rows').innerHTML = rows.map(r => row(r)).join('');
+    bind(rows);
+  }
+  $('q').oninput = draw;
+  document.querySelectorAll('#variants button').forEach(b => b.onclick = () => {
+    variant = b.dataset.v;
+    document.querySelectorAll('#variants button').forEach(x => x.classList.toggle('on', x === b));
+    draw();
+  });
+  // Open on the unit frames, where the previews matter most.
+  at = [topics.findIndex(t => t[0] === 'Unit frames'), 0];
+  draw();
+</script>
+</body>
+</html>

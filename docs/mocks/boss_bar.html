@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUD Layout Mock</title>
+<style>
+  :root {
+    --gold: #f2c76e;
+    --gold-dim: #7a5f2a;
+    --muted: #9c977f;
+    --text: #e8dec2;
+    --font: "Friz Quadrata", "Palatino Linotype", Georgia, serif;
+    --row: 22px;
+    --icon: 20px;
+    --side: 88px;
+    --bar: 300px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font); color: var(--text); background: #1b1a12; }
+  h1 { font-size: 18px; margin: 18px 16px 4px; color: var(--gold); font-weight: normal; }
+  p.lead { margin: 0 16px 12px; color: var(--muted); font-size: 13px; }
+  .scene {
+    position: relative; margin: 0 16px 22px; height: 230px; border-radius: 6px; overflow: hidden;
+    background:
+      radial-gradient(ellipse at 50% 120%, rgba(240,220,60,.35), transparent 40%),
+      radial-gradient(circle at 20% 30%, #6b6a22, transparent 50%),
+      radial-gradient(circle at 80% 70%, #5a5c1c, transparent 55%),
+      linear-gradient(#4f5216, #6d6a1f);
+  }
+  .label {
+    position: absolute; left: 10px; bottom: 8px; font-size: 12px; color: #fff; text-shadow: 1px 1px 0 #000;
+    background: rgba(0,0,0,.45); padding: 3px 8px; border-radius: 3px;
+  }
+  .label b { color: var(--gold); font-weight: normal; }
+  .top {
+    position: absolute; left: 0; right: 0; top: 6px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px; text-shadow: 1px 1px 0 #000;
+  }
+  .clock { font-size: 30px; color: #fff; line-height: 1; }
+  .runline { font-size: 13px; color: #fff; margin-bottom: 8px; }
+  .runline span { color: var(--gold); }
+  .yell { color: #ff4a3a; font-size: 13px; margin-bottom: 4px; }
+
+  /* ---- F: dark crimson and steel ---- */
+  :root {
+    --steel: #9aa3b8; --steel-hi: #d4d9e4; --steel-lo: #5d6679; --tick: rgba(127,143,176,.55);
+    --wine: #8a1f33; --wine-lo: #4c0d1b; --wine-hi: #b83a50; --well: #1b0a11;
+    --frame-ink: #0d1517; --text-hi: #e8eaf0; --outline: #07090a;
+  }
+  .scene.dark { background: radial-gradient(ellipse at 50% 40%, #1f2a24, #0c110f 75%); }
+  .yell { color: #ff6f82; }
+  .bars { display: grid; grid-template-columns: var(--side) var(--bar) var(--side); row-gap: 8px; column-gap: 8px; }
+  .side { display: flex; gap: 4px; align-items: center; height: var(--row); }
+  .side.l { justify-content: flex-end; padding-right: 9px; }
+
+  /* Frame: a dark plate with a thin steel line, a steel cap at the right end, a crest on top. */
+  .bar {
+    position: relative; height: var(--row); display: flex; padding: 3px 3px 3px 18px;
+    background: var(--frame-ink); border-radius: 2px;
+    box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.6);
+  }
+  .bar::after {
+    content: ""; position: absolute; top: 50%; right: -5px; width: 9px; height: 9px; transform: translateY(-50%) rotate(45deg);
+    background: linear-gradient(135deg, var(--steel-hi), var(--steel-lo)); box-shadow: 0 0 0 1px #000; z-index: 5;
+  }
+  .crest {
+    position: absolute; left: calc(18px + (100% - 21px) / 2); top: -4px; width: 7px; height: 7px; transform: translateX(-50%) rotate(45deg);
+    background: linear-gradient(135deg, var(--steel-hi), var(--steel-lo)); box-shadow: 0 0 0 1px #000; z-index: 5;
+  }
+  .bar.focus { box-shadow: inset 0 0 0 1px var(--steel-hi), 0 0 0 1px #000, 0 0 8px 1px rgba(212,217,228,.35), 0 2px 6px rgba(0,0,0,.6); }
+  .bar.elite { box-shadow: inset 0 0 0 1px #3f4656, 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.6); }
+  .bar.elite::after, .bar.elite .crest { background: linear-gradient(135deg, #8d93a0, #3f4656); }
+
+  /* The emblem: a ringed medallion over the left end. */
+  .kind {
+    position: absolute; left: -7px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; z-index: 6;
+    border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: var(--steel-hi);
+    background: radial-gradient(circle, #1a1f2b 0 45%, #2c3550 46% 58%, #0b0e14 59%);
+    box-shadow: 0 0 0 1px #000, 0 0 0 2px var(--steel), 0 0 0 3px #000;
+  }
+  .kind svg { width: 18px; height: 18px; display: block; fill: currentColor; }
+  .elite .kind { box-shadow: 0 0 0 1px #000, 0 0 0 2px #6c7384, 0 0 0 3px #000; color: #b9bdc8; }
+
+  .well {
+    position: relative; flex: 1; overflow: hidden;
+    background: linear-gradient(#12060b, var(--well) 40%, #240d16);
+    box-shadow: inset 0 0 0 1px #000;
+  }
+  .lag  { position: absolute; inset: 0 auto 0 0; background: linear-gradient(#e6a3ae, #a85566); opacity: .55; }
+  .fill {
+    position: absolute; inset: 0 auto 0 0;
+    background: linear-gradient(var(--wine-hi) 0 1px, #9a2a3e 1px, var(--wine) 45%, var(--wine-lo) 100%);
+    box-shadow: inset -1px 0 0 rgba(255,200,210,.7);
+  }
+  /* Segment ticks every tenth; phase lines brighter and full height. */
+  .well::before {
+    content: ""; position: absolute; inset: 74% 0 0 0; z-index: 2; pointer-events: none;
+    background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), var(--tick) calc(10% - 1px) 10%);
+  }
+  .phase { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 3; background: var(--steel-hi); box-shadow: 0 0 3px rgba(212,217,228,.6); }
+
+  .txt {
+    position: absolute; inset: 0; z-index: 4; padding: 0 6px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; white-space: nowrap;
+    color: var(--text-hi); font-size: 11px; letter-spacing: .2px;
+    text-shadow: 0 1px 1px rgba(0,0,0,.95);
+  }
+  .txt .who { overflow: hidden; text-overflow: ellipsis; }
+  .txt .who b { font-weight: normal; color: var(--text-hi); }
+  .elite .txt .who b { color: #c9ccd6; }
+  .txt .who i { font-style: normal; font-size: 9px; color: var(--steel); margin-left: 5px; }
+  .txt .hp { display: flex; align-items: baseline; gap: 6px; }
+  .txt .hp small { font-size: 9px; color: #b8bdca; }
+  .txt .hp em { font-style: normal; min-width: 26px; text-align: right; }
+
+  .cast .hp { color: #c9d6f2; }
+  .castline { position: absolute; left: 0; bottom: 0; height: 2px; z-index: 3; background: linear-gradient(90deg, #5d6f9c, #dfe6f7); box-shadow: 0 0 4px rgba(200,215,245,.7); }
+
+  .enraged { animation: rage 1.3s ease-in-out infinite; }
+  @keyframes rage { 50% { box-shadow: inset 0 0 0 1px var(--steel-hi), 0 0 0 1px #000, 0 0 12px 3px rgba(190,30,55,.75), 0 2px 6px rgba(0,0,0,.6); } }
+  .shielded .fill { background: linear-gradient(#8592ad 0 1px, #5f6c88 1px, #46516b 50%, #2c3448); }
+  .shielded .well::after {
+    content: ""; position: absolute; inset: 0; z-index: 2;
+    background: repeating-linear-gradient(115deg, transparent 0 8px, rgba(212,217,228,.12) 8px 11px);
+  }
+  .low .fill { animation: low 1s ease-in-out infinite; }
+  @keyframes low { 50% { filter: brightness(1.45); } }
+
+  .aura {
+    position: relative; width: var(--icon); height: var(--icon); flex: none; border-radius: 2px;
+    display: grid; place-items: center; font-size: 11px; color: var(--text-hi); cursor: default;
+    box-shadow: 0 0 0 1px #000, 0 0 0 2px var(--steel-lo);
+  }
+  .aura.debuff { box-shadow: 0 0 0 1px #000, 0 0 0 2px var(--wine-hi); }
+  .aura .sweep { position: absolute; inset: 0; background: conic-gradient(rgba(0,0,0,.6) var(--p), transparent 0); }
+  .aura .t {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 9px; line-height: 9px; text-align: center;
+    font-size: 8px; color: var(--text-hi); background: rgba(5,7,9,.75); font-family: Arial, sans-serif;
+  }
+  .aura .stk {
+    position: absolute; top: -6px; left: 50%; transform: translateX(-50%); min-width: 11px; height: 11px; padding: 0 2px; line-height: 10px; z-index: 1;
+    font-size: 8px; text-align: center; color: var(--text-hi); background: #000; border: 1px solid var(--wine-hi); border-radius: 6px; font-family: Arial, sans-serif;
+  }
+  .aura .tip {
+    display: none; position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
+    width: 220px; padding: 8px 10px; z-index: 10; background: rgba(12,17,19,.96); border: 1px solid var(--steel-lo); border-radius: 3px;
+    text-align: left; text-shadow: 1px 1px 0 #000; box-shadow: 0 4px 12px rgba(0,0,0,.5);
+  }
+  .aura:hover .tip { display: block; }
+  .tip .h { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hi); }
+  .tip .h i { font-style: normal; font-size: 12px; }
+  .tip .d { font-size: 12px; color: #c7cede; margin-top: 3px; }
+  .tip .r { font-size: 11px; color: #7c8496; margin-top: 3px; }
+  .ic-enrage { background: linear-gradient(135deg,#4c0d1b,#b83a50); }
+  .ic-molten { background: linear-gradient(135deg,#5a1a14,#c0603a); }
+  .ic-shield { background: linear-gradient(135deg,#3a4560,#c7cede); }
+  .ic-frost  { background: linear-gradient(135deg,#1c2b4a,#7f9fd6); }
+  .ic-dot    { background: linear-gradient(135deg,#2a1530,#7a4a8c); }
+  .ic-mark   { background: linear-gradient(135deg,#3a0a14,#a4303f); }
+
+
+  /* ---- The whole screen ---- */
+  .wrap { display: flex; gap: 14px; padding: 0 16px 24px; align-items: flex-start; }
+  .viewport { flex: 1; min-width: 0; }
+  .fit { position: relative; width: 100%; overflow: hidden; border-radius: 6px; box-shadow: 0 0 0 1px #3a3626; }
+  #stage {
+    position: absolute; left: 0; top: 0; width: 1366px; height: 768px; transform-origin: 0 0; overflow: hidden;
+    background:
+      radial-gradient(ellipse 22% 16% at 50% 64%, rgba(245,230,60,.55), transparent 70%),
+      radial-gradient(circle at 15% 25%, #6e6c25, transparent 45%),
+      radial-gradient(circle at 85% 75%, #5b5d1d, transparent 50%),
+      radial-gradient(circle at 70% 10%, #7a4a2a, transparent 30%),
+      linear-gradient(#545718, #6f6c20);
+    font-family: var(--font);
+  }
+  .grid-on #stage::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 50;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(90deg, transparent calc(50% - 1px), rgba(120,200,255,.5) calc(50% - 1px) calc(50% + 1px), transparent 0),
+      linear-gradient(transparent calc(50% - 1px), rgba(120,200,255,.5) calc(50% - 1px) calc(50% + 1px), transparent 0);
+  }
+  .ui { position: absolute; cursor: grab; user-select: none; text-shadow: 1px 1px 0 #000; }
+  .ui.dragging { cursor: grabbing; z-index: 40; }
+  .ui:hover { outline: 1px dashed rgba(120,200,255,.7); outline-offset: 3px; }
+  .ui.sel { outline: 1px solid #78c8ff; outline-offset: 3px; }
+  .ui .tag {
+    display: none; position: absolute; left: 0; top: -18px; white-space: nowrap; font: 10px Arial, sans-serif;
+    color: #cfe9ff; background: rgba(10,30,50,.85); padding: 1px 5px; border-radius: 2px; text-shadow: none; z-index: 60;
+  }
+  .ui:hover .tag, .ui.sel .tag { display: block; }
+  .world { position: absolute; pointer-events: none; }
+  .worldlayer { position: absolute; top: 0; bottom: 0; width: 1366px; left: calc(50% - 683px); pointer-events: none; }
+
+  /* World stand-ins */
+  .boss-body { width: 190px; height: 230px; border-radius: 45% 45% 30% 30%; background: radial-gradient(circle at 50% 30%, #8a6a52, #3b2a20 70%); opacity: .9; }
+  .hero-body { width: 34px; height: 70px; border-radius: 40% 40% 20% 20%; background: linear-gradient(#a58a6a, #3d342a); }
+  .mob-body { width: 40px; height: 52px; border-radius: 45%; background: radial-gradient(circle at 50% 35%, #8b7a5a, #3a3022 70%); }
+  .float { font-size: 34px; color: #ffe35a; text-shadow: 2px 2px 0 #000; }
+
+  /* Header */
+  .header { width: 300px; display: flex; flex-direction: column; align-items: center; }
+  .header .clock { font-size: 34px; }
+  .header .runline { font-size: 14px; margin: 2px 0 0; }
+  .banner { width: 600px; text-align: center; font-size: 30px; color: #ffd100; }
+
+  /* Boss bars as a block */
+  .bossblock { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+
+  /* Jewelry row and cache */
+  .jewels { display: flex; gap: 4px; }
+  .jewel { width: 30px; height: 30px; border-radius: 3px; box-shadow: 0 0 0 1px #000, 0 0 0 2px #6f5a2a; background: linear-gradient(135deg, #2c3f5a, #8db0d8); }
+  .jewel.b { background: linear-gradient(135deg, #4a2a10, #e0a040); }
+  .cache { width: 86px; height: 64px; border-radius: 8px; background: linear-gradient(#5d7fa8, #2f4a6b 55%, #1f2c3d); box-shadow: inset 0 0 0 3px #8a7a5a, 0 3px 6px rgba(0,0,0,.5); }
+  .cache::after { content: ""; position: absolute; left: 36px; top: 26px; width: 14px; height: 14px; border-radius: 3px; background: #d8b45a; box-shadow: 0 0 0 2px #000; }
+
+  /* Test Grounds */
+  .tg { width: 292px; padding: 8px; background: rgba(9,8,7,.96); border: 1px solid #574523; border-radius: 6px; display: flex; flex-direction: column; gap: 5px; }
+  .tg h3 { margin: 0; font-weight: normal; font-size: 15px; color: #f2c76e; }
+  .tg .sub { font-size: 9px; color: #9c977f; margin-top: -4px; }
+  .tg .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tg .btn { width: 134px; height: 24px; border: 1px solid #574523; border-radius: 3px; background: #0f0d0a; display: grid; place-items: center; font-size: 11px; color: #e8dec2; }
+  .tg .btn.on { border-color: #f2c76e; }
+  .tg .btn.g { border-color: #76c794; color: #76c794; }
+  .tg .btn.r { border-color: #e0614d; }
+  .tg .sec { font-size: 10px; color: #f2c76e; border-bottom: 1px solid rgba(87,69,35,.6); padding-bottom: 2px; margin-top: 4px; }
+
+  /* Minimap cluster */
+  .mm { width: 182px; height: 176px; }
+  .mm .zone { position: absolute; left: 7px; top: 3px; width: 142px; height: 20px; border: 1px solid #8a7a4a; border-radius: 3px; background: rgba(0,0,0,.65); font-size: 12px; color: #ffd100; padding-left: 6px; line-height: 18px; }
+  .mm .close { position: absolute; left: 154px; top: 3px; width: 20px; height: 20px; border-radius: 3px; background: #7a1010; border: 1px solid #c9a040; color: #fff; font-size: 12px; display: grid; place-items: center; }
+  .mm .disc { position: absolute; left: 22px; top: 28px; width: 136px; height: 136px; border-radius: 50%; background: radial-gradient(circle at 40% 40%, #7a8a3a, #4f5f22); box-shadow: 0 0 0 5px #3b3426, 0 0 0 7px #8a7a5a, 0 3px 8px rgba(0,0,0,.6); }
+  .mm .disc::after { content: "N"; position: absolute; left: 62px; top: -2px; font-size: 11px; color: #ffd100; }
+  .mm .dot { position: absolute; left: 88px; top: 92px; width: 8px; height: 8px; background: #ffe35a; transform: rotate(45deg); }
+  .mm .sun { position: absolute; left: 150px; top: 34px; width: 28px; height: 28px; border-radius: 50%; background: radial-gradient(#fff6b0, #e8b030 60%, #3a5a9a 62%); box-shadow: 0 0 0 2px #8a7a5a; }
+  .mm .zoom { position: absolute; width: 20px; height: 20px; border-radius: 50%; background: #2a2a2a; box-shadow: 0 0 0 2px #8a7a5a; color: #ddd; font-size: 14px; display: grid; place-items: center; }
+
+  /* Damage meter */
+  .dm { width: 280px; background: rgba(12,10,8,.85); border: 1px solid #574523; border-radius: 3px; font-size: 12px; }
+  .dm .tabs { display: flex; }
+  .dm .tabs div { flex: 1; text-align: center; padding: 3px 0; color: #e8dec2; }
+  .dm .tabs .on { background: rgba(120,95,50,.55); }
+  .dm .sum { color: #ffd100; padding: 2px 6px; }
+  .dm .line { margin: 2px 4px 4px; padding: 1px 4px; display: flex; justify-content: space-between; background: rgba(200,160,90,.35); font-size: 11px; color: #fff; }
+
+  /* Unit frames */
+  .uf { width: 140px; height: 48px; }
+  .uf .port { position: absolute; top: 2px; width: 44px; height: 44px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #d9a070, #6a4020 70%); box-shadow: 0 0 0 3px #3b3426, 0 0 0 5px #8a7a5a; }
+  .uf .lvl { position: absolute; top: 34px; width: 16px; height: 16px; border-radius: 50%; background: #1a1a1a; box-shadow: 0 0 0 2px #8a7a5a; font-size: 9px; color: #ffd100; display: grid; place-items: center; }
+  .uf .ufbars { position: absolute; top: 8px; width: 82px; }
+  .uf .nm { height: 10px; font-size: 7px; text-align: center; color: #ffd100; background: #1a1a1a; border: 1px solid #555; }
+  .uf .hp, .uf .mp { height: 9px; font-size: 6px; text-align: center; color: #fff; line-height: 9px; border: 1px solid #222; }
+  .uf .hp { background: linear-gradient(#3ad040, #1a8a20); }
+  .uf .mp { background: #1a1a2a; }
+  .uf.player .port { left: 0; } .uf.player .lvl { left: -4px; } .uf.player .ufbars { left: 52px; }
+  .uf.target .port { right: 0; } .uf.target .lvl { right: -4px; } .uf.target .ufbars { right: 52px; }
+
+  /* Hero plate */
+  .hplate { width: 128px; height: 12px; display: flex; align-items: center; gap: 2px; }
+  .hplate .bar { flex: 1; height: 9px; border: 1px solid #000; background: linear-gradient(#5ae050, #1f9a1f); box-shadow: 0 0 0 1px #8a7a5a; }
+  .hplate .lv { width: 18px; height: 12px; background: #1a1a1a; box-shadow: 0 0 0 1px #8a7a5a; font-size: 9px; color: #ffd100; display: grid; place-items: center; }
+
+  /* Compact enemy plate */
+
+  /* Action bar */
+  /* The action bar, as built: the HUD frame, the XP well with the level and numbers in it, the
+     six spell buttons, a rule, the character and talents buttons. */
+  .ab { padding: 3px; display: flex; flex-direction: column; gap: 3px; background: rgba(13,21,23,.92); border-radius: 2px;
+        box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 5px rgba(0,0,0,.55); }
+  .ab .xp { position: relative; height: 12px; overflow: hidden; background: #120a1a; box-shadow: 0 0 0 1px #000;
+            display: flex; align-items: center; justify-content: center; gap: 5px; font: 10px "Arial Narrow", Arial, sans-serif; color: #fff; text-shadow: 1px 1px 0 #000; }
+  .ab .xp em { position: relative; font-style: normal; color: var(--steel-hi); } .ab .xp span { position: relative; }
+  .ab .xp i { position: absolute; left: 0; top: 0; bottom: 0; width: 89%; background: #6a2d8f; box-shadow: inset 0 1px 0 #9a5cc0; }
+  .ab .slots { display: flex; gap: 3px; align-items: center; }
+  .ab .rule { width: 1px; height: 26px; margin: 0 3px; background: var(--steel-lo); }
+  .ab .slot { width: 32px; height: 32px; position: relative; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .ab .slot.e { background: #07090c !important; box-shadow: inset 0 0 0 1px #2c323d, 0 0 0 1px #000; }
+  .ab .slot b { position: absolute; right: 2px; bottom: 0; font-size: 11px; color: #fff; font-weight: normal; }
+  .s1 { background: linear-gradient(135deg,#2a3a2a,#8aa08a); } .s2 { background: linear-gradient(135deg,#4a0a0a,#c03030); }
+  .s3 { background: linear-gradient(135deg,#3a1010,#a04020); } .s4 { background: linear-gradient(135deg,#5a2a0a,#d0702a); }
+  .s5 { background: linear-gradient(135deg,#1a2a4a,#7090c0); } .s6 { background: #1a1a1a; }
+  .s7 { background: linear-gradient(135deg,#6a4a2a,#e0b080); } .s8 { background: linear-gradient(135deg,#3a2a1a,#9a7a5a); }
+
+  /* Side panel */
+  .panel { width: 290px; flex: none; background: #12110c; border: 1px solid #3a3626; border-radius: 6px; padding: 10px; font: 12px Arial, sans-serif; color: #d8d2c0; position: sticky; top: 10px; }
+  .panel h2 { font: 15px var(--font); color: var(--gold); margin: 0 0 6px; }
+  .panel p { margin: 0 0 8px; color: #9c977f; line-height: 1.35; }
+  .panel table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .panel td { padding: 2px 3px; border-bottom: 1px solid #24221a; }
+  .panel td:not(:first-child) { text-align: right; color: #a8c8e0; }
+  .panel tr.sel td { background: #1c2a36; }
+  .panel tr { cursor: pointer; }
+  .panel .btns { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+  .panel button { font: 12px Arial, sans-serif; background: #2a2618; color: #e8dec2; border: 1px solid #574523; border-radius: 3px; padding: 4px 8px; cursor: pointer; }
+  .panel label { display: block; margin: 3px 0; }
+  .panel textarea { width: 100%; height: 90px; background: #0b0a07; color: #a8c8e0; border: 1px solid #3a3626; font: 10px monospace; }
+  @media (max-width: 900px) { .wrap { flex-direction: column; } .panel { width: 100%; position: static; } }
+  /* Only the screen */
+  body { background: #0c0b08; }
+  .wrap { display: block; padding: 8px; }
+  .fit { margin: 0 auto; max-width: calc((100vh - 60px) * 16 / 9); }
+  .strip { display: flex; gap: 14px; align-items: center; justify-content: center; padding: 8px 0 0; font: 12px Arial, sans-serif; color: #8a8572; }
+  .strip select { font: 12px Arial, sans-serif; background: #1a1812; color: #d8d2c0; border: 1px solid #3a3626; border-radius: 3px; padding: 2px 4px; }
+  .ui:hover { outline: none; }
+  .ui .tag { display: none !important; }
+  /* ---- Right column, in the boss bars' steel and crimson ---- */
+  .plate {
+    background: rgba(13,21,23,.92); border-radius: 2px;
+    box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.55);
+  }
+  .bossblock .yell { margin-top: 2px; font-size: 13px; }
+
+  /* Minimap: a steel ring, a diamond north, small steel knobs on the ring */
+  .map2 { width: 230px; height: 196px; }
+  .map2 .ring {
+    position: absolute; left: 30px; top: 8px; width: 170px; height: 170px; border-radius: 50%;
+    background: #0b0e14; box-shadow: 0 0 0 1px #000, 0 0 0 3px var(--steel), 0 0 0 4px #000, 0 3px 10px rgba(0,0,0,.6);
+  }
+  .map2 .land {
+    position: absolute; inset: 5px; border-radius: 50%; overflow: hidden;
+    background: radial-gradient(circle at 35% 30%, #7d8a46, #4d5a25 60%, #3c4820);
+    box-shadow: inset 0 0 0 1px #000, inset 0 0 18px rgba(0,0,0,.55);
+  }
+  .map2 .me { position: absolute; left: 75px; top: 72px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 12px solid #f3e9c8; filter: drop-shadow(0 0 1px #000); }
+  .map2 .blip { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: #d84a4a; box-shadow: 0 0 0 1px #000; }
+  .map2 .blip.boss { width: 9px; height: 9px; background: #b83a50; box-shadow: 0 0 0 1px #000, 0 0 0 2px var(--steel-hi); }
+  .map2 .north {
+    position: absolute; left: 107px; top: 1px; width: 16px; height: 16px; transform: rotate(45deg);
+    background: var(--steel); box-shadow: 0 0 0 1px #000; font: 9px Arial, sans-serif; color: #0b0e14; font-style: normal;
+    display: grid; place-items: center;
+  }
+  .map2 .north { color: transparent; }
+  .map2 .north::after { content: "N"; position: absolute; transform: rotate(-45deg); color: #0b0e14; font: bold 9px Arial, sans-serif; }
+  .map2 .sub {
+    position: absolute; left: 45px; top: 170px; width: 140px; height: 18px; text-align: center; line-height: 16px;
+    font-size: 11px; color: var(--text-hi);
+    background: rgba(13,21,23,.95); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000;
+  }
+  .map2 .knob {
+    position: absolute; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+    font: 12px Arial, sans-serif; color: var(--steel-hi); background: radial-gradient(#1f2633, #0b0e14);
+    box-shadow: 0 0 0 1px #000, 0 0 0 2px var(--steel-lo), 0 0 0 3px #000;
+  }
+  .map2 .knob.x { width: 16px; height: 16px; font-size: 9px; color: #d0566a; }
+
+  /* Run tracker: the clock, the boss schedule and the run's counts */
+  .trk { width: 248px; padding: 7px 9px 8px; font-size: 12px; color: var(--text-hi); }
+  .trk { background: rgba(13,21,23,.92); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.55); }
+  .trk .th { display: flex; justify-content: space-between; align-items: baseline; }
+  .trk .th span { font-size: 14px; }
+  .trk .th em { font-style: normal; font-size: 10px; color: var(--steel); letter-spacing: .5px; text-transform: uppercase; }
+  .trk .tt { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .trk .tbar { position: relative; flex: 1; height: 8px; background: #1b0a11; box-shadow: 0 0 0 1px #000, 0 0 0 2px var(--steel-lo); }
+  .trk .tbar i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(#b83a50 0 1px, #9a2a3e 1px, #8a1f33 50%, #4c0d1b); }
+  .trk .tbar b { position: absolute; top: 50%; width: 6px; height: 6px; transform: translate(-50%, -50%) rotate(45deg); background: var(--steel); box-shadow: 0 0 0 1px #000; }
+  .trk .clock2 { font-size: 20px; line-height: 1; min-width: 52px; text-align: right; }
+  .trk .tsub { display: flex; justify-content: space-between; font-size: 9px; color: var(--steel-lo); margin: 3px 58px 6px 0; }
+  .trk .tr { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; height: 18px; color: #8b93a6; }
+  .trk .tr i { font-style: normal; font-size: 10px; color: var(--steel); }
+  .trk .tr em { font-style: normal; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .trk .tr.done { color: #6f7789; }
+  .trk .tr.done span { text-decoration: line-through; text-decoration-color: rgba(111,119,137,.6); }
+  .trk .tr.now { color: var(--text-hi); background: linear-gradient(90deg, rgba(184,58,80,.28), transparent 80%); margin: 0 -9px; padding: 0 9px; }
+  .trk .tr.now i::before { content: ""; display: block; width: 6px; height: 6px; transform: rotate(45deg); background: #d0566a; box-shadow: 0 0 6px rgba(208,86,106,.8); }
+  .trk .tr.now em { color: #c9d6f2; }
+  .trk .tf, .trk .tstat { display: flex; justify-content: space-between; font-size: 10px; color: var(--steel); }
+  .trk .tf { margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(93,102,121,.45); }
+  .trk .tstat { margin-top: 3px; }
+  .trk b { font-weight: normal; color: var(--text-hi); }
+
+  /* Damage meter: rows as small crimson bars */
+  .dm2 { width: 248px; padding: 5px 6px 6px; font-size: 11px; color: var(--text-hi); }
+  .dm2 { background: rgba(13,21,23,.92); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.55); }
+  .dm2 .dh { display: flex; gap: 10px; align-items: baseline; padding: 0 2px 4px; font-size: 11px; color: var(--steel-lo); }
+  .dm2 .dh .on { color: var(--text-hi); box-shadow: 0 2px 0 #b83a50; }
+  .dm2 .dh em { margin-left: auto; font-style: normal; font-size: 10px; color: var(--steel); }
+  .dm2 .dr { position: relative; height: 17px; margin-top: 2px; display: flex; justify-content: space-between; align-items: center; padding: 0 5px; background: #1b0a11; box-shadow: inset 0 0 0 1px #000; }
+  .dm2 .dr i { position: absolute; inset: 0 auto 0 0; width: var(--w); background: linear-gradient(#b83a50 0 1px, #8a1f33 1px, #6a1527); }
+  .dm2 .dr.ally i { background: linear-gradient(#7f8fb0 0 1px, #46516b 1px, #2c3448); }
+  .dm2 .dr span, .dm2 .dr em { position: relative; text-shadow: 0 1px 1px #000; }
+  .dm2 .dr b { font-weight: normal; color: var(--steel); margin-right: 6px; font-size: 10px; }
+  .dm2 .dr em, .dm2 .df em { font-style: normal; font-variant-numeric: tabular-nums; }
+  .dm2 small { font-size: 9px; color: #b8bdca; margin-left: 4px; }
+  .dm2 .df { display: flex; justify-content: space-between; margin-top: 4px; padding: 3px 5px 0; border-top: 1px solid rgba(93,102,121,.45); color: var(--steel); }
+  /* Compact right column */
+  .map2 { width: 190px; height: 160px; }
+  .map2 .ring { left: 25px; top: 6px; width: 140px; height: 140px; }
+  .map2 .me { left: 60px; top: 58px; }
+  .map2 .north { left: 87px; top: -1px; width: 13px; height: 13px; }
+  .map2 .north::after { font-size: 8px; }
+  .map2 .sub { left: 35px; top: 139px; width: 120px; height: 15px; line-height: 14px; font-size: 10px; }
+  .map2 .knob { width: 17px; height: 17px; font-size: 10px; }
+  .map2 .knob.x { width: 14px; height: 14px; font-size: 8px; }
+  .trk { width: 210px; padding: 5px 7px 5px; font-size: 11px; }
+  .trk .th span { font-size: 12px; }
+  .trk .th em { font-size: 9px; }
+  .trk .tt { margin: 4px 0 4px; gap: 6px; }
+  .trk .tbar { height: 6px; }
+  .trk .tbar b { width: 5px; height: 5px; }
+  .trk .clock2 { font-size: 15px; min-width: 40px; }
+  .trk .tsub { display: none; }
+  .trk .tr { height: 15px; grid-template-columns: 12px 1fr auto; }
+  .trk .tr em { font-size: 10px; }
+  .trk .tr.now { margin: 0 -7px; padding: 0 7px; }
+  .trk .tf { margin-top: 4px; padding-top: 3px; font-size: 9px; }
+  .dm2 { width: 210px; padding: 4px 5px 5px; font-size: 10px; }
+  .dm2 .dh { font-size: 10px; padding-bottom: 3px; gap: 8px; }
+  .dm2 .dr { height: 14px; margin-top: 1px; padding: 0 4px; }
+  .dm2 .dr b { margin-right: 4px; font-size: 9px; }
+  .dm2 small { font-size: 8px; margin-left: 3px; }
+  .dm2 .df { margin-top: 3px; padding: 2px 4px 0; font-size: 10px; }
+  /* Square minimap, the column's width on the right, knobs down its left */
+  .map2 { width: 210px; height: 184px; }
+  .map2 .ring { left: 46px; top: 0; width: 164px; height: 164px; border-radius: 1px; }
+  .map2 .land { inset: 4px; border-radius: 0; }
+  .map2 .me { left: 73px; top: 72px; }
+  .map2 .north { left: 121px; top: -6px; }
+  .map2 .sub {
+    left: 46px; top: 168px; width: 164px; height: 16px; line-height: 15px; padding: 0 6px; box-sizing: border-box;
+    display: flex; justify-content: space-between; text-align: left;
+  }
+  .map2 .sub .now { font-style: normal; color: var(--steel-hi); font-variant-numeric: tabular-nums; }
+  /* --- Synced with the game --- */
+  /* Boss bars: the caps, crest and ring in the darker grey; focus no longer whitens the frame */
+  .bar::after, .crest { background: var(--steel-lo); }
+  .bar.elite::after, .bar.elite .crest { background: #3f4656; }
+  .kind { box-shadow: 0 0 0 1px #000, 0 0 0 2px var(--steel-lo), 0 0 0 3px #000; }
+  .elite .kind { box-shadow: 0 0 0 1px #000, 0 0 0 2px #3f4656, 0 0 0 3px #000; }
+  .bar.focus { box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 0 6px rgba(93,102,121,.45), 0 2px 6px rgba(0,0,0,.6); }
+
+  /* Minimap: the same frame as the tracker, a 2px dark inset round the map */
+  .map2 .ring { background: rgba(13,21,23,.92); box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.55); border-radius: 2px; }
+  .map2 .land { inset: 3px; box-shadow: 0 0 0 1px #000; }
+  .map2 .north { background: var(--steel-lo); }
+
+  /* Hero plate */
+  .hplate { width: 84px; height: 8px; display: block; }
+  .hplate .hb { position: absolute; inset: 0; background: rgba(5,9,8,.85); box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .hplate .hb i { position: absolute; inset: 1px; background: #2e8c33; box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
+  .hplate .lv { position: absolute; left: 90px; top: -3px; width: auto; height: auto; background: none; box-shadow: none; font-size: 9px; color: #e8eaf0; text-shadow: 0 1px 1px #000; }
+
+  /* Compact enemy plates: the grey edge; the selected one crimson */
+  /* Compact plates, as built: 100px; an 11px well with the level, name and health; one row of 9px
+     icons over it, your debuffs from the left, the unit's buffs from the right. */
+  .cplate { width: 100px; height: 22px; }
+  .cplate .row { position: absolute; left: 0; right: 0; top: 0; height: 9px; display: flex; gap: 1px; }
+  .cplate .row .sp { flex: 1; }
+  .cplate .ic { position: relative; width: 9px; height: 9px; display: grid; place-items: center; font-size: 6px; line-height: 1; color: #fff; }
+  .cplate .ic.d { background: #3c2050; box-shadow: inset 0 0 0 1px #b83a50, 0 0 0 1px #000; }
+  .cplate .ic.b { background: #5a1a10; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .cplate .ic s { position: absolute; right: -1px; bottom: -2px; text-decoration: none; font: bold 5px Arial, sans-serif; text-shadow: .5px .5px 0 #000; }
+  .cplate .b { position: absolute; top: 11px; left: 0; width: 100px; height: 11px; box-sizing: border-box; overflow: hidden;
+    display: flex; align-items: center; gap: 2px; padding: 0 3px; background: #1b0a11; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .cplate .b i { position: absolute; left: 1px; top: 1px; bottom: 1px; background: #8a1f33; box-shadow: inset 0 1px 0 #b83a50; }
+  .cplate .b span { position: relative; white-space: nowrap; color: #e8eaf0; text-shadow: 0 1px 1px rgba(0,0,0,.95); }
+  .cplate .l { font: 5.5px Arial, sans-serif; color: var(--steel) !important; }
+  .cplate .n { font-size: 7px; flex: 1; min-width: 0; overflow: hidden; }
+  .cplate .h { font: 5.5px Arial, sans-serif; }
+  .cplate.tsel .b { box-shadow: inset 0 0 0 1px #b83a50, 0 0 0 1px #000; }
+
+  /* Unit frames: the game's 240 × 76 frame */
+  .uf2 { width: 240px; height: 76px; --icon: 18px; }
+  .uf2 .ring { position: absolute; top: 8px; width: 60px; height: 60px; border-radius: 50%; background: #000; box-shadow: inset 0 0 0 2px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.6); }
+  .uf2 .face { position: absolute; inset: 4px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #d9a070, #6a4020 70%); }
+  .uf2 .lv { position: absolute; top: 50px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; color: #e8eaf0;
+    background: #141924; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; z-index: 2; }
+  .uf2 .pl { position: absolute; top: 14px; width: 164px; padding: 3px; display: flex; flex-direction: column; gap: 2px; box-sizing: border-box;
+    background: rgba(13,21,23,.92); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.55); }
+  .uf2 .pl > div { position: relative; display: grid; place-items: center; }
+  .uf2 .nm { height: 14px; font-size: 11px; color: #e8eaf0; text-shadow: 0 1px 1px #000; }
+  .uf2 .hp { height: 16px; background: #08130a; box-shadow: 0 0 0 1px #000; }
+  .uf2 .mp { height: 9px; background: #03050f; box-shadow: 0 0 0 1px #000; }
+  .uf2 .hp i, .uf2 .mp i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .uf2 .hp i { background: #2e8c33; box-shadow: inset 0 1px 0 #5cbd5c; }
+  .uf2.target .hp { background: #1b0a11; }
+  .uf2.target .hp i { background: #8a1f33; box-shadow: inset 0 1px 0 #b83a50; }
+  .uf2 .mp i { background: #054df2; }
+  .uf2 .hp span, .uf2 .mp span { position: relative; font-size: 10px; color: #e8eaf0; text-shadow: 0 1px 1px #000; }
+  .uf2 .mp span { font-size: 8px; }
+  .uf2 .ups, .uf2 .downs { position: absolute; width: 164px; height: 18px; display: flex; gap: 4px; }
+  .uf2 .ups { top: -9px; } .uf2 .downs { top: 74px; }
+  .uf2 .aura { font-size: 10px; }
+  .uf2 .aura .t { height: 7px; line-height: 7px; font-size: 7px; }
+  .uf2.player .ring { left: 6px; } .uf2.player .face { } .uf2.player .lv { left: 4px; } .uf2.player .pl, .uf2.player .ups, .uf2.player .downs { left: 70px; }
+  .uf2.target .ring { right: 6px; } .uf2.target .lv { right: 4px; } .uf2.target .pl, .uf2.target .ups, .uf2.target .downs { right: 70px; }
+  .uf2.target .ups, .uf2.target .downs { justify-content: flex-end; }
+  /* Unit frames, compact: the boss bar's frame with a power line, the portrait medallion over
+     the outer end, the level on its rim; buffs over the bar, debuffs under it. */
+  .uf3 { width: 200px; height: 40px; --icon: 16px; }
+  .uf3 .fr {
+    position: absolute; top: 8px; width: 178px; height: 24px; box-sizing: border-box;
+    padding: 2px 3px 2px 3px; display: flex; flex-direction: column; gap: 2px;
+    background: var(--frame-ink); border-radius: 2px;
+    box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.6);
+  }
+  .uf3 .fr::after {   /* the end cap, as the boss bar's */
+    content: ""; position: absolute; top: 50%; width: 8px; height: 8px; transform: translateY(-50%) rotate(45deg);
+    background: var(--steel-lo); box-shadow: 0 0 0 1px #000; z-index: 2;
+  }
+  .uf3 .well { position: relative; flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 0 6px;
+    background: #08130a; box-shadow: 0 0 0 1px #000; overflow: hidden; }
+  .uf3 .fill { position: absolute; left: 0; top: 0; bottom: 0;
+    background: linear-gradient(#5cbd5c 0 1px, #2e8c33 1px 45%, #22702a 70%, #17531e); }
+  .uf3.target .well { background: #1b0a11; }
+  .uf3.target .fill { background: linear-gradient(#b83a50 0 1px, #8a1f33 1px 45%, #6e1828 70%, #4c0d1b); }
+  .uf3 .who, .uf3 .num { position: relative; font-size: 11px; color: var(--text-hi); text-shadow: 0 1px 1px rgba(0,0,0,.95); white-space: nowrap; }
+  .uf3 .num { font-size: 10px; color: #c9cedb; font-family: Arial, sans-serif; }
+  .uf3 .pw { position: relative; height: 3px; background: #03050f; box-shadow: 0 0 0 1px #000; }
+  .uf3 .pw i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(#3f7cff, #0a3fc0); }
+  .uf3.target .pw { display: none; }
+  .uf3.target .fr { padding-bottom: 2px; }
+  .uf3 .med { position: absolute; top: 0; width: 40px; height: 40px; border-radius: 50%; z-index: 3; background: #000;
+    box-shadow: inset 0 0 0 2px var(--steel-lo), 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.6); }
+  .uf3 .face { position: absolute; inset: 3px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #d9a070, #6a4020 70%); }
+  .uf3 .lv { position: absolute; top: 27px; width: 16px; height: 16px; border-radius: 50%; z-index: 4; display: grid; place-items: center;
+    font: 9px Arial, sans-serif; color: var(--text-hi); background: #141924; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .uf3 .ups, .uf3 .downs { position: absolute; display: flex; gap: 3px; width: 160px; }
+  .uf3 .ups { top: -12px; } .uf3 .downs { top: 40px; }
+  .uf3 .aura { font-size: 9px; border-radius: 1px; }
+  .uf3 .aura .t { height: 7px; line-height: 7px; font-size: 7px; }
+  .uf3 .aura .stk { top: -5px; min-width: 9px; height: 9px; line-height: 8px; font-size: 7px; }
+  /* Player: medallion left, cap right; the target mirrors it */
+  .uf3.player .med { left: 0; } .uf3.player .lv { left: -3px; }
+  .uf3.player .fr { left: 22px; padding-left: 21px; } .uf3.player .fr::after { right: -4px; }
+  .uf3.player .ups, .uf3.player .downs { left: 44px; }
+  .uf3.target .med { right: 0; } .uf3.target .lv { right: -3px; }
+  .uf3.target .fr { right: 22px; padding-right: 21px; } .uf3.target .fr::after { left: -4px; }
+  .uf3.target .ups, .uf3.target .downs { right: 44px; justify-content: flex-end; }
+  .uf3.target .well { flex-direction: row; }
+  /* Unit frames, as built (design E): the boss bars' frame round a health well and a power
+     well; the auras on its edges, 4px off, from the outer end. */
+  .ue { width: 170px; height: 25px; --icon: 14px; }
+  .ue .fr { position: absolute; left: 0; right: 0; top: 0; padding: 2px; display: flex; flex-direction: column; gap: 2px;
+    background: rgba(13,21,23,.92); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000, 0 2px 5px rgba(0,0,0,.55); }
+  .ue .well { position: relative; height: 13px; overflow: hidden; display: flex; align-items: center; justify-content: space-between; padding: 0 5px;
+    background: #07120a; box-shadow: 0 0 0 1px #000; }
+  .ue.target .well { background: #1b0a11; }
+  .ue .fill, .ue .pw i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .ue .fill { background: #2e8c33; box-shadow: inset 0 1px 0 #5cbd5c; }
+  .ue.target .fill { background: #8a1f33; box-shadow: inset 0 1px 0 #b83a50; }
+  .ue .who, .ue .num { position: relative; white-space: nowrap; color: #e8eaf0; text-shadow: 0 1px 1px rgba(0,0,0,.95); }
+  .ue .who { font-size: 10px; } .ue .who b { font: normal 8px Arial, sans-serif; color: var(--steel); margin-right: 4px; }
+  .ue .num { font: 9px Arial, sans-serif; }
+  .ue .pw { position: relative; height: 4px; background: #05060b; box-shadow: 0 0 0 1px #000; }
+  .ue .rage { background: #b3241a; box-shadow: inset 0 1px 0 #e0574a; }
+  .ue .ups, .ue .downs { position: absolute; display: flex; gap: 2px; }
+  .ue .ups { bottom: calc(100% + 4px); } .ue .downs { top: calc(100% + 4px); }
+  .ue.player .ups, .ue.player .downs { left: 0; }
+  .ue.target .ups, .ue.target .downs { right: 0; flex-direction: row-reverse; }
+  .ue .aura { font-size: 8px; border-radius: 0; box-shadow: inset 0 0 0 1px var(--steel-lo), 0 0 0 1px #000; }
+  .ue .aura.debuff { box-shadow: inset 0 0 0 1px var(--wine-hi), 0 0 0 1px #000; }
+  .ue .aura .t { height: 6px; line-height: 6px; font-size: 6px; }
+  .ue .aura .stk { top: -3px; min-width: 7px; height: 8px; line-height: 7px; font-size: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="viewport"><div class="fit" id="fit"><div id="stage">
+
+
+
+    <div class="ui bossblock" data-anchor="c" data-name="Boss bars" style="left:437px; top:12px">
+      <div class="bars">
+        <div class="side l">
+          <div class="aura ic-molten">🔥
+            <div class="tip"><div class="h">Molten <i style="color:#9fb0d0">Buff</i></div><div class="d">Leaves pools of fire where it strikes.</div></div></div>
+          <div class="aura ic-enrage">⚡
+            <div class="tip"><div class="h">Enraged <i style="color:#9fb0d0">Buff</i></div><div class="d">Its swings and abilities hit 50% harder, and its abilities come faster.</div></div></div>
+        </div>
+        <div class="bar focus enraged cast">
+          <i class="crest"></i><div class="kind">SKULL</div>
+          <div class="well">
+            <div class="lag" style="width:95%"></div><div class="fill" style="width:91%"></div>
+            <i class="phase" style="left:66%"></i><i class="phase" style="left:33%"></i>
+            <div class="castline" style="width:62%"></div>
+            <div class="txt"><span class="who"><b>Hogger</b><i>9</i></span><span class="hp">War Stomp<em>91%</em></span></div>
+          </div>
+        </div>
+        <div class="side">
+          <div class="aura debuff ic-frost">❄<span class="t">3.2</span>
+            <div class="tip"><div class="h">Slowed <i style="color:#d0566a">Debuff</i></div><div class="d">Movement speed reduced by 40%.</div><div class="r">3 sec remaining</div></div></div>
+          <div class="aura debuff ic-dot">☠<span class="t">8</span><span class="stk">2</span>
+            <div class="tip"><div class="h">Corruption <i style="color:#d0566a">Debuff</i></div><div class="d">Takes 142 damage every 3.0 sec (2 stacks).</div><div class="r">8 sec remaining</div></div></div>
+          <div class="aura debuff ic-mark">◎
+            <div class="tip"><div class="h">Hunter's Mark <i style="color:#d0566a">Debuff</i></div><div class="d">Takes increased damage, and explodes when it dies.</div></div></div>
+        </div>
+        <div class="side l">
+          <div class="aura ic-shield">✦<span class="t">12</span>
+            <div class="tip"><div class="h">Shielded <i style="color:#9fb0d0">Buff</i></div><div class="d">Immune to all damage while its guards stand.</div><div class="r">12 sec remaining</div></div></div>
+        </div>
+        <div class="bar shielded">
+          <i class="crest"></i><div class="kind">SKULL</div>
+          <div class="well">
+            <div class="fill" style="width:63%"></div><i class="phase" style="left:50%"></i>
+            <div class="txt"><span class="who"><b>Princess</b><i>9</i></span><span class="hp"><small>9.8k / 15.6k</small><em>63%</em></span></div>
+          </div>
+        </div>
+        <div class="side"></div>
+        <div class="side l"></div>
+        <div class="bar elite low">
+          <i class="crest"></i><div class="kind">STAR</div>
+          <div class="well">
+            <div class="fill" style="width:18%"></div>
+            <div class="txt"><span class="who"><b>Gruff Swiftbite</b><i>9</i></span><span class="hp"><small>713 / 3.96k</small><em>18%</em></span></div>
+          </div>
+        </div>
+        <div class="side"></div>
+      </div>
+      <div class="yell">Hogger yells: Grrr... fresh meat!</div>
+    </div>
+
+    <div class="ui banner" data-anchor="c" data-name="Banner (22% down)" style="left:383px; top:169px">A silver Kobold Laborer approaches!</div>
+
+    <div class="ui jewels" data-name="Jewelry row" style="left:10px; top:106px">
+      <div class="jewel"></div><div class="jewel b"></div><div class="jewel"></div>
+    </div>
+    <div class="ui cache" data-name="Cache chest" style="left:26px; top:141px"></div>
+
+    <div class="ui tg" data-name="Test Grounds panel" style="left:12px; top:210px">
+      <h3>Test Grounds</h3><div class="sub">Nothing is saved - F8 hides</div>
+      <div class="row"><div class="btn">Spawn</div><div class="btn on">Hero</div></div>
+      <div class="sec">TOGGLES</div>
+      <div class="row"><div class="btn g">God mode: On</div><div class="btn">Immortal enemies: Off</div></div>
+      <div class="sec">HERO</div>
+      <div class="row"><div class="btn">+1 level</div><div class="btn">+5 levels</div><div class="btn">Upgrade (chest)</div><div class="btn">+1000 gold</div><div class="btn g">Full heal</div></div>
+      <div class="sec">ENEMIES</div>
+      <div class="row"><div class="btn r">Kill all</div><div class="btn">Clear all</div></div>
+    </div>
+
+    <div class="ui map2" data-anchor="r" data-name="Minimap" style="left:1147px; top:8px">
+      <div class="ring"><div class="land"><i class="me"></i><i class="blip" style="left:34px; top:50px"></i><i class="blip boss" style="left:92px; top:30px"></i></div></div>
+      <i class="north">N</i>
+      <div class="sub"><span>Jasperlode Mine</span><em class="now">21:47</em></div>
+      <div class="knob" style="left:24px; top:26px" title="Time of day">☀</div>
+      <div class="knob" style="left:24px; top:120px">+</div>
+      <div class="knob" style="left:24px; top:142px">−</div>
+      <div class="knob x" style="left:26px; top:2px">✕</div>
+    </div>
+
+    <div class="ui trk" data-anchor="r" data-name="Run tracker" style="left:1147px; top:196px">
+      <div class="th"><span>Elwynn Forest</span><em>Normal</em></div>
+      <div class="tt">
+        <div class="tbar"><i style="width:43.6%"></i>
+          <b style="left:25%"></b><b style="left:50%"></b><b style="left:75%"></b><b style="left:100%"></b></div>
+        <span class="clock2">05:14</span>
+      </div>
+      <div class="tsub"><span>0:00</span><span>last boss at 12:00</span></div>
+      <div class="tr done"><i>✓</i><span>Mother Fang</span><em>04:12</em></div>
+      <div class="tr now"><i></i><span>Narg the Taskmaster</span><em>in 0:46</em></div>
+      <div class="tr"><i></i><span>Hogger</span><em>09:00</em></div>
+      <div class="tr"><i></i><span>Thuros Lightfingers</span><em>12:00</em></div>
+      <div class="tf"><span>Elites <b>1</b>/4</span><span>Silvers <b>2</b></span><span>Lv <b>6</b></span><span>Kills <b>128</b></span><span>Gold <b>42</b></span></div>
+    </div>
+
+    <div class="ui dm2" data-anchor="r" data-name="Damage meter" style="left:1147px; top:332px">
+      <div class="dh"><span class="on">Damage</span><span>DPS</span><span>Self</span><em>05:14</em></div>
+      <div class="dr" style="--w:100%"><i></i><span><b>1</b>Hero</span><em>1.54k <small>103</small></em></div>
+      <div class="dr ally" style="--w:84%"><i></i><span><b>2</b>Brannoc</span><em>1.29k <small>87</small></em></div>
+      <div class="dr ally" style="--w:40%"><i></i><span><b>3</b>Sela</span><em>612 <small>41</small></em></div>
+      <div class="df"><span>Party</span><em>3.44k <small>231 DPS</small></em></div>
+    </div>
+
+    <div class="ui hplate" data-anchor="c" data-name="Hero plate (follows hero)" style="left:641px; top:488px">
+      <div class="hb"><i></i></div><div class="lv">6</div>
+    </div>
+
+    <div class="ui cplate" data-anchor="c" data-name="Enemy plate (follows mob)" style="left:224px; top:396px">
+      <div class="row"><span class="ic d">☠<s>3</s></span><span class="ic d">❄</span></div>
+      <div class="b"><i style="width:70%"></i><span class="l">6</span><span class="n">Kobold Laborer</span><span class="h">84 · 70%</span></div>
+    </div>
+    <div class="ui cplate tsel" data-anchor="c" data-name="Enemy plate 2, selected (follows mob)" style="left:994px; top:446px">
+      <div class="row"><span class="ic d">☠</span><span class="sp"></span><span class="ic b">⚡</span></div>
+      <div class="b"><i style="width:40%"></i><span class="l">6</span><span class="n">Defias Thug</span><span class="h">48 · 40%</span></div>
+    </div>
+
+    <div class="ui ue player" data-anchor="c" data-name="Player frame" style="left:480px; top:600px">
+      <div class="fr"><div class="ups"><div class="aura ic-shield">🛡<span class="t">8.0</span></div><div class="aura ic-molten">🔥<span class="t">12</span></div></div>
+        <div class="well"><i class="fill" style="width:100%"></i><span class="who"><b>6</b>Warrior</span><span class="num">225 / 225 · 100%</span></div>
+        <div class="pw"><i class="rage" style="width:42%"></i></div><div class="downs"></div></div>
+    </div>
+    <div class="ui ue target" data-anchor="c" data-name="Target frame" style="left:716px; top:600px">
+      <div class="fr"><div class="ups"><div class="aura ic-enrage">⚡</div><div class="aura ic-molten">🔥</div></div>
+        <div class="well"><i class="fill" style="width:91%"></i><span class="who"><b>11</b>Hogger</span><span class="num">15.4k / 17.0k · 91%</span></div>
+        <div class="downs"><div class="aura debuff ic-dot">☠<span class="stk">3</span><span class="t">9.1</span></div><div class="aura debuff ic-frost">❄<span class="t">3.2</span></div><div class="aura debuff ic-mark">◎<span class="t">1m</span></div></div></div>
+    </div>
+
+    <div class="ui ab" data-anchor="c" data-name="Action bar" style="left:534px; top:707px">
+      <div class="xp"><i></i><em>Level 6</em><span>71 / 80</span></div>
+      <div class="slots">
+        <div class="slot s1"><b>1</b></div><div class="slot s2"><b>2</b></div><div class="slot s3"><b>1</b></div><div class="slot s4"><b>1</b></div>
+        <div class="slot s5"><b>1</b></div><div class="slot e"></div><div class="rule"></div><div class="slot s7"></div><div class="slot s8"></div>
+      </div>
+    </div>
+
+  </div></div></div>
+
+  <div class="strip">
+    <select id="res">
+      <option value="1366x768">1366 × 768</option>
+      <option value="1920x1080" selected>1920 × 1080</option>
+      <option value="2560x1440">2560 × 1440 (2K)</option>
+      <option value="3840x2160">3840 × 2160 (4K)</option>
+      <option value="1920x1200">1920 × 1200 (16:10)</option>
+      <option value="3440x1440">3440 × 1440 (ultrawide)</option>
+    </select>
+    <label><input type="checkbox" id="actual"> Actual pixels</label>
+    <span id="resnote"></span>
+    <div hidden><input type="checkbox" id="grid"><input type="checkbox" id="snap" checked><button id="copy"></button><button id="reset"></button><table id="list"></table><textarea id="out"></textarea></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const SKULL = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="11" r="5.5"/><rect x="9" y="14.5" width="6" height="4" rx="1"/><circle cx="9.8" cy="11.2" r="1.5" fill="#0b0e14"/><circle cx="14.2" cy="11.2" r="1.5" fill="#0b0e14"/><path d="M12 13.2l-.8 1.3h1.6z" fill="#0b0e14"/></svg>';
+  const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12,5.5 13.53,9.9 18.18,9.99 14.47,12.8 15.82,17.26 12,14.6 8.18,17.26 9.53,12.8 5.82,9.99 10.47,9.9"/></svg>';
+  document.querySelectorAll('.kind').forEach(k => { k.innerHTML = k.textContent.trim() === 'STAR' ? STAR : SKULL; });
+
+  // The game scales its UI by window height / 768 (hud.rs apply_ui_scale), so the canvas is always
+  // 768 units tall and as wide as the screen's shape makes it.
+  const H = 768;
+  let W = 1366, px = [1920, 1080];
+  const stage = document.getElementById('stage');
+  const fit = document.getElementById('fit');
+  const res = document.getElementById('res');
+  const actual = document.getElementById('actual');
+  let scale = 1;
+  const resize = () => {
+    // Actual pixels: one canvas unit is (screen height / 768) screen pixels; CSS pixels are
+    // screen pixels divided by this display's scaling.
+    scale = actual.checked ? px[1] / H / (window.devicePixelRatio || 1) : fit.clientWidth / W;
+    stage.style.width = W + 'px';
+    stage.style.transform = `scale(${scale})`;
+    fit.style.height = (H * scale) + 'px';
+    fit.style.overflow = actual.checked ? 'auto' : 'hidden';
+    fit.querySelector('.sizer') || fit.insertAdjacentHTML('beforeend', '<div class="sizer" style="position:absolute;left:0;top:0;width:1px;height:1px"></div>');
+    const sizer = fit.querySelector('.sizer');
+    sizer.style.left = (W * scale - 1) + 'px';
+    sizer.style.top = (H * scale - 1) + 'px';
+    fit.style.height = (actual.checked ? Math.min(H * scale, window.innerHeight * 0.85) : H * scale) + 'px';
+  };
+  new ResizeObserver(() => { if (!actual.checked) resize(); }).observe(fit);
+
+  const items = [...stage.querySelectorAll('.ui')];
+  // Each element keeps its offset from the edge it is anchored to: l from the left, r from the
+  // right, c from the centre line, as the game lays them out.
+  const anchor = el => el.dataset.anchor || 'l';
+  const toOffset = (el, x) => anchor(el) === 'r' ? W - (x + el.offsetWidth) : anchor(el) === 'c' ? x + el.offsetWidth / 2 - W / 2 : x;
+  const fromOffset = (el, o) => anchor(el) === 'r' ? W - o - el.offsetWidth : anchor(el) === 'c' ? W / 2 + o - el.offsetWidth / 2 : o;
+  const home = new Map(items.map(el => [el, [toOffset(el, parseFloat(el.style.left)), parseFloat(el.style.top)]]));
+  items.forEach(el => { const t = document.createElement('span'); t.className = 'tag'; el.appendChild(t); });
+  const KEY = 'wenilla-hud-layout-v10';
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    items.forEach(el => { const p = saved[el.dataset.name]; if (p) { el.dataset.o = p[0]; el.style.top = p[1] + 'px'; } });
+  } catch (e) {}
+  items.forEach(el => { if (el.dataset.o === undefined) el.dataset.o = home.get(el)[0]; });
+  const layoutAll = () => items.forEach(el => { el.style.left = fromOffset(el, parseFloat(el.dataset.o)) + 'px'; });
+  const setRes = () => {
+    px = res.value.split('x').map(Number);
+    W = Math.round(H * px[0] / px[1]);
+    document.getElementById('resnote').textContent =
+      `Canvas ${W} × ${H} units; one unit is ${(px[1] / H).toFixed(2)} screen pixels.`;
+    resize();
+    layoutAll();
+    render();
+  };
+  res.onchange = setRes;
+  actual.onchange = () => { resize(); };
+
+  const list = document.getElementById('list');
+  const out = document.getElementById('out');
+  const snap = document.getElementById('snap');
+  let sel = null;
+  const pos = el => [Math.round(parseFloat(el.style.left)), Math.round(parseFloat(el.style.top))];
+  const edgeName = { l: 'left', r: 'right', c: 'centre' };
+  const render = () => {
+    const layout = {};
+    list.innerHTML = '<tr><td><b>Element</b></td><td>from</td><td>x</td><td>y</td><td>w</td><td>h</td></tr>';
+    items.forEach(el => {
+      const [, y] = pos(el);
+      const o = Math.round(parseFloat(el.dataset.o));
+      const w = el.offsetWidth, h = el.offsetHeight;
+      layout[el.dataset.name] = { anchor: edgeName[anchor(el)], x: o, y, w, h };
+      el.querySelector('.tag').textContent = `${el.dataset.name} · ${edgeName[anchor(el)]} ${o}, top ${y} · ${w}×${h}`;
+      const tr = document.createElement('tr');
+      if (el === sel) tr.className = 'sel';
+      tr.innerHTML = `<td>${el.dataset.name}</td><td>${edgeName[anchor(el)]}</td><td>${o}</td><td>${y}</td><td>${w}</td><td>${h}</td>`;
+      tr.onclick = () => select(el);
+      list.appendChild(tr);
+    });
+    out.value = JSON.stringify(layout);
+    try { const s = {}; items.forEach(el => s[el.dataset.name] = [parseFloat(el.dataset.o), pos(el)[1]]); localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+  };
+  const select = el => { items.forEach(i => i.classList.toggle('sel', i === el)); sel = el; render(); };
+  const place = (el, x, y) => {
+    const g = snap.checked ? 2 : 1;
+    x = Math.round(Math.max(-el.offsetWidth + 10, Math.min(W - 10, x)) / g) * g;
+    y = Math.round(Math.max(-el.offsetHeight + 10, Math.min(H - 10, y)) / g) * g;
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.dataset.o = toOffset(el, x);
+  };
+
+  items.forEach(el => {
+    el.addEventListener('pointerdown', ev => {
+      if (ev.target.closest('.tip')) return;
+      ev.preventDefault();
+      select(el);
+      el.classList.add('dragging');
+      el.setPointerCapture(ev.pointerId);
+      const [x0, y0] = pos(el), sx = ev.clientX, sy = ev.clientY;
+      const move = e => { place(el, x0 + (e.clientX - sx) / scale, y0 + (e.clientY - sy) / scale); render(); };
+      const up = () => { el.classList.remove('dragging'); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); render(); };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    });
+  });
+  document.addEventListener('keydown', e => {
+    if (!sel || !e.key.startsWith('Arrow') || e.target.tagName === 'TEXTAREA') return;
+    e.preventDefault();
+    const d = e.shiftKey ? 10 : 1, [x, y] = pos(sel);
+    const dx = e.key === 'ArrowLeft' ? -d : e.key === 'ArrowRight' ? d : 0;
+    const dy = e.key === 'ArrowUp' ? -d : e.key === 'ArrowDown' ? d : 0;
+    sel.style.left = (x + dx) + 'px'; sel.style.top = (y + dy) + 'px'; sel.dataset.o = toOffset(sel, x + dx);
+    render();
+  });
+  document.getElementById('grid').onchange = e => document.body.classList.toggle('grid-on', e.target.checked);
+  document.getElementById('reset').onclick = () => { items.forEach(el => { const [o, y] = home.get(el); el.dataset.o = o; el.style.top = y + 'px'; }); layoutAll(); render(); };
+  document.getElementById('copy').onclick = async () => { out.select(); try { await navigator.clipboard.writeText(out.value); } catch (e) { document.execCommand('copy'); } };
+  setRes();
+})();
+</script>
+<script>
+  (function tick() {
+    const n = new Date(), el = document.querySelector('.map2 .now');
+    if (el) el.textContent = String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0');
+    setTimeout(tick, 10000);
+  })();
+</script>
+</body>
+</html>

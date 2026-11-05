@@ -22,10 +22,42 @@ def main():
     from race_catalog import PORTRAITS
     from repair_goblin_torso import repair_model
 
+    def merge_dbc_rows(existing_data, imported_data, name):
+        existing = Dbc(existing_data)
+        imported = Dbc(imported_data)
+        if (existing.fields, existing.size, existing.strings) != (
+            imported.fields, imported.size, imported.strings
+        ) or existing.size < 4:
+            raise ValueError(f'Cannot safely merge changed DBC layout: {name}')
+        by_id = {}
+        for record in existing.records:
+            row_id = int.from_bytes(record[:4], 'little')
+            if row_id in by_id:
+                raise ValueError(f'Duplicate row ID in existing DBC: {name} {row_id}')
+            by_id[row_id] = record
+        for record in imported.records:
+            row_id = int.from_bytes(record[:4], 'little')
+            if row_id in by_id:
+                if by_id[row_id] != record:
+                    raise ValueError(f'Refusing to replace changed DBC row: {name} {row_id}')
+            else:
+                existing.add_raw(record)
+                by_id[row_id] = record
+        return existing.bytes()
+
     candidate = source / 'downloads/race-expansion'
     dest = root / 'wow-data/Data'
     metadata = json.loads((source / 'launcher/native-races.json').read_text())
     classes_source = (root / 'crates/benilla-app/src/survivors/data.rs').read_text()
+    race_source = root / 'crates/benilla-app/src/survivors/races_data.rs'
+    existing_race_rows = race_source.read_text().splitlines()
+    forever_rows = {
+        int(match.group(1)): line.strip()
+        for line in existing_race_rows
+        if (match := re.match(r'Race \{ id: (95|96),', line.strip()))
+    }
+    if set(forever_rows) != {95, 96}:
+        raise ValueError('Preserve the existing High Order and Windshaper Skyborne rows')
     classes = {}
     for block in classes_source.split('ClassDef {')[2:]:
         cid = int(re.search(r'id: (\d+)', block)[1])
@@ -45,6 +77,13 @@ def main():
     try:
         displays = Dbc(chain.read(dbc_name('CreatureDisplayInfo')))
         extras = Dbc(chain.read(dbc_name('CreatureDisplayInfoExtra')))
+        char_base = Dbc(chain.read(dbc_name('CharBaseInfo')))
+        if char_base.size != 2 or char_base.fields != 2:
+            raise ValueError('Unexpected CharBaseInfo layout')
+        allowed_by_race = {}
+        for record in char_base.records:
+            race_id, class_id = record
+            allowed_by_race.setdefault(race_id, set()).add(class_id)
         races = {r[0]: r for r in Dbc(chain.read(dbc_name('ChrRaces'))).rows()}
         display_rows = {r[0]: r for r in displays.rows()}
         extra_rows = {r[0]: r for r in extras.rows()}
@@ -57,9 +96,9 @@ def main():
             (10, 'Blood Elf', 'horde'),
             *((int(k), v['name'], v['faction']) for k, v in metadata.items()),
         ):
-            allowed = metadata[str(rid)]['classes'] if str(rid) in metadata else None
-            if rid == 10:
-                allowed = [2, 3, 4, 5, 8, 9]
+            allowed = sorted(allowed_by_race.get(rid, ())) or None
+            if allowed is None and str(rid) in metadata:
+                allowed = metadata[str(rid)]['classes']
             if allowed is None:
                 allowed = [cid for cid, looks in classes.items() if any(
                     extra_rows.get(display_rows[d][3], [0, 0])[1] == rid
@@ -90,9 +129,13 @@ def main():
             files = read_stored(output.read_bytes())
             existing = dict(zip(files[0].decode('ascii').splitlines(), files[1:], strict=True))
             for name, data in entries.items():
-                if name in existing and existing[name] != data:
+                if name not in existing:
+                    existing[name] = data
+                    continue
+                if name in (dbc_name('CreatureDisplayInfo'), dbc_name('CreatureDisplayInfoExtra')):
+                    existing[name] = merge_dbc_rows(existing[name], data, name)
+                elif existing[name] != data:
                     raise ValueError(f'Refusing to replace different local entry: {name}')
-            existing.update(entries)
             entries = existing
         for sex in ('Male', 'Female'):
             path = f'Character\\Goblin\\{sex}\\Goblin{sex}.m2'
@@ -109,8 +152,9 @@ def main():
         for r in roster:
             faction = {'alliance': 0, 'horde': 1, 'neutral': 2}[r['faction']]
             lines.append(f'Race {{ id: {r["id"]}, name: {json.dumps(r["name"])}, faction: {faction}, classes: &{r["classes"]}, portrait: ({r["portrait"][0]}, {r["portrait"][1]}) }},')
+        lines.extend(forever_rows[rid] for rid in (95, 96) if rid in forever_rows)
         lines.append('];')
-        (root / 'crates/benilla-app/src/survivors/races_data.rs').write_text('\n'.join(lines) + '\n')
+        race_source.write_text('\n'.join(lines) + '\n')
         print(f'Imported {len(roster)} races, 52 body models and class appearances into {dest}')
     finally:
         chain.close()

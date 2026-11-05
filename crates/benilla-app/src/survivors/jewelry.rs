@@ -5,6 +5,7 @@ pub(super) struct JewelDef {
     pub icon: &'static str,
     pub stat: u8,
     pub base: f32,
+    #[allow(dead_code)]
     pub ring: bool,
 }
 pub(super) static JEWELS: &[JewelDef] = &[
@@ -175,9 +176,12 @@ pub(crate) struct Jewel {
     pub index: usize,
     pub strength: f32,
     pub picks: u32,
+    #[allow(dead_code)]
     pub rarity: Rarity,
 }
 impl Jewel {
+    // Gear no longer drops from chests; kept until it is decided whether it comes back.
+    #[allow(dead_code)]
     pub fn gain(&self, r: Rarity) -> f32 {
         let d = &JEWELS[self.index];
         rewards::jewel_gain(d.stat, d.base, r, Some((self.strength, self.picks)))
@@ -232,6 +236,8 @@ pub(super) fn stat(index: usize, strength: f32, stat: u8) -> f32 {
         .map(|(_, v)| v)
         .sum()
 }
+// Gear no longer drops from chests; kept until it is decided whether it comes back.
+#[allow(dead_code)]
 pub(super) fn delta(index: usize, before: f32, after: f32) -> String {
     effects(index, after)
         .into_iter()
