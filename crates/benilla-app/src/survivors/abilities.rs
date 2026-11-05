@@ -395,6 +395,16 @@ pub(super) fn cast_abilities(
         fx.impact(hit.target, hit.spell);
         hits.write(hit);
     }
+    for (target, pos, spell, depth) in std::mem::take(&mut run.talents.combat.confirmed_deaths) {
+        super::spell_passives::on_death(&mut run, &mut rng, target, pos, spell, depth);
+    }
+    let talent_targets: Vec<_> = foes.iter().map(|f| super::talent_combat::Target {
+        entity: f.e, pos: f.pos, priority: f.priority,
+    }).collect();
+    for hit in super::talent_combat::tick(&mut run, hpos, &talent_targets) {
+        if hit.damage > 0.0 { fx.impact(hit.target, hit.spell); }
+        hits.write(hit);
+    }
     let speed_of = |spell: u32| {
         spells
             .as_deref()
@@ -430,7 +440,8 @@ pub(super) fn cast_abilities(
         if def.kind == Kind::Passive {
             continue;
         }
-        let p = parameters(o, &run);
+        let mut p = parameters(o, &run);
+        if let Some(cast) = free { p.dmg *= cast.scale; p.dot *= cast.scale; }
         let speed = if def.native_kind != 255 {
             def.speed
         } else {
@@ -505,6 +516,7 @@ pub(super) fn cast_abilities(
                     fx.cast(me, def.spell, &entities(&targets), None);
                     for f in &targets {
                         let (dmg, crit) = roll(&mut rng, &stats, p.dmg);
+                        critical_cast |= crit;
                         let delay = if speed > 0.0 { f.dist / speed } else { 0.0 };
                         schedule(
                             &mut pending,
@@ -595,7 +607,9 @@ pub(super) fn cast_abilities(
                     }
                     fx.cast(me, def.spell, &entities(&chain), None);
                     for (k, f) in chain.iter().enumerate() {
-                        let (dmg, crit) = roll(&mut rng, &stats, p.dmg * 0.92f32.powi(k as i32));
+                        let falloff = if def.key == "chain_lightning" && run.talents.has("elemental_fury") { 1.0 } else { 0.92f32.powi(k as i32) };
+                        let (dmg, crit) = roll(&mut rng, &stats, p.dmg * falloff);
+                        critical_cast |= crit;
                         schedule(
                             &mut pending,
                             &mut hits,
@@ -613,7 +627,7 @@ pub(super) fn cast_abilities(
                     .filter(|f| {
                         enemies
                             .get(f.e)
-                            .is_ok_and(|(_, _, en)| !en.dots.iter().any(|d| d.spell == def.spell))
+                            .is_ok_and(|(_, _, en)| !en.dots.iter().any(|d| d.spell == def.spell && d.source == source))
                     })
                     .collect();
                 if pool.is_empty() {
@@ -644,6 +658,7 @@ pub(super) fn cast_abilities(
                     }
                     for f in &targets {
                         let (dmg, crit) = roll(&mut rng, &stats, p.dmg);
+                        critical_cast |= crit;
                         hits.write(hit_for(def, &p, f.e, dmg, crit, source));
                     }
                     true
@@ -666,7 +681,7 @@ pub(super) fn cast_abilities(
                 true
             }
             Kind::Immune => {
-                if run.hp < stats.max_hp * 0.35 {
+                if run.hp < stats.max_hp * 0.35 || free.is_some() {
                     run.immune_t = p.duration;
                     fx.cast(me, def.spell, &[me], None);
                     true
@@ -687,7 +702,7 @@ pub(super) fn cast_abilities(
                 }
             }
             Kind::Heal => {
-                if run.hp < stats.max_hp * 0.85 {
+                if run.hp < stats.max_hp * 0.85 || free.is_some() {
                     if p.duration > 0.0 {
                         run.heal_rate = p.dmg / p.duration;
                         run.heal_t = p.duration;
@@ -764,6 +779,10 @@ pub(super) fn cast_abilities(
             }
             Kind::Passive => false,
         };
+        if fired {
+            let healing = if def.kind == Kind::Heal { p.dmg } else { 0.0 };
+            super::talent_combat::cast(&mut run, def.spell, healing, hpos);
+        }
         if free.is_some() {
             continue;
         }
@@ -781,12 +800,15 @@ pub(super) fn cast_abilities(
             slot_mut(&mut run, i).next_source = None;
             // A talent's echo: a bar spell goes off again at once.
             let chance = (run.talents.stat(13) + run.jewel_stat(9)).min(0.6);
-            let echo_roll = if i < bar && !run.abilities[i].echoing { Some(rng.f32()) } else { None };
+            let chain = run.talents.combat.echo_chains.get(def.key).copied().unwrap_or(0);
+            let cascade = run.talents.has("arcane_power") && chain < 4;
+            let echo_roll = if i < bar && (!run.abilities[i].echoing || cascade) { Some(rng.f32()) } else { None };
             let echo = echo_roll.is_some_and(|roll| roll < chance);
             if i < bar {
                 run.abilities[i].echoing = echo;
             }
             if echo {
+                run.talents.combat.echo_chains.insert(def.key, chain + 1);
                 run.abilities[i].cd = 0.15;
                 let sources = run.effect_sources(13, 9);
                 let mut roll = echo_roll.unwrap_or(0.0) / chance * sources.iter().map(|(_, v)| v).sum::<f32>();
@@ -797,7 +819,7 @@ pub(super) fn cast_abilities(
                         break;
                     }
                 }
-            }
+            } else { run.talents.combat.echo_chains.remove(def.key); }
             talents::trigger(&mut run, &mut rng, ProcTrigger::Cast, def.spell, source);
             if critical_cast {
                 talents::trigger(&mut run, &mut rng, ProcTrigger::CastCrit, def.spell, source);
@@ -820,6 +842,7 @@ pub(super) fn tick_areas(
     mut fx: Fx,
     mut pending: ResMut<PendingHits>,
     mut hits: MessageWriter<Hit>,
+    hero: Query<Entity, With<Hero>>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
@@ -896,6 +919,14 @@ pub(super) fn tick_areas(
         while totem.tick <= 0.00001 {
             totem.tick += totem.every.max(0.01);
             let pos = tf.translation;
+            if totem.cast == 724 {
+                run.heal(totem.damage);
+                if let Ok(me) = hero.single() {
+                    fx.cast(e, 724, &[me], None);
+                    fx.number(me, totem.damage, false, COLOR_HEAL);
+                }
+                continue;
+            }
             if totem.pulse {
                 let targets = around(&live, pos, totem.radius);
                 if targets.is_empty() {
@@ -1061,7 +1092,10 @@ pub(super) fn apply_hits(
             continue;
         }
         talents::trigger(&mut run, &mut rng, ProcTrigger::Hit, h.spell, h.source);
-        let mut dmg = h.damage * super::spell_passives::marked_multiplier(&run, e);
+        let vulnerable = run.talents.combat.vulnerability.get(&e)
+            .filter(|(_, until)| *until > run.elapsed).map_or(1.0, |(share, _)| 1.0 + share);
+        let exposed = if en.exposed_until > run.elapsed { 1.0 + en.exposed } else { 1.0 };
+        let mut dmg = h.damage * super::spell_passives::marked_multiplier(&run, e) * vulnerable * exposed;
         if dmg > 0.0 {
             // The talents that hit harder on the elite, the wounded, the afflicted and the held.
             let t = &run.talents;
@@ -1080,6 +1114,7 @@ pub(super) fn apply_hits(
             if h.crit {
                 talents::trigger(&mut run, &mut rng, ProcTrigger::Crit, h.spell, h.source);
             }
+            super::talent_combat::hit(&mut run, &mut rng, &h, tf.translation, &mut en);
             // Cap after every offensive multiplier, before healing, procs and the meter.
             dmg = super::almighty_strength::damage(en.boss, en.max_hp, dmg * full_belly);
             let leech = run.talents.stat(14) + run.jewel_stat(18);
@@ -1089,6 +1124,10 @@ pub(super) fn apply_hits(
             // The meter counts health actually taken, so a guest's hits on a replica the host
             // has already killed (held at 0.001 until the kill arrives) add nothing.
             let landed = dmg.min(en.hp.max(0.0));
+            if landed > 0.0 {
+                run.talents.combat.last_hits.insert(e, (h.spell, h.proc_depth, h.source));
+                en.last_hit = (coop.peer, h.spell, h.proc_depth);
+            }
             en.hp -= dmg;
             let was_sheep = run
                 .passives
@@ -1131,7 +1170,8 @@ pub(super) fn apply_hits(
             }
         }
         if h.dot > 0.0 && h.dot_dur > 0.0 {
-            en.dots.retain(|d| d.spell != h.spell);
+            if h.damage <= 0.0 { super::talent_combat::hit(&mut run, &mut rng, &h, tf.translation, &mut en); }
+            en.dots.retain(|d| d.spell != h.spell || d.source != h.source);
             en.dots.push(enemies::Dot {
                 source: h.source,
                 spell: h.spell,
@@ -1181,7 +1221,10 @@ pub(super) fn apply_hits(
         }
         if coop.guest() {
             if let Ok(id) = replicas.get(e) {
-                coop.submit(id.0, dmg, h.effect);
+                coop.submit(id.0, dmg, h.effect, h.spell, h.proc_depth);
+                if h.spell == 1160 && run.talents.has("imp_demo_shout") {
+                    coop.expose(id.0, run.talents.value("imp_demo_shout"), 6.0);
+                }
             }
             en.hp = en.hp.max(0.001);
         }
@@ -1189,6 +1232,7 @@ pub(super) fn apply_hits(
             en.hp = en.hp.max(1.0);
         }
         if en.hp <= 0.0 {
+            super::talent_combat::death(&mut run, e, tf.translation, &en, h.spell, h.proc_depth);
             super::spell_passives::on_death(
                 &mut run,
                 &mut rng,
@@ -1213,29 +1257,52 @@ pub(super) fn apply_hits(
         let mut dealt = 0.0;
         let mut drained = 0.0;
         let mut remaining_hp = en.hp.max(0.0);
+        let marked = super::spell_passives::marked_multiplier(&run, e);
+        let vulnerable = run.talents.combat.vulnerability.get(&e)
+            .filter(|(_, until)| *until > run.elapsed).map_or(1.0, |(share, _)| 1.0 + share);
+        let mut killing_spell = 0;
         let boss = en.boss;
         let maximum = en.max_hp;
+        let cc = en.stun_t > 0.0 || en.root_t > 0.0 || en.fear_t > 0.0 || en.slow_t > 0.0;
+        let periodic_bonus = 1.0 + if en.priority() > 0 { run.talents.stat(19) } else { 0.0 }
+            + run.talents.stat(21) + if cc { run.talents.stat(18) } else { 0.0 };
+        let mut last_hit = en.last_hit;
+        let en_exposed = en.exposed;
+        let en_exposed_until = en.exposed_until;
         let guest_id = if coop.guest() { replicas.get(e).ok().map(|id| id.0) } else { None };
         for d in &mut en.dots {
             d.left -= dt;
             d.tick -= dt.min((d.left + dt).max(0.0)) * (1.0 + run.jewel_stat(19));
             while d.tick <= 0.00001 {
                 d.tick += d.every.max(0.01);
-                let damage = super::almighty_strength::damage(boss, maximum, d.damage * full_belly);
+                let exposed = if en_exposed_until > run.elapsed { 1.0 + en_exposed } else { 1.0 };
+                let wounded = if remaining_hp / maximum < 0.3 { run.talents.stat(20) } else { 0.0 };
+                let damage = super::almighty_strength::damage(boss, maximum, d.damage * full_belly * marked * vulnerable * exposed * (periodic_bonus + wounded));
                 dealt += damage;
                 let landed = damage.min(remaining_hp);
-                run.record_damage(d.source, d.spell, landed);
+                if landed > 0.0 {
+                    run.talents.combat.last_hits.insert(e, (d.spell, 0, d.source));
+                    last_hit = (coop.peer, d.spell, 0);
+                }
+                // Nightfall applies Corruption; its ticks belong to Corruption's row, while
+                // the free Shadow Bolt proc remains attributed to the Nightfall talent.
+                let meter_source = if d.spell == 172 && d.source == Some(super::damage_meter::Source::Talent("nightfall")) {
+                    Some(super::damage_meter::Source::Spell(172))
+                } else { d.source };
+                run.record_damage(meter_source, d.spell, landed);
                 remaining_hp -= landed;
-                drained += damage * (d.drain + talent_leech);
+                drained += landed * (d.drain + talent_leech + run.jewel_stat(18)
+                    + if run.talents.has("siphon_life") { 0.01 } else { 0.0 });
+                if landed > 0.0 && remaining_hp <= 0.0 { killing_spell = d.spell; }
                 if landed > 0.0 {
                     talents::trigger(&mut run, &mut rng, ProcTrigger::DotTick, d.spell, d.source);
                 }
                 // Send each tick separately so the host's per-hit cap never merges skills.
-                if let Some(id) = guest_id { coop.submit(id, damage, Effect::None); }
+                if let Some(id) = guest_id { coop.submit(id, damage, Effect::None, d.spell, 0); }
             }
         }
-        en.dots.retain(|d| d.left > 0.0);
         if dealt > 0.0 {
+            en.last_hit = last_hit;
             run.heal(drained);
             en.hp -= dealt;
             fx.number(e, dealt, false, COLOR_SPELL);
@@ -1246,6 +1313,7 @@ pub(super) fn apply_hits(
                 en.hp = en.hp.max(1.0);
             }
             if en.hp <= 0.0 {
+                super::talent_combat::death(&mut run, e, tf.translation, &en, killing_spell, 0);
                 super::spell_passives::on_death(&mut run, &mut rng, e, tf.translation, 0, 0);
                 kill(&mut commands, &mut run, e, tf.translation, &mut en);
                 units::kill_unit(&mut store);
@@ -1253,5 +1321,6 @@ pub(super) fn apply_hits(
                 marks.flush(e, guid.0, &mut store, &mut fields);
             }
         }
+        en.dots.retain(|d| d.left > 0.0);
     }
 }

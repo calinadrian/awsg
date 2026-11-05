@@ -84,6 +84,8 @@ mod spell_passives;
 mod text_edit;
 mod talents;
 mod talents_data;
+mod talent_combat;
+mod companions;
 mod telegraphs;
 mod test_grounds;
 mod ui_audit;
@@ -216,7 +218,8 @@ impl Plugin for SurvivorsPlugin {
                     enemies::move_enemies.run_if(coop::authority),
                     enemies::run_scripts.run_if(coop::authority),
                     mechanics::run_mechanics.run_if(coop::authority),
-                    enemies::cap_heights,
+                    (enemies::cap_heights,
+                        (talent_combat::forms, companions::tick).chain().run_if(in_state(Phase::Playing))).chain(),
                     abilities::cast_abilities.run_if(in_state(Phase::Playing)),
                     (
                         auto_attack::start_on_right_click,
@@ -770,7 +773,12 @@ impl Run {
         if self.dead_t.is_none() && self.hp > 0.0
             && self.healing_blocked_until <= self.elapsed && self.morgan_bleed.until <= self.elapsed
         {
-            self.hp = (self.hp + amount).min(self.stats().max_hp);
+            let max = self.stats().max_hp;
+            let overheal = (self.hp + amount - max).max(0.0);
+            self.hp = (self.hp + amount).min(max);
+            if overheal > 0.0 && self.talents.has("tree_of_life") {
+                talent_combat::shield(self, overheal, max * 0.2, 774);
+            }
         }
     }
 
@@ -825,12 +833,17 @@ impl Run {
         s.crit_mult += t.stat(4);
         s.regen += t.stat(6) + t.stat(24) * s.max_hp;
         s.speed = (s.speed * (1.0 + t.stat(7))).min(MAX_SPEED);
-        s.reduction = (s.reduction
+        let reduction_cap = MAX_REDUCTION + t.stat(27);
+        let raw_reduction = s.reduction
             + t.stat(5)
             + self.jewel_stat(5)
             + self.gear[4]
-            + race(Bonus::Reduction))
-        .min(MAX_REDUCTION);
+            + race(Bonus::Reduction);
+        s.reduction = raw_reduction.min(reduction_cap);
+        s.might *= 1.0 + t.stat(25) * s.reduction * 10.0
+            + t.stat(26) * (raw_reduction - reduction_cap).max(0.0) * 100.0;
+        if self.shield > 0.0 && self.shield_t > 0.0 { s.might *= 1.0 + t.stat(28); }
+        if t.combat.flurry_until > self.elapsed { s.haste += t.value("flurry_shaman"); }
         for &(_, effect, strength, _) in &self.buffs {
             match effect {
                 8 | 10 => s.might += strength,

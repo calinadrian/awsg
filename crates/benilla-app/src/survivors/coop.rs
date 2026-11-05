@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 
 const DEFAULT_SERVER: &str = "ws://hassian.duckdns.org:47771";
 pub(super) const REVIVE_SECONDS: f32 = 3.0;
+fn is_no_hit(hit: &(u32, u32, u8)) -> bool { *hit == (0, 0, 0) }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(super) struct Pose {
@@ -80,6 +81,12 @@ struct Foe {
     timed_enraged: bool,
     #[serde(rename = "b", default, skip_serializing_if = "is_false")]
     boss_minion: bool,
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    exposed: f32,
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    exposed_until: f32,
+    #[serde(default, skip_serializing_if = "is_no_hit")]
+    last_hit: (u32, u32, u8),
     #[serde(rename = "v", default, skip_serializing_if = "is_false")]
     hidden: bool,
     #[serde(rename = "q", default, skip_serializing_if = "Vec::is_empty")]
@@ -133,6 +140,12 @@ pub(super) struct Blow {
     effect: u8,
     strength: f32,
     seconds: f32,
+    #[serde(default)]
+    spell: u32,
+    #[serde(default)]
+    depth: u8,
+    #[serde(skip)]
+    peer: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -456,7 +469,7 @@ impl Coop {
             self.caches.push(pos.to_array());
         }
     }
-    pub fn submit(&mut self, target: u64, damage: f32, effect: data::Effect) {
+    pub fn submit(&mut self, target: u64, damage: f32, effect: data::Effect, spell: u32, depth: u8) {
         if !self.guest() || self.outgoing.len() >= 2048 {
             return;
         }
@@ -477,7 +490,13 @@ impl Coop {
             effect,
             strength,
             seconds,
+            spell, depth, peer: self.peer,
         });
+    }
+    pub fn expose(&mut self, target: u64, strength: f32, seconds: f32) {
+        if self.guest() && self.outgoing.len() < 2048 {
+            self.outgoing.push(Blow { target, damage: 0.0, effect: 6, strength, seconds, spell: 0, depth: 0, peer: self.peer });
+        }
     }
     pub fn living_guests(&self) -> bool {
         self.players
@@ -890,7 +909,7 @@ fn receive(
                                 .iter()
                                 .map(|(_, id, _, tf, ..)| (id.0, tf.translation))
                                 .collect();
-                            for h in hits.into_iter().take(2048) {
+                            for mut h in hits.into_iter().take(2048) {
                                 if h.damage.is_finite()
                                     && (0. ..=1_000_000.).contains(&h.damage)
                                     && h.seconds.is_finite()
@@ -901,6 +920,7 @@ fn receive(
                                         units::flat(*at - Vec3::from_array(pose.pos)).length()
                                             <= 70.
                                     }) {
+                                        h.peer = peer;
                                         coop.incoming.push(h);
                                     }
                                 }
@@ -1144,6 +1164,8 @@ fn receive(
                                     e.enrage_at = f.enrage_at;
                                     e.timed_enraged = f.timed_enraged;
                                     e.boss_minion = f.boss_minion;
+                                    e.exposed = f.exposed;
+                                    e.exposed_until = f.exposed_until;
                                     if e.boss {
                                         commands.entity(entity).insert(
                                             super::boss_cooldowns::ReplicaTimers(
@@ -1164,6 +1186,12 @@ fn receive(
                                         0
                                     };
                                     if f.dead && !e.dead {
+                                        let (spell, depth) = if f.last_hit.0 == coop.peer { (f.last_hit.1, f.last_hit.2) } else {
+                                            run.talents.combat.last_hits.remove(&entity);
+                                            (0, 0)
+                                        };
+                                        super::talent_combat::death(&mut run, entity, Vec3::from_array(f.pos), &e, spell, depth);
+                                        run.talents.combat.confirmed_deaths.push((entity, Vec3::from_array(f.pos), spell, depth));
                                         e.dead = true;
                                         units::kill_unit(&mut store);
                                     }
@@ -1551,6 +1579,9 @@ fn transmit(
                 enrage_at: e.enrage_at,
                 timed_enraged: e.timed_enraged,
                 boss_minion: e.boss_minion,
+                exposed: e.exposed,
+                exposed_until: e.exposed_until,
+                last_hit: e.last_hit,
                 hidden: !e.dead && script.is_some_and(|s| s.morgan.hidden()),
                 bombs: if e.dead { Vec::new() } else { script.map(|s| s.morgan.bombs.clone()).unwrap_or_default() },
                 cooldowns: if e.boss && !e.dead {
@@ -1724,6 +1755,7 @@ pub(super) fn apply_guest_hits(
         }
         let damage = super::almighty_strength::damage(enemy.boss, enemy.max_hp, hit.damage);
         enemy.hp -= damage;
+        if damage > 0.0 { enemy.last_hit = (hit.peer, hit.spell, hit.depth); }
         fx.number(entity, damage, false, units::COLOR_SPELL);
         let boss = enemy.boss || enemy.home.is_some();
         let seconds = hit.seconds.clamp(0., 30.) * if boss { 0.25 } else { 1. };
@@ -1739,9 +1771,18 @@ pub(super) fn apply_guest_hits(
                 enemy.weaken = hit.strength.clamp(0.3, 1.);
                 enemy.weaken_t = seconds;
             }
+            6 => {
+                if enemy.exposed_until <= run.elapsed { enemy.exposed = 0.0; }
+                enemy.exposed = enemy.exposed.max(hit.strength.clamp(0.0, 0.5));
+                enemy.exposed_until = run.elapsed + hit.seconds.clamp(0.0, 30.0);
+            }
             _ => {}
         }
         if enemy.hp <= 0. {
+            // This killing blow belongs to a guest, so a host pet's earlier hit cannot
+            // claim a kill-triggered Death Coil or cooldown reset.
+            run.talents.combat.last_hits.remove(&entity);
+            super::talent_combat::death(&mut run, entity, tf.translation, &enemy, 0, 0);
             enemy.hp = 0.;
             enemy.dead = true;
             enemy.dots.clear();
@@ -1818,6 +1859,9 @@ mod tests {
             enrage_at: 0.0,
             timed_enraged: false,
             boss_minion: false,
+            exposed: 0.0,
+            exposed_until: 0.0,
+            last_hit: (0, 0, 0),
             hidden: false,
             bombs: Vec::new(),
         };

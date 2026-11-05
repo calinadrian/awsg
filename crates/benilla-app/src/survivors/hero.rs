@@ -349,11 +349,14 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
         let absorbed = dmg.min(run.shield);
         run.shield -= absorbed;
         dmg -= absorbed;
+        let broke = run.shield <= 0.0;
+        super::talent_combat::absorbed(run, absorbed, broke);
         if run.shield <= 0.0 {
             run.talents.broken_shield = Some(run.shield_spell);
         }
     }
     run.hp -= dmg;
+    super::talent_combat::fatal(run);
     dmg
 }
 
@@ -428,6 +431,9 @@ pub(super) fn hero_vitals(
 
     // The buffs show as their own state kits: the shield bubble, the immunity glow, the orbs.
     let mut shown: Vec<u32> = Vec::new();
+    if run.talents.has("shadowform") { shown.push(15473); }
+    if run.talents.has("leader_of_pack") { shown.push(9634); }
+    if run.talents.has("cat_form") { shown.push(768); }
     if run.shield_t > 0.0 && run.shield > 0.0 {
         if run.shield_spell != 0 { shown.push(run.shield_spell); }
     }

@@ -73,7 +73,7 @@ pub(super) enum Eff {
     CastEvery { cast: &'static str, seconds: f32 },
     CastOnKills { cast: &'static str, count: u32 },
     FollowUp { on: &'static [&'static str], share: f32 },
-    /// A milestone mechanic of the old game's, by its tag: not ported.
+    /// A milestone mechanic implemented by talent key in talent_combat or companions.
     Other(u32),
 }
 
@@ -120,9 +120,10 @@ pub(super) fn trees(class: u8) -> Option<&'static [TreeDef; 3]> {
     TREES.iter().find(|(c, _)| *c == class).map(|(_, t)| t)
 }
 
-const EXCLUSIVE_PAIRS: [(&str, &str); 2] = [
+const EXCLUSIVE_PAIRS: [(&str, &str); 3] = [
     ("pact_of_the_annihilan", "butcher"),
     ("leader_of_pack", "cat_form"),
+    ("soul_devourer", "soul_link"),
 ];
 
 fn exclusive_with(key: &str) -> Option<&'static str> {
@@ -154,19 +155,18 @@ fn spell(key: &str) -> Option<&'static AbilityDef> {
 impl Eff {
     fn implemented(&self) -> bool {
         match self {
-            Self::Stat(stat, _) => matches!(*stat, 0..=7 | 12..=15 | 18..=24),
+            Self::Stat(stat, _) => matches!(*stat, 0..=7 | 12..=15 | 17..=32),
             Self::Mod { target, what, .. } => {
                 *what <= 5 && super::data::ABILITIES.iter().any(|def| target.picks(def))
             }
             Self::Grant(key) | Self::Starter(key) => spell(key).is_some(),
-            Self::Proc { cast, trigger, on, .. } => {
-                !matches!(*trigger, ProcTrigger::PetHit | ProcTrigger::FatalHit)
-                    && (cast.is_empty() || spell(cast).is_some())
+            Self::Proc { cast, on, .. } => {
+                (cast.is_empty() || spell(cast).is_some())
                     && (on.is_empty() && !cast.is_empty() || on.iter().any(|key| spell(key).is_some()))
             }
             Self::CastEvery { cast, .. } | Self::CastOnKills { cast, .. } => spell(cast).is_some(),
             Self::FollowUp { on, .. } => on.iter().any(|key| spell(key).is_some()),
-            Self::Other(_) => false,
+            Self::Other(tag) => super::talent_combat::implemented(*tag),
         }
     }
 }
@@ -226,7 +226,8 @@ pub(super) fn value_text(t: &TalentDef, rank: u8) -> String {
 }
 
 pub(super) fn text_at(t: &TalentDef, rank: u8) -> String {
-    t.text.replace("{v}", &value_text(t, rank))
+    let value = value_text(t, rank);
+    t.text.replace("{v}", &value).replace("{v2}", &value)
 }
 
 /// One class's talents: its experience and the ranks bought.
@@ -545,6 +546,7 @@ struct ProcState {
 pub(super) struct FreeCast {
     pub def: &'static AbilityDef,
     pub source: &'static str,
+    pub scale: f32,
 }
 
 struct ScheduledCast {
@@ -560,6 +562,7 @@ enum CastSchedule {
 /// The hero's talents as a run counts them.
 #[derive(Default)]
 pub(super) struct Build {
+    pub combat: super::talent_combat::State,
     pub granted_by: HashMap<&'static str, &'static str>,
     pub sources: Vec<(&'static str, u32, f32)>,
     /// [`Eff::Stat`] totals, by the old game's stat number.
@@ -585,6 +588,8 @@ impl Build {
                 continue;
             }
             let r = f32::from(rank);
+            b.combat.ranks.insert(t.key, rank);
+            b.combat.values.insert(t.key, t.v * r);
             for e in t.effects {
                 match e {
                     Eff::Stat(s, per) => {
@@ -598,13 +603,13 @@ impl Build {
                     }
                     Eff::Starter(key) => {
                         if let Some(def) = spell(key) {
-                            b.starter = Some(FreeCast { def, source: t.key });
+                            b.starter = Some(FreeCast { def, source: t.key, scale: 1.0 });
                         }
                     }
                     Eff::CastEvery { cast, seconds } => {
                         if let Some(def) = spell(cast) {
                             b.scheduled.push(ScheduledCast {
-                                cast: FreeCast { def, source: t.key },
+                                cast: FreeCast { def, source: t.key, scale: 1.0 },
                                 when: CastSchedule::Time { every: *seconds, next: *seconds },
                             });
                         }
@@ -612,7 +617,7 @@ impl Build {
                     Eff::CastOnKills { cast, count } => {
                         if let Some(def) = spell(cast) {
                             b.scheduled.push(ScheduledCast {
-                                cast: FreeCast { def, source: t.key },
+                                cast: FreeCast { def, source: t.key, scale: 1.0 },
                                 when: CastSchedule::Kills { every: *count, paid: 0 },
                             });
                         }
@@ -650,6 +655,20 @@ impl Build {
         self.stats.get(&s).copied().unwrap_or(0.0)
     }
 
+    pub fn has(&self, key: &str) -> bool { self.combat.ranks.contains_key(key) }
+    pub fn value(&self, key: &str) -> f32 { self.combat.values.get(key).copied().unwrap_or(0.0) }
+    pub fn rank(&self, key: &str) -> u8 { self.combat.ranks.get(key).copied().unwrap_or(0) }
+    pub fn queue(&mut self, key: &str, source: &'static str) {
+        if self.pending.len() < MAX_PENDING_CASTS {
+            if let Some(def) = spell(key) { self.pending.push(FreeCast { def, source, scale: 1.0 }); }
+        }
+    }
+    pub fn queue_scaled(&mut self, key: &str, source: &'static str, scale: f32) {
+        if self.pending.len() < MAX_PENDING_CASTS {
+            if let Some(def) = spell(key) { self.pending.push(FreeCast { def, source, scale }); }
+        }
+    }
+
     /// The summed modifier of kind `what` on a spell.
     pub fn modifier(&self, def: &AbilityDef, what: u32) -> f32 {
         self.mods
@@ -657,6 +676,10 @@ impl Build {
             .filter(|(t, w, _)| *w == what && t.picks(def))
             .map(|(_, _, v)| v)
             .sum()
+    }
+    pub fn periodic_modifier(&self, what: u32) -> f32 {
+        self.mods.iter().filter(|(target, w, _)| *w == what && matches!(target, Target::Kind(6)))
+            .map(|(_, _, value)| *value).sum()
     }
 }
 
@@ -716,7 +739,8 @@ pub(super) fn trigger(
         if build.pending.len() == MAX_PENDING_CASTS {
             break;
         }
-        if proc.trigger != trigger || now < proc.ready_at || source == Some(Source::Talent(proc.source)) {
+        if proc.trigger != trigger || now < proc.ready_at
+            || (source == Some(Source::Talent(proc.source)) && trigger != ProcTrigger::DotTick) {
             continue;
         }
         if trigger == ProcTrigger::LowHealth && (health.0 < proc.arg || health.1 >= proc.arg) {
@@ -729,7 +753,7 @@ pub(super) fn trigger(
         let Some(def) = proc.cast.or(matched) else { continue };
         if rng.f32() < proc.chance {
             proc.ready_at = now + proc.every;
-            build.pending.push(FreeCast { def, source: proc.source });
+            build.pending.push(FreeCast { def, source: proc.source, scale: 1.0 });
         }
     }
 }
@@ -862,10 +886,11 @@ pub(super) fn refresh_progress(
 pub(super) fn begin_run(mut run: ResMut<Run>, mut book: ResMut<TalentBook>) {
     let class = run.class.id;
     run.talents = Build::of(class, book.class(class));
+    super::talent_combat::begin(&mut run);
     if let Some(starter) = run.talents.starter {
         if let Some(first) = run.abilities.first_mut() {
             *first = super::Owned::new(starter.def, super::rewards::Rarity::Common);
-            first.damage_source = Some(Source::Talent(starter.source));
+            first.damage_source = Some(Source::Spell(starter.def.spell));
         }
     }
     let grants = run.talents.grants.clone();
@@ -877,7 +902,7 @@ pub(super) fn begin_run(mut run: ResMut<Run>, mut book: ResMut<TalentBook>) {
             && !run.abilities.iter().any(|o| o.def.key == key)
         {
             let mut owned = super::Owned::new(def, super::rewards::Rarity::Common);
-            owned.damage_source = run.talents.granted_by.get(key).map(|&key| super::damage_meter::Source::Talent(key));
+            owned.damage_source = Some(Source::Spell(def.spell));
             run.abilities.push(owned);
         }
     }

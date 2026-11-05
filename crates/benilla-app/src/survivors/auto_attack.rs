@@ -57,7 +57,7 @@ pub(super) fn start_on_right_click(
 /// Swing at the target whenever the timer is up and it stands in reach.
 pub(super) fn swing(
     time: Res<Time>,
-    run: Res<Run>,
+    mut run: ResMut<Run>,
     mut rng: ResMut<Rng>,
     mut auto: ResMut<AutoAttack>,
     hero: Query<(Entity, &Transform), With<Hero>>,
@@ -100,6 +100,7 @@ pub(super) fn swing(
     let mut hit = Hit::direct(target, damage, crit);
     hit.spell = kind.spell;
     hits.write(hit);
+    if run.class.id == 3 { super::talent_combat::cast(&mut run, kind.spell, 0.0, htf.translation); }
 }
 
 /// How far the target frame looks for the enemy the hero's spells are focusing.

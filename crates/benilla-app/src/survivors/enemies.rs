@@ -41,6 +41,9 @@ pub(super) struct Enemy {
     pub fear_t: f32,
     pub weaken: f32,
     pub weaken_t: f32,
+    pub exposed: f32,
+    pub exposed_until: f32,
+    pub last_hit: (u32, u32, u8),
     pub dots: Vec<Dot>,
     pub dead: bool,
     /// A guardian's lair: it sleeps there until the hero comes near, and goes back to it when he
@@ -227,6 +230,7 @@ impl Script {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct Dot {
     pub source: Option<super::damage_meter::Source>,
     pub spell: u32,
@@ -487,6 +491,9 @@ fn spawn_with(
             fear_t: 0.0,
             weaken: 1.0,
             weaken_t: 0.0,
+            exposed: 0.0,
+            exposed_until: 0.0,
+            last_hit: (0, 0, 0),
             dots: Vec::new(),
             dead: false,
             home,
