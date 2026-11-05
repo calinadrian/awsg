@@ -106,8 +106,11 @@ impl SpellProgress {
         self.power *= 1. + 0.04 / (1. + 0.125 * rank.saturating_sub(2) as f32);
     }
 }
+#[allow(dead_code)]
 pub(super) const JEWEL_SCALE: [f32; 5] = [1., 1.4, 1.8, 2.4, 3.2];
 /// Return the added strength, with the original stat-specific caps and soft health/armor curve.
+// Gear no longer drops from chests; kept until it is decided whether it comes back.
+#[allow(dead_code)]
 pub(super) fn jewel_gain(tag: u8, base: f32, rarity: Rarity, current: Option<(f32, u32)>) -> f32 {
     if tag == 16 {
         return (if rarity as usize >= 3 { 2.0_f32 } else { 1. })

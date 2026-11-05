@@ -88,11 +88,6 @@ pub(super) struct CharacterIcon;
 pub(super) struct AbilityRow;
 #[derive(Component)]
 pub(super) struct PassiveRow;
-#[derive(Component)]
-pub(super) struct OfferRow;
-/// The line under LEVEL UP: which level this is.
-#[derive(Component)]
-pub(super) struct LevelUpSub;
 
 /// A radial cooldown sweep over one ability icon: `sweep` is the remaining fraction
 /// (1.0 = just cast, 0.0 = ready), drawn by `ui_sweep.wgsl`.
@@ -167,6 +162,8 @@ pub(super) enum TipFor {
     Pool(&'static str),
     Amulet,
     Jewelry(usize),
+    /// A food slot, by kind.
+    Food(usize),
     Character,
     Talents,
     /// A boss bar's buff or debuff; its [`super::plates::AuraTip`] holds what it says.
@@ -215,15 +212,14 @@ pub(super) struct SteelHover {
 pub(super) enum Choice {
     NewAbility(&'static AbilityDef, Rarity),
     Upgrade(usize, Rarity, [Option<Upgrade>; 2]),
-    Jewelry(usize, Rarity),
-    Amulet(usize),
+    Food(super::food::FoodId),
     Gold,
 }
 impl Choice {
     pub fn rarity(self) -> Rarity {
         match self {
-            Self::NewAbility(_, r) | Self::Upgrade(_, r, _) | Self::Jewelry(_, r) => r,
-            Self::Amulet(i) => super::amulets::AMULETS[i].rarity,
+            Self::NewAbility(_, r) | Self::Upgrade(_, r, _) => r,
+            Self::Food(id) => id.rarity(),
             Self::Gold => Rarity::Common,
         }
     }
@@ -350,7 +346,16 @@ pub(super) fn spell_name(spells: Option<&crate::ui_action::Spells>, spell: u32, 
     spells
         .and_then(|s| s.catalog.get(spell))
         .map(|d| d.name.clone())
-        .unwrap_or_else(|| fallback.replace('_', " "))
+        .unwrap_or_else(|| {
+            // A spell outside the client's table still reads as a name: `arcane_torrent`, Arcane Torrent.
+            let words = fallback.split('_').map(|word| {
+                let mut letters = word.chars();
+                letters.next().map_or(String::new(), |first| {
+                    first.to_uppercase().chain(letters).collect()
+                })
+            });
+            words.collect::<Vec<_>>().join(" ")
+        })
 }
 
 pub(super) fn setup_hud(
@@ -358,7 +363,6 @@ pub(super) fn setup_hud(
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
     mut fills: ResMut<Assets<super::fill::FillMaterial>>,
-    card_art: Res<super::card_view::CardArt>,
 ) {
     let font = crate::char_select::wow_font(&asset_server);
     commands.insert_resource(HudFont(font.clone()));
@@ -684,49 +688,15 @@ pub(super) fn setup_hud(
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(18.0),
                 ..default()
             },
             // Dims the world, the plates and the meters under the cards.
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+            BackgroundColor(Color::srgba(0.02, 0.027, 0.039, 0.847)),
             GlobalZIndex(420),
             Visibility::Hidden,
             // The build's icons stay hoverable under the cards.
             bevy::ui::FocusPolicy::Pass,
-        ))
-        .with_children(|root| {
-            root.spawn(super::card_view::text(
-                &card_art.title,
-                "CHOOSE YOUR REWARD",
-                32.0,
-                super::card_view::TEXT,
-            ));
-            root.spawn((
-                LevelUpSub,
-                super::card_view::text(
-                    &card_art.body,
-                    "Choose your power",
-                    18.0,
-                    super::card_view::MUTED,
-                ),
-            ));
-            root.spawn((
-                OfferRow,
-                Node {
-                    column_gap: Val::Px(32.0 * super::card_view::GAME_SCALE),
-                    // Room for a hovered card's lift.
-                    margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(28.0), Val::Px(16.0)),
-                    ..default()
-                },
-            ));
-            root.spawn(super::card_view::text(
-                &card_art.body,
-                "Click a card, or press 1, 2 or 3",
-                18.0,
-                super::card_view::MUTED,
-            ));
-            super::cards::spawn_controls(root, &card_art);
-        });
+        ));
 
     // --- Pause. ---
     commands
@@ -1068,63 +1038,51 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
 }
 
 fn choices_for(run: &Run, rng: &mut Rng, chest: bool) -> Vec<Choice> {
-    let mut pool = Vec::new();
     if chest {
-        for (i, d) in JEWELS.iter().enumerate() {
-            let owned = run.jewelry.iter().find(|j| j.index == i);
-            let slots = run
-                .jewelry
-                .iter()
-                .filter(|j| JEWELS[j.index].ring == d.ring)
-                .count();
-            if owned.is_none() && slots >= 2 {
-                continue;
-            }
-            let rarity = Rarity::roll(rng.f32(), run.luck());
-            let gain = owned.map_or_else(
-                || super::rewards::jewel_gain(d.stat, d.base, rarity, None),
-                |j| j.gain(rarity),
-            );
-            if gain > 0.000001 {
-                pool.push(Choice::Jewelry(i, rarity));
-            }
+        let mut pool = super::food::eligible(&run.food);
+        pool.retain(|id| {
+            !run.hand
+                .banned
+                .contains(&super::cards::RewardKey::Food(*id))
+        });
+        let mut hand: Vec<Choice> = super::food::draw(pool, 3, rng)
+            .into_iter()
+            .map(Choice::Food)
+            .collect();
+        if hand.is_empty() {
+            hand.push(Choice::Gold);
         }
+        return hand;
+    }
+    let mut pool = Vec::new();
+    for (i, o) in run.abilities.iter().enumerate() {
         let rarity = Rarity::roll(rng.f32(), run.luck());
-        for (i, a) in super::amulets::AMULETS.iter().enumerate() {
-            if a.rarity == rarity {
-                pool.push(Choice::Amulet(i));
-            }
+        let mut axes = super::reward_axes::axes(o.def.key).to_vec();
+        axes.retain(|a| match a {
+            Upgrade::Targets => o.progress.targets < 12,
+            Upgrade::Area => o.progress.area < 4.999,
+            Upgrade::Duration => o.progress.duration < 5.999,
+            Upgrade::Cooldown => o.progress.cooldown > 0.20001,
+            _ => true,
+        });
+        if axes.is_empty() {
+            continue;
         }
-    } else {
-        for (i, o) in run.abilities.iter().enumerate() {
-            let rarity = Rarity::roll(rng.f32(), run.luck());
-            let mut axes = super::reward_axes::axes(o.def.key).to_vec();
-            axes.retain(|a| match a {
-                Upgrade::Targets => o.progress.targets < 12,
-                Upgrade::Area => o.progress.area < 4.999,
-                Upgrade::Duration => o.progress.duration < 5.999,
-                Upgrade::Cooldown => o.progress.cooldown > 0.20001,
-                _ => true,
-            });
-            if axes.is_empty() {
-                continue;
-            }
-            let first = axes.swap_remove(rng.index(axes.len()));
-            let second = if rarity == Rarity::Legendary && !axes.is_empty() {
-                Some(axes.swap_remove(rng.index(axes.len())))
-            } else {
-                None
-            };
-            pool.push(Choice::Upgrade(i, rarity, [Some(first), second]));
-        }
-        if run.abilities.len() < data::MAX_ABILITIES {
-            for key in run.class.pool {
-                if !run.abilities.iter().any(|o| o.def.key == *key) {
-                    pool.push(Choice::NewAbility(
-                        data::ability(key),
-                        Rarity::roll(rng.f32(), run.luck()),
-                    ));
-                }
+        let first = axes.swap_remove(rng.index(axes.len()));
+        let second = if rarity == Rarity::Legendary && !axes.is_empty() {
+            Some(axes.swap_remove(rng.index(axes.len())))
+        } else {
+            None
+        };
+        pool.push(Choice::Upgrade(i, rarity, [Some(first), second]));
+    }
+    if run.abilities.len() < data::MAX_ABILITIES {
+        for key in run.class.pool {
+            if !run.abilities.iter().any(|o| o.def.key == *key) {
+                pool.push(Choice::NewAbility(
+                    data::ability(key),
+                    Rarity::roll(rng.f32(), run.luck()),
+                ));
             }
         }
     }
@@ -1145,6 +1103,14 @@ fn choices_for(run: &Run, rng: &mut Rng, chest: bool) -> Vec<Choice> {
 pub(super) fn roll_offer(run: Res<Run>, mut rng: ResMut<Rng>, mut offer: ResMut<Offer>) {
     offer.chest = run.pending_chests > 0;
     offer.choices = choices_for(&run, &mut rng, offer.chest);
+    // A hand of the upper rarities at once, to look at them all.
+    if !offer.chest && crate::webenv::var("WOW_SURVIVORS_REWARD_PREVIEW").as_deref() == Some("rarities") {
+        let new = run.class.pool.iter().filter(|key| !run.abilities.iter().any(|o| o.def.key == **key));
+        offer.choices = new
+            .zip([Rarity::Rare, Rarity::Epic, Rarity::Legendary])
+            .map(|(key, rarity)| Choice::NewAbility(data::ability(key), rarity))
+            .collect();
+    }
 }
 pub(super) fn redeal(run: &Run, rng: &mut Rng, offer: &mut Offer) {
     offer.choices = choices_for(run, rng, offer.chest);
@@ -1177,28 +1143,7 @@ pub(super) fn pick(
                 o.upgrade(r, axes);
             }
         }
-        Choice::Jewelry(index, r) => {
-            if let Some(j) = run.jewelry.iter_mut().find(|j| j.index == index) {
-                j.strength += j.gain(r);
-                j.picks += 1;
-                j.rarity = r;
-            } else {
-                let d = &JEWELS[index];
-                run.jewelry.push(jewelry::Jewel {
-                    index,
-                    strength: super::rewards::jewel_gain(d.stat, d.base, r, None),
-                    picks: 1,
-                    rarity: r,
-                });
-            }
-        }
-        Choice::Amulet(index) => {
-            if let Some(a) = run.amulet.as_mut().filter(|a| a.index == index) {
-                a.rank = a.rank.saturating_add(1);
-            } else {
-                run.amulet = Some(super::amulets::Amulet { index, rank: 1 });
-            }
-        }
+        Choice::Food(id) => run.food[id.kind as usize] = Some(id),
         Choice::Gold => run.gold = run.gold.saturating_add(25),
     }
     run.version += 1;
@@ -1206,6 +1151,7 @@ pub(super) fn pick(
 }
 
 fn finish_offer(run: &mut Run, offer: &mut Offer, rng: &mut Rng, next: &mut NextState<Phase>) {
+    run.hand.forget_banished_food();
     if let Some(chest) = super::rewards::consume_pending(
         offer.chest,
         &mut run.pending_levels,
@@ -1445,65 +1391,13 @@ pub(super) fn describe_card(
                 desc: lines.join("\n\n"),
             }
         }
-        Choice::Jewelry(i, r) => {
-            let d = &JEWELS[i];
-            let old = run.jewelry.iter().find(|j| j.index == i);
-            let current = old.map_or(0., |j| j.strength);
-            let gain = old.map_or_else(
-                || super::rewards::jewel_gain(d.stat, d.base, r, None),
-                |j| j.gain(r),
-            );
-            CardText {
-                spell: 0,
-                icon: Some(d.icon),
-                name: d.name.into(),
-                tag: format!(
-                    "{} {}",
-                    if old.is_some() { "UPGRADE" } else { "NEW" },
-                    if d.ring { "RING" } else { "TRINKET" }
-                ),
-                desc: format!(
-                    "{}\n\nApplies for this run",
-                    jewelry::delta(i, current, current + gain)
-                ),
-            }
-        }
-        Choice::Amulet(i) => {
-            let d = &super::amulets::AMULETS[i];
-            let old = run.amulet.as_ref().filter(|a| a.index == i);
-            let a = super::amulets::Amulet {
-                index: i,
-                rank: old.map_or(1, |a| a.rank + 1),
-            };
-            let mut lines: Vec<String> = d
-                .stats
-                .iter()
-                .map(|(stat, v)| {
-                    format!(
-                        "{}   +{}",
-                        jewelry::label(*stat),
-                        jewelry::amount(*stat, *v * a.scale())
-                    )
-                })
-                .collect();
-            if d.targets > 0 {
-                lines.push(format!("All spells   +{}", skin::plural(d.targets, "target")));
-            }
-            CardText {
-                spell: 0,
-                icon: Some(d.icon),
-                name: d.name.into(),
-                tag: if old.is_some() {
-                    "EMPOWER AMULET"
-                } else if run.amulet.is_some() {
-                    "REPLACE AMULET"
-                } else {
-                    "NEW AMULET"
-                }
-                .into(),
-                desc: lines.join("\n\n"),
-            }
-        }
+        Choice::Food(id) => CardText {
+            spell: 0,
+            icon: Some(id.food().icon),
+            name: id.food().name.into(),
+            tag: String::new(),
+            desc: id.build().desc.into(),
+        },
         Choice::Gold => CardText {
             spell: 0,
             icon: Some("Interface\\Icons\\INV_Misc_Coin_02"),
@@ -1650,6 +1544,9 @@ pub(super) fn refresh_hud(
                                 .as_ref()
                                 .map(|a| (0, a.rank.min(255) as u8, TipFor::Amulet)),
                         )
+                        .chain(run.food.iter().enumerate().filter_map(|(kind, held)| {
+                            held.map(|id| (0, id.rank + 1, TipFor::Food(kind)))
+                        }))
                         .collect(),
                     0,
                     PASSIVE_SIZE,
@@ -1668,7 +1565,11 @@ pub(super) fn refresh_hud(
                         border: UiRect::all(Val::Px(edge)),
                         ..default()
                     },
-                    BorderColor::all(EDGE),
+                    BorderColor::all(match tip {
+                        TipFor::Food(kind) => run.food[kind]
+                            .map_or(EDGE, |id| super::card_view::quality(id.rarity() as usize)),
+                        _ => EDGE,
+                    }),
                     Interaction::default(),
                     tip,
                 ));
@@ -1699,6 +1600,18 @@ pub(super) fn refresh_hud(
                                     super::amulets::AMULETS[a.index].icon,
                                     [0., 1., 0., 1.],
                                 ),
+                            ));
+                        }
+                    } else if let TipFor::Food(kind) = tip {
+                        if let Some(id) = run.food[kind] {
+                            slot.spawn((
+                                Node {
+                                    width: Val::Percent(100.),
+                                    height: Val::Percent(100.),
+                                    ..default()
+                                },
+                                ImageNode::default(),
+                                UiArt::crop(id.food().icon, [0., 1., 0., 1.]),
                             ));
                         }
                     } else {
@@ -2369,6 +2282,23 @@ pub(super) fn icon_tooltip(
             if d.targets > 0 {
                 lines.push(TipLine::new(format!("+{} spell target", d.targets), GOLD));
             }
+            lines
+        }),
+        TipFor::Food(kind) => run.food.get(kind).copied().flatten().map(|id| {
+            let quality = super::card_view::quality(id.rarity() as usize);
+            let mut lines = vec![TipLine::new(id.food().name, quality).header()];
+            for bonus in id.build().bonuses {
+                let label = bonus.label.to_lowercase();
+                let (first, rest) = label.split_at(1);
+                lines.push(TipLine::new(
+                    format!("{}{rest}: {}", first.to_uppercase(), bonus.amount(id.rank)),
+                    GOLD,
+                ));
+            }
+            lines.push(TipLine::new(
+                format!("Rank {} · {}", id.rank + 1, id.rarity().label()),
+                DIM,
+            ));
             lines
         }),
         TipFor::Character => Some(vec![

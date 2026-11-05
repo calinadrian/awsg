@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASR · Reward cards</title>
+<style>
+@font-face{font-family:Friz;src:url('assets/FRIZQT__.ttf') format('truetype');font-display:swap}
+:root{color-scheme:dark;--panel:#0d1517;--steel:#5d6679;--line:#343d4a;--wine:#8a1f33;--red:#d0566a;--text:#e8eaf0;--muted:#8b93a6;--gold:#f2c76e;--green:#1eff00}
+*{box-sizing:border-box}
+body{margin:0;background:#0b1013;color:var(--text);font:13px Arial,sans-serif}
+button,select{font:inherit;color:var(--text);background:#141923;border:1px solid var(--steel);border-radius:2px;padding:9px 12px}
+button{cursor:pointer}
+button:hover:not(:disabled),button[aria-pressed=true]{border-color:var(--red);background:#301320}
+button:disabled{cursor:default;color:#5d6675;border-color:#2b323d}
+button:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+h1,h2,p{margin:0}
+.intro,.controls,.notes{max-width:1550px;margin:auto}
+.intro{padding:25px 25px 20px;display:flex;justify-content:space-between;gap:20px;align-items:center}
+h1{font:25px Friz,Georgia,serif;margin:7px 0 9px}
+.eyebrow{font:10px Arial,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--red)}
+.intro p{color:var(--muted);line-height:1.6}
+.badge{flex:none;border:1px solid var(--line);padding:8px 10px;color:var(--muted);font-size:11px}
+.controls{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:0 25px 20px}
+.controls label{display:grid;gap:6px;font:10px Arial,sans-serif;letter-spacing:.5px;color:var(--muted)}
+.scene-wrap{max-width:1550px;margin:0 auto;padding:0 14px}
+
+/* Every size below is in --u, one pixel of a 1600 wide screen, as the game's card scale would be. */
+.scene{position:relative;container-type:inline-size;aspect-ratio:16/9;overflow:hidden;background:#172014 url('assets/reward-scene-local.png') center/cover no-repeat;border:1px solid #4c5667}
+.scene.original{background-image:url('assets/reward-current-local.webp')}
+.scene.original .reward{display:none}
+.scene-label{position:absolute;left:12px;bottom:10px;z-index:5;background:#0b1013e8;border:1px solid #465163;color:#b2bac9;padding:7px 9px;font-size:10px;letter-spacing:.5px}
+
+.reward{--u:calc(100cqw / 1600);--caption:calc(var(--u)*11.7);--small:calc(var(--u)*14);--body:calc(var(--u)*16.4);--lead:calc(var(--u)*18.75);--heading:calc(var(--u)*23.4);--title:calc(var(--u)*30.5);position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#05070ad8;font-family:Friz,Georgia,serif}
+.reward-head{text-shadow:calc(var(--u)*1.75) calc(var(--u)*1.75) 0 #000;text-align:center;margin-bottom:calc(var(--u)*30)}
+.reward-kicker{display:flex;align-items:center;justify-content:center;gap:calc(var(--u)*10);color:#d4d9e4;font-size:var(--caption)}
+.diamond{width:calc(var(--u)*7);height:calc(var(--u)*7);transform:rotate(45deg);background:var(--red);border:1px solid #090b10;flex:none}
+.reward h2{font-weight:normal;font-size:var(--title);text-transform:uppercase;line-height:1.2;margin-top:calc(var(--u)*8)}
+
+.hand{display:grid;grid-template-columns:repeat(var(--n,3),calc(var(--u)*372));column-gap:calc(var(--u)*22);align-items:stretch}
+.hand.five{--u:calc(100cqw / 2100);--caption:calc(var(--u)*11.7);--small:calc(var(--u)*14);--body:calc(var(--u)*16.4);--lead:calc(var(--u)*18.75);--heading:calc(var(--u)*23.4);--title:calc(var(--u)*30.5);grid-template-columns:repeat(5,calc(var(--u)*372))}
+.slot{--rarity:#ffffff;--frame:#9aa3b8;--wash:transparent;--well:#29303b;--hover:#831c3550;--gem:11;--rule:2;--aura:0 0 0 transparent;position:relative;display:grid;grid-template-rows:1fr auto;row-gap:calc(var(--u)*8);min-width:0}
+
+/* The HUD's frame: a hard steel edge, a black gap, then the panel. */
+.card{position:relative;display:block;width:100%;height:100%;padding:2px;text-align:left;color:var(--text);background:#080b0f;border:1px solid var(--frame);box-shadow:0 0 0 1px #050609,0 calc(var(--u)*8) calc(var(--u)*20) #0008,var(--aura);transition:transform .12s ease-out,border-color .12s}
+.card:hover:not(:disabled),.card:focus-visible{transform:translateY(calc(var(--u)*-6));border-color:var(--rarity);background:#080b0f}
+.card:before{content:'';position:absolute;z-index:2;width:calc(var(--u)*var(--gem));height:calc(var(--u)*var(--gem));left:calc(50% - var(--u)*var(--gem)/2);top:calc(var(--u)*var(--gem)/-2 - 1px);transform:rotate(45deg);background:var(--rarity);border:1px solid #0a0c10}
+.card-inner{position:relative;overflow:hidden;display:flex;flex-direction:column;height:100%;background:linear-gradient(180deg,var(--wash),transparent 48%),linear-gradient(160deg,#1a202b,#0b1215 62%);border:1px solid #343c49;border-top:calc(var(--u)*var(--rule)) solid var(--rarity)}
+.card:hover:not(:disabled) .card-inner,.card:focus-visible .card-inner{background:linear-gradient(180deg,var(--hover),transparent 62%),linear-gradient(160deg,#1a202b,#0b1215 62%)}
+.card-head,.desc,.stats,.card-foot{position:relative;z-index:1}
+
+/* Rarity is a ladder: each step keeps everything below it and adds one new thing. */
+.t-uncommon{--frame:#3fae35;--wash:#1eff0018;--well:#2a4a2a;--hover:#1eff0030}
+.t-rare{--frame:var(--rarity);--wash:#0070dd26;--well:#1e4570;--hover:#0070dd50;--aura:0 0 calc(var(--u)*16) #0070dd77}
+.t-epic{--frame:var(--rarity);--wash:#a335ee2a;--well:#4a2a6b;--hover:#a335ee58;--gem:14;--rule:3;--aura:0 0 calc(var(--u)*22) #a335ee80}
+.t-legendary{--frame:#ffa64d;--wash:#ff800030;--well:#6b4114;--hover:#ff800060;--gem:17;--rule:3;--aura:0 0 0 1px #ff800080,0 0 calc(var(--u)*30) #ff800088}
+.t-rare .icon,.t-epic .icon,.t-legendary .icon{box-shadow:0 0 0 1px #000,inset 0 0 0 1px #080a0d,0 0 calc(var(--u)*12) var(--rarity)}
+.rar{color:var(--rarity)}
+.t-common .rar{color:inherit}
+.t-rare .rar{color:color-mix(in srgb,var(--rarity) 65%,#fff)}
+.t-epic .rar,.t-legendary .rar{padding:calc(var(--u)*2) calc(var(--u)*6);margin-right:calc(var(--u)*3);background:var(--rarity);color:#140c04}
+.t-epic .rar{color:#fff}
+.corner{position:absolute;z-index:2;width:calc(var(--u)*var(--corner,14));height:calc(var(--u)*var(--corner,14));border:calc(var(--u)*2) solid var(--rarity);pointer-events:none}
+.t-epic{--corner:18}.t-legendary{--corner:24}
+.corner.tl{left:calc(var(--u)*-3);top:calc(var(--u)*-3);border-right:0;border-bottom:0}
+.corner.tr{right:calc(var(--u)*-3);top:calc(var(--u)*-3);border-left:0;border-bottom:0}
+.corner.bl{left:calc(var(--u)*-3);bottom:calc(var(--u)*-3);border-right:0;border-top:0}
+.corner.br{right:calc(var(--u)*-3);bottom:calc(var(--u)*-3);border-left:0;border-top:0}
+.gem{position:absolute;z-index:2;top:calc(var(--u)*-4.5);width:calc(var(--u)*8);height:calc(var(--u)*8);transform:rotate(45deg);background:var(--rarity);border:1px solid #0a0c10}
+.halo{position:absolute;z-index:0;inset:calc(var(--u)*-44) calc(var(--u)*-34) calc(var(--u)*20);pointer-events:none;background:radial-gradient(ellipse at 50% 46%,color-mix(in srgb,var(--rarity) 36%,transparent),transparent 68%);animation:halo 2.8s ease-in-out infinite}
+.t-legendary .halo{background:radial-gradient(ellipse at 50% 46%,color-mix(in srgb,var(--rarity) 58%,transparent),transparent 70%);animation-duration:2s}
+.beam{position:absolute;z-index:0;left:calc(50% - var(--u)*130);top:calc(var(--u)*-58);width:calc(var(--u)*260);height:calc(var(--u)*116);pointer-events:none;background:radial-gradient(ellipse at 50% 50%,#ffc47790,transparent 68%)}
+.icon-wash{position:absolute;left:calc(var(--u)*-48);top:calc(var(--u)*-52);width:calc(var(--u)*220);height:calc(var(--u)*220);pointer-events:none;background:radial-gradient(circle,color-mix(in srgb,var(--rarity) 42%,transparent),transparent 68%)}
+.sweep{position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 38%,#ffe2b036 50%,transparent 62%);transform:translateX(-110%);animation:sweep 4.5s ease-in-out infinite}
+.ember{position:absolute;bottom:calc(var(--u)*-8);width:calc(var(--u)*5);height:calc(var(--u)*5);pointer-events:none;background:#ffc477;opacity:0;transform:rotate(45deg);animation:ember 3.4s linear infinite}
+.flash{position:absolute;inset:0;z-index:3;pointer-events:none;background:color-mix(in srgb,var(--rarity) 45%,#fff);opacity:0}
+.card.deal .flash{animation:flash .6s ease-out both;animation-delay:inherit}
+.t-legendary .card.deal{animation:deal-big .42s cubic-bezier(.2,1.3,.4,1) both}
+.reward.top-epic{background:radial-gradient(ellipse at 50% 52%,#a335ee12,transparent 58%),#05070ad8}
+.reward.top-legendary{background:radial-gradient(ellipse at 50% 52%,#ff800016,transparent 60%),#05070ad8}
+@keyframes halo{0%,100%{opacity:.55}50%{opacity:1}}
+@keyframes sweep{0%,55%{transform:translateX(-110%)}100%{transform:translateX(110%)}}
+@keyframes ember{0%{opacity:0;transform:translateY(0) rotate(45deg)}12%{opacity:.9}100%{opacity:0;transform:translateY(calc(var(--u)*-400)) rotate(45deg)}}
+@keyframes flash{from{opacity:.8}to{opacity:0}}
+@keyframes deal-big{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+
+.card-head{display:grid;grid-template-columns:calc(var(--u)*64) minmax(0,1fr);column-gap:calc(var(--u)*14);align-items:center;padding:calc(var(--u)*18) calc(var(--u)*16) calc(var(--u)*14)}
+.icon{position:relative;width:calc(var(--u)*64);height:calc(var(--u)*64);padding:calc(var(--u)*3);background:#11151b;border:1px solid var(--rarity);box-shadow:0 0 0 1px #000,inset 0 0 0 1px #080a0d}
+.icon img{display:block;width:100%;height:100%;object-fit:cover}
+.key{position:absolute;left:calc(var(--u)*-6);top:calc(var(--u)*-6);min-width:calc(var(--u)*20);height:calc(var(--u)*20);line-height:calc(var(--u)*18);text-align:center;background:#10141d;border:1px solid #5d6679;color:#e8eaf0;font-size:var(--caption)}
+.name{color:var(--rarity);font-size:var(--heading);line-height:1.15}
+.tags{display:flex;align-items:center;gap:calc(var(--u)*8);margin-top:calc(var(--u)*7);font-size:var(--caption);white-space:nowrap;color:#8b93a6}
+.tag{padding:calc(var(--u)*2) calc(var(--u)*6);border:1px solid #465163;color:#d0d4dd}
+.tag.new{background:var(--wine);border-color:#b83a50;color:#fff}
+
+/* Every card is one size: five lines of text and three stat rows hold the longest spell in the game,
+   so a reroll or banish never moves the buttons under your cursor. */
+.desc{min-height:calc(var(--u)*130);padding:0 calc(var(--u)*16) calc(var(--u)*12);color:#b8bdca;font-size:var(--body);line-height:1.42}
+.desc b{font-weight:normal;color:#e8eaf0}
+
+.stats{margin:auto calc(var(--u)*12) 0;min-height:calc(var(--u)*124);padding:calc(var(--u)*4) calc(var(--u)*12);display:flex;flex-direction:column;background:#05080b;border:1px solid var(--well)}
+.stat{flex:1;display:flex;align-items:center;justify-content:space-between;gap:calc(var(--u)*10);padding:calc(var(--u)*5) 0}
+.stat+.stat{border-top:1px solid #1d232c}
+.stat-label{font-size:var(--caption);color:#8b93a6}
+.stat-value{font-size:var(--lead);white-space:nowrap}
+.stat:only-child .stat-value.plain{font-size:var(--title)}
+.stat-value s{text-decoration:none;color:#8b93a6;font-size:var(--small)}
+.stat-value i{font-style:normal;color:#8b93a6;font-size:var(--small);margin:0 calc(var(--u)*4)}
+.stat-value em{font-style:normal;color:var(--green)}
+.card-foot{display:flex;align-items:center;justify-content:space-between;gap:calc(var(--u)*10);min-height:calc(var(--u)*42);padding:calc(var(--u)*10) calc(var(--u)*16);color:#8b93a6;font-size:var(--small)}
+.pips{display:flex;gap:calc(var(--u)*4);flex:none}
+.pips i{width:calc(var(--u)*9);height:calc(var(--u)*9);border:1px solid #5d6778;background:#0a0d11}
+.pips i.on{background:#8d97a9}
+.pips i.next{background:var(--red);border-color:#f0a3b1}
+
+.food-bar{display:flex;align-items:center;justify-content:center;gap:calc(var(--u)*7);margin-top:calc(var(--u)*18)}
+.food-bar[hidden]{display:none}
+.food-count{flex:none;white-space:nowrap;margin-right:calc(var(--u)*7);font-size:var(--caption);color:#8b93a6}
+.food-count b{font-weight:normal;font-size:var(--lead);color:#e8eaf0}
+.food-col{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*7);width:calc(var(--u)*56)}
+.food-col small{font-size:var(--caption);color:#8b93a6}
+.food-slot{position:relative;width:calc(var(--u)*42);height:calc(var(--u)*42);padding:calc(var(--u)*2);background:#05080b;border:1px solid #3c4552}
+.food-slot img{display:block;width:100%;height:100%;object-fit:cover}
+.food-slot.full{border-color:var(--rarity);box-shadow:0 0 0 1px #000}
+.food-slot:not(.full):after{content:'';position:absolute;left:calc(50% - var(--u)*3.5);top:calc(50% - var(--u)*3.5);width:calc(var(--u)*7);height:calc(var(--u)*7);transform:rotate(45deg);background:#232a35}
+.food-slot span{position:absolute;right:calc(var(--u)*-5);bottom:calc(var(--u)*-5);min-width:calc(var(--u)*18);height:calc(var(--u)*17);line-height:calc(var(--u)*15);padding:0 calc(var(--u)*3);text-align:center;background:#10141d;border:1px solid #5d6679;color:#e8eaf0;font-size:var(--caption)}
+
+.banish{position:relative;z-index:1;width:100%;height:calc(var(--u)*34);padding:0;font:var(--small) Friz,Georgia,serif;color:#8b93a6;background:#0d1517;border-color:#5d6679}
+.banish:hover:not(:disabled){color:#fff}
+
+.bar{display:flex;align-items:stretch;justify-content:center;gap:calc(var(--u)*10);margin-top:calc(var(--u)*22)}
+.action{display:flex;align-items:center;gap:calc(var(--u)*9);height:calc(var(--u)*44);padding:0 calc(var(--u)*18);font:var(--body) Friz,Georgia,serif;background:#141923;border-color:#9aa3b8}
+.action kbd{font:var(--caption) Friz,Georgia,serif;padding:calc(var(--u)*2) calc(var(--u)*6);background:#080b0f;border:1px solid #5d6778;color:#d0d4dd}
+.action small{font-size:var(--small);color:var(--gold)}
+.action:disabled small{color:inherit}
+.count{display:flex;align-items:center;gap:calc(var(--u)*8);padding:0 calc(var(--u)*14);border:1px solid #5d6679;background:#0d1517;font-size:var(--small);color:#8b93a6}
+.count b{font-weight:normal;color:#e8eaf0;font-size:var(--lead)}
+
+/* Picking: the chosen card holds, the others step back. */
+.hand.picked .slot:not(.chosen){opacity:.28}
+.slot.chosen .card{transform:scale(1.025);border-color:var(--rarity)}
+.hand.picked .banish{visibility:hidden}
+.card.deal{animation:deal .22s ease-out both}
+@keyframes deal{from{opacity:0;transform:translateY(calc(var(--u)*20))}to{opacity:1;transform:none}}
+
+.catalog{max-width:1550px;margin:auto;padding:26px 25px 4px}
+.catalog h2{font:21px Friz,Georgia,serif;margin:6px 0 8px}
+.catalog-rule{max-width:900px;line-height:1.6;color:var(--muted)}
+.catalog-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:16px}
+.cat-builds{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.cat-build h4{margin:0;font:normal 15px Friz,Georgia,serif;color:var(--gold)}
+.cat-build>p{margin:3px 0 8px;color:var(--muted);font-size:11px}
+.catalog-grid article{padding:14px 12px 6px;background:linear-gradient(160deg,#1a202b,#0b1215 62%);border:1px solid #343c49}
+.catalog-grid h3{margin:0;font:normal 17px Friz,Georgia,serif}
+.catalog-grid article>p{margin:3px 0 10px;color:var(--red);font-size:11px;letter-spacing:.3px}
+.cat-food{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:9px 0;border-top:1px solid #232a35}
+.cat-food img{display:block;width:38px;height:38px;padding:1px;background:#05080b;border:1px solid #465163}
+.cat-food b{display:block;font:normal 14px Friz,Georgia,serif}
+.cat-food span{display:block;margin-top:3px;color:#d0d4dd;font-size:11.5px;line-height:1.35}
+.cat-food small{display:block;margin-top:3px;color:#8b95a7;font-size:10.5px}
+
+.notes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;padding:24px 25px 30px}
+.notes h2{font:16px Friz,Georgia,serif;margin-bottom:8px}
+.notes p{line-height:1.7;color:var(--muted);font-size:12px}
+.notes span{color:#d0d4dd}
+
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+@media(max-width:850px){
+ .intro{align-items:start}.badge{display:none}
+ .scene{aspect-ratio:auto;min-height:720px}
+ .reward{--u:1px;position:relative;padding:24px 12px}
+ .hand,.hand.five{--u:1px;--caption:calc(var(--u)*11.7);--small:calc(var(--u)*14);--body:calc(var(--u)*16.4);--lead:calc(var(--u)*18.75);--heading:calc(var(--u)*23.4);--title:calc(var(--u)*30.5);grid-template-columns:minmax(0,1fr);row-gap:18px;width:100%}
+ .desc,.stats{min-height:0}
+ .tags{flex-wrap:wrap}
+ .bar{flex-wrap:wrap}
+ .scene-label{display:none}
+ .notes{grid-template-columns:1fr;gap:18px}
+ .cat-builds{grid-template-columns:1fr}
+ .food-bar{flex-wrap:wrap}
+ .food-count{width:100%;text-align:center;margin:0}
+}
+</style>
+</head>
+<body>
+<header class="intro"><div><div class="eyebrow">HUD proposal · for approval</div><h1>Reward cards</h1><p>Steel frames. Dark panels. Burgundy accents. The level-up reward in the same visual language as the rest of your HUD.</p></div><div class="badge">Mockup only · no game changes</div></header>
+<section class="controls" aria-label="Preview controls">
+  <label>OFFER<select id="offer">
+    <option value="ladder">All five rarities · sample values</option>
+    <option value="level">Level 3 · your screenshot</option>
+    <option value="rarity">Mixed rarities · sample values</option>
+    <option value="longest">Longest real spell text · fit test</option>
+    <option value="cache">Chest · 5 food slots, playable</option>
+  </select></label>
+  <button id="original" type="button" aria-pressed="false">Original screenshot</button>
+  <button id="fill" type="button" hidden>Fill food slots</button>
+  <button id="reset" type="button">Reset preview</button>
+</section>
+<main>
+<div class="scene-wrap"><section class="scene" id="scene" aria-label="Reward card proposal over a gameplay screenshot">
+  <div class="reward" id="reward">
+    <div class="reward-head">
+      <div class="reward-kicker"><span class="diamond"></span><span id="kicker"></span><span class="diamond"></span></div>
+      <h2 id="heading"></h2>
+    </div>
+    <div class="hand" id="hand"></div>
+    <div class="food-bar" id="foodBar" hidden></div>
+    <div class="bar">
+      <button class="action" id="reroll" type="button"><kbd>R</kbd><span>Reroll</span><small id="rerollCount"></small></button>
+      <div class="count"><span>Banishes left</span><b id="banishCount"></b></div>
+      <button class="action" id="skip" type="button"><kbd>S</kbd><span>Skip</span><small>+10 gold</small></button>
+    </div>
+  </div>
+  <div class="scene-label" id="sceneLabel"></div>
+</section></div>
+<section class="catalog" aria-label="Food catalog">
+  <div class="eyebrow">Chest rewards</div>
+  <h2>Food catalog</h2>
+  <p class="catalog-rule">Five types, one slot each, so you always carry at most five foods. Each type has three builds with real trade-offs, and each build is a ladder of five ranks: 75 foods. Every slot starts at Common, and your first pick sets its build. After that a chest only offers the next rank of that food, so numbers only go up, all the way to Legendary. The values shown are your total at that rank, and they are sample numbers.</p>
+  <div class="catalog-grid" id="catalogGrid"></div>
+</section>
+<section class="notes" aria-label="Design notes">
+  <article><h2>Read it top to bottom</h2><p>Icon and name first, then what the spell does, then its numbers, then what it costs you. <span>Each section sits at the same height on every card, and every card is one size</span>, tall enough for the longest spell text in the game. You compare across instead of hunting, and a reroll never moves the buttons under your cursor. Rarity decoration stays around the content, so the numbers read the same on every card.</p></article>
+  <article><h2>Rarity is a ladder</h2><p>Each step keeps what is below it and adds one thing. <span>Common</span> is plain steel. <span>Uncommon</span> tints the frame and top. <span>Rare</span> adds a glow and corner brackets. <span>Epic</span> adds gems, a filled rarity tag, a light behind the icon and a slow pulse. <span>Legendary</span> adds a gold double frame, a beam, drifting embers, a light sweep and a flash when dealt.</p></article>
+  <article><h2>Upgrades show their gain</h2><p>A new spell shows plain values. An upgrade shows <span>old value, arrow, new value in green</span>, using the same comparison rows the game already computes. Spell slots become six pips, with the slot this card would take in burgundy. <span>Chests offer food instead of rings and amulets</span>, so run rewards never compete with the gear your character wears. <span>You carry 5 foods, one of each type, and each climbs from Common to Legendary</span>, as listed in the catalog above. Numbers only go up, and no food gives move speed.</p></article>
+  <article><h2>Quieter controls</h2><p>"Banish (1 left)" no longer repeats three times: <span>each card has a plain Banish button and the shared count sits once in the action bar</span>. Reroll and Skip carry their key and their value. Banish stays a separate control below the card, so it can never pick the card by accident.</p></article>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const COLORS={COMMON:'#ffffff',UNCOMMON:'#1eff00',RARE:'#0070dd',EPIC:'#a335ee',LEGENDARY:'#ff8000'};
+const WRATH='assets/icon-spell_holy_excorcism-local.png',JUDGE='assets/icon-spell_holy_righteousfury-local.png',HAMMER='assets/icon-ability_thunderclap-local.png',SMITE='assets/icon-spell_holy_holysmite-local.png',COIN='assets/icon-inv_misc_coin_02-local.png';
+// Chest food. Five types, one slot each, so you always carry at most five foods. Each type has three
+// builds, and each build is a ladder from Common to Legendary. Numbers only climb and stay small on
+// purpose: for scale, one common ring pick in the game gives +25.5% damage. Food never gives move speed.
+const LAST_RANK=4;
+const TYPES=[
+ {id:'sweet',name:'Sweets',one:'SWEET',slot:'sweets',job:'Damage',paths:[
+  {name:'Sugar Rush',note:'All damage',desc:'Pure sugar. Your spells simply hit harder.',
+   stats:[['DAMAGE',[1,1.5,2,2.5,3],'%']],
+   foods:[['Peppermint Drop','inv_misc_food_28'],['Cherry Lollipop','inv_misc_food_26'],['Glazed Ring','inv_misc_food_34'],['Frosted Swirl','inv_misc_food_31'],['Starlight Cookie','inv_misc_food_62']]},
+  {name:'Sharing Treats',note:'Less damage, more targets',desc:'Made to be passed around. Your spells hit less hard but strike more enemies.',
+   stats:[['DAMAGE',[.3,.4,.5,.6,.8],'%'],['TARGETS',[1,1,1,2,2],'',true]],
+   foods:[['Candy Corn','inv_misc_food_30'],['Ribbon Candy','inv_holiday_christmas_wrapping_01'],['Sweetheart Candy','inv_valentinescandy'],['Festival Gift Box','inv_misc_gift_01'],['Winter Cane','inv_misc_food_61']]},
+  {name:'Big Bites',note:'Less damage, more area',desc:'Rich and oversized. Your spells hit less hard but cover more ground.',
+   stats:[['DAMAGE',[.5,.75,1,1.25,1.5],'%'],['AREA',[1,1.5,2,2.5,3],'%']],
+   foods:[['Flaky Croissant','inv_misc_food_32'],['Honey Bun','inv_misc_food_33'],['Berry Pie','inv_misc_food_10'],['Dark Fudge','inv_misc_food_27'],['Grinning Pumpkin','inv_misc_food_59']]},
+ ]},
+ {id:'drink',name:'Drinks',one:'DRINK',slot:'drinks',job:'Damage reduction',paths:[
+  {name:'Stout Hearts',note:'All damage reduction',desc:'Strong and steadying. Blows simply hurt less.',
+   stats:[['DAMAGE REDUCTION',[.5,.75,1,1.25,1.5],'%']],
+   foods:[['Campfire Cocoa','inv_drink_15'],['Foaming Ale','inv_drink_08'],['Barrel Stout','inv_drink_05'],['Iron Stein','inv_drink_03'],['Spirit Gourd','inv_drink_16']]},
+  {name:'Healing Draughts',note:'Less reduction, more healing',desc:'Soothing all the way down. Blows hurt more than a stout, but wounds slowly close.',
+   stats:[['DAMAGE REDUCTION',[.2,.3,.4,.5,.6],'%'],['HEALTH PER SECOND',[.1,.15,.2,.25,.3],'']],
+   foods:[['Bog Root Tea','inv_drink_17'],['Spring Water','inv_drink_14'],['Healer\'s Flask','inv_drink_18'],['Aged Red','inv_drink_10'],['Sacred Vintage','inv_drink_11']]},
+  {name:'Bitter Brews',note:'Less reduction, hurts attackers',desc:'It burns going down. Blows hurt more than a stout, but melee attackers pay for it.',
+   stats:[['DAMAGE REDUCTION',[.25,.4,.5,.6,.75],'%'],['REFLECTED MELEE',[1,1.5,2,2.5,3],'%']],
+   foods:[['Bitter Cider','inv_drink_04'],['Thorn Wine','inv_drink_02'],['Clear Moonshine','inv_drink_06'],['Black Flask','inv_drink_01'],['Venom Vintage','inv_drink_09']]},
+ ]},
+ {id:'meat',name:'Meat',one:'MEAT',slot:'meat',job:'Maximum health',paths:[
+  {name:'Hearty Cuts',note:'All health',desc:'Filling and plain. You simply stay on your feet longer.',
+   stats:[['MAXIMUM HEALTH',[1,1.5,2,2.5,3],'%']],
+   foods:[['Spiced Sausage','inv_misc_food_53'],['Drumstick','inv_misc_food_18'],['Fire Skewer','inv_misc_food_68'],['Prime Ribs','inv_misc_food_16'],['Kingly Roast','inv_misc_food_13']]},
+  {name:'Bloody Cuts',note:'Less health, some life steal',desc:'Barely cooked. You have less health to spare, but your hits feed you.',
+   stats:[['MAXIMUM HEALTH',[.4,.6,.8,1,1.2],'%'],['LIFE STEAL',[.1,.15,.2,.25,.3],'%']],
+   foods:[['Blood Sausage','inv_misc_food_66'],['Rare Steak','inv_misc_food_47'],['Butcher\'s Cut','inv_misc_food_70'],['Raw Flank','inv_misc_food_71'],['Beating Heart','inv_misc_organ_03']]},
+  {name:'Hunter\'s Game',note:'Less health, heal on kills',desc:'Earned on the hunt. You have less health to spare, but every kill patches you up.',
+   stats:[['MAXIMUM HEALTH',[.5,.75,1,1.25,1.5],'%'],['HEALTH PER KILL',[.05,.075,.1,.125,.15],'']],
+   foods:[['Smoked Wing','inv_misc_food_51'],['Salted Ham','inv_misc_food_50'],['Roast Fowl','inv_misc_food_15'],['Boar Chops','inv_misc_food_48'],['Smoking Haunch','inv_misc_food_60']]},
+ ]},
+ {id:'fish',name:'Fish',one:'FISH',slot:'fish',job:'Critical chance',paths:[
+  {name:'Keen Catch',note:'All crit chance',desc:'Clean and sharp. You simply crit more often.',
+   stats:[['CRITICAL CHANCE',[.5,.75,1,1.25,1.5],'%']],
+   foods:[['Pink Shrimp','inv_misc_fish_15'],['Salmon Roll','inv_misc_fish_17'],['Reef Darter','inv_misc_fish_09'],['Frostfin','inv_misc_fish_20'],['Moonfin','inv_misc_fish_21']]},
+  {name:'Savage Catch',note:'Less crit chance, bigger crits',desc:'All teeth. You crit less often than a keen catch, but your crits land harder.',
+   stats:[['CRITICAL CHANCE',[.2,.3,.4,.5,.6],'%'],['CRITICAL DAMAGE',[2,3,4,5,6],'%']],
+   foods:[['Bog Eel','inv_misc_fish_11'],['Yellow Snapper','inv_misc_fish_03'],['Red Crawler','inv_misc_fish_14'],['Ember Salmon','inv_misc_fish_22'],['Gnashing Horror','inv_misc_fish_27']]},
+  {name:'Lucky Catch',note:'Less crit chance, more luck',desc:'A fisher\'s story come true. You crit less often than a keen catch, but rewards roll better.',
+   stats:[['CRITICAL CHANCE',[.25,.4,.5,.6,.75],'%'],['LUCK',[1,1.5,2,2.5,3],'%']],
+   foods:[['Bluegill','inv_misc_fish_08'],['Silver Trout','inv_misc_fish_30'],['Harlequin','inv_misc_fish_10'],['Golden Perch','inv_misc_fish_19'],['Rainbow Starfin','inv_misc_fish_04']]},
+ ]},
+ {id:'fruit',name:'Fruit',one:'FRUIT',slot:'fruit',job:'Cooldown reduction',paths:[
+  {name:'Fresh Picks',note:'All cooldown reduction',desc:'Bright and quick. Your spells simply come back sooner.',
+   stats:[['COOLDOWN REDUCTION',[.5,.75,1,1.25,1.5],'%']],
+   foods:[['Crisp Apple','inv_misc_food_19'],['Wild Cherries','inv_misc_food_40'],['Sun Orange','inv_misc_food_41'],['Vintner\'s Grapes','inv_misc_food_58'],['Ember Pomegranate','inv_misc_food_43']]},
+  {name:'Double Harvest',note:'Less cooldown, double casts',desc:'Twice the fruit. Your spells come back slower than fresh picks, but sometimes cast twice.',
+   stats:[['COOLDOWN REDUCTION',[.2,.3,.4,.5,.6],'%'],['DOUBLE CAST',[.3,.45,.6,.75,.9],'%']],
+   foods:[['Ripe Banana','inv_misc_food_24'],['Banana Bunch','inv_misc_food_23'],['Honeydew','inv_misc_food_46'],['Emerald Grapes','inv_misc_food_57'],['Blood Melon','inv_misc_food_22']]},
+  {name:'Scholar\'s Garden',note:'Less cooldown, more experience',desc:'Good for the mind. Your spells come back slower than fresh picks, but you level faster.',
+   stats:[['COOLDOWN REDUCTION',[.25,.4,.5,.6,.75],'%'],['EXPERIENCE',[1,1.5,2,2.5,3],'%']],
+   foods:[['Green Apple','inv_misc_food_21'],['Ripe Peach','inv_misc_food_42'],['Garden Carrot','inv_misc_food_54'],['Scholar\'s Radish','inv_misc_food_56'],['Sage Root','inv_misc_food_55']]},
+ ]},
+];
+const FOOD_SLOTS=TYPES.length;
+// Three builds per type, five rarities per build: 75 foods. Each rank adds its value to the ranks
+// below, so a food's stats are its running total. A stat marked flat, such as targets, is already a total.
+const runningTotal=(values,r,flat)=>flat?values[r]:values.slice(0,r+1).reduce((sum,v)=>sum+v,0);
+const FOODS=TYPES.flatMap(type=>type.paths.flatMap((path,p)=>path.foods.map(([name,icon],r)=>({
+ type:type.id,path:p,id:`${type.id}-${p}-${r}`,name,rarity:Object.keys(COLORS)[r],icon:`assets/icon-${icon}-local.png`,desc:path.desc,
+ stats:path.stats.map(([label,values,suffix,flat])=>[label,runningTotal(values,r,flat),suffix]),
+}))));
+const GOLD={name:'Gold',rarity:'COMMON',kind:'TREASURE',tag:'',icon:COIN,desc:'No eligible upgrades remain in this reward pool.',stats:[['GOLD','+25']],foot:{text:'Added to your run gold'}};
+const slotFoot={text:'Takes a spell slot',pips:[2,1]};
+const foodFoot={text:'Lasts the whole run'};
+const SWIRL_CARD={name:'Frosted Swirl',rarity:'EPIC',kind:'SWEET',tag:'PERMANENT',icon:'assets/icon-inv_misc_food_31-local.png',desc:'Pure sugar. Your spells simply hit harder.',stats:[['DAMAGE','+7.0%']],foot:foodFoot};
+const TIERS=Object.keys(COLORS);
+const offers={
+ ladder:{kicker:'RARITY LADDER · ONE REWARD AT EACH STEP',heading:'Five rarities, side by side',label:'PROPOSAL · all five rarities, sample values',cards:[
+  {name:'Holy Wrath',rarity:'COMMON',kind:'SPELL',tag:'NEW',icon:WRATH,desc:'Deals <b>43.7</b> damage to every enemy within <b>12 yd</b> of you.',stats:[['DAMAGE','43.7'],['COOLDOWN','9.8s']],foot:slotFoot},
+  {name:'Holy Shock',rarity:'UNCOMMON',kind:'SPELL',tag:'NEW',icon:SMITE,desc:'Fires <b>2 missiles</b> for <b>96</b> damage each at random enemies within <b>22 yd</b>. Bosses and elites take priority; missiles can hit the same enemy repeatedly, healing you for <b>3%</b> of maximum health per enemy hit.',stats:[['DAMAGE','96'],['COOLDOWN','5.2s']],foot:slotFoot},
+  {name:'Judgement',rarity:'RARE',kind:'SPELL',tag:'RANK 3 → 4',icon:JUDGE,desc:'Hits the <b>2</b> nearest enemies for <b>468</b> damage. Bosses and elites are targeted first.',stats:[['DAMAGE',['388.2','468.4']],['TARGETS',['1','2']]],foot:{text:'Upgrades an existing spell'}},
+  SWIRL_CARD,
+  {name:'Hammer of Wrath',rarity:'LEGENDARY',kind:'SPELL',tag:'RANK 4 → 5',icon:HAMMER,desc:'Hits the nearest enemy for <b>540</b> damage. Bosses and elites are targeted first.',stats:[['DAMAGE',['310.5','540.3']],['COOLDOWN',['1.6s','1.1s']]],foot:{text:'Upgrades an existing spell'}},
+ ],spare:[
+  {name:'Crisp Apple',rarity:'COMMON',kind:'FRUIT',tag:'PERMANENT',icon:'assets/icon-inv_misc_food_19-local.png',desc:'Bright and quick. Your spells simply come back sooner.',stats:[['COOLDOWN REDUCTION','+0.5%']],foot:foodFoot},
+ ]},
+ level:{kicker:'LEVEL 3 · SPELL REWARD',heading:'Choose your reward',label:'PROPOSAL · level 3 offer, values from your screenshot',cards:[
+  {name:'Holy Wrath',rarity:'COMMON',kind:'SPELL',tag:'NEW',icon:WRATH,desc:'Deals <b>43.7</b> damage to every enemy within <b>12 yd</b> of you.',stats:[['DAMAGE','43.7'],['COOLDOWN','9.8s']],foot:slotFoot},
+  {name:'Judgement',rarity:'COMMON',kind:'SPELL',tag:'NEW',icon:JUDGE,desc:'Hits the nearest enemy for <b>312</b> damage. Bosses and elites are targeted first.',stats:[['DAMAGE','311.6'],['COOLDOWN','8.4s']],foot:slotFoot},
+  {name:'Hammer of Wrath',rarity:'COMMON',kind:'SPELL',tag:'RANK 1 → 2',icon:HAMMER,desc:'Hits the nearest enemy for <b>150</b> damage. Bosses and elites are targeted first.',stats:[['DAMAGE',['122.3','150.1']]],foot:{text:'Upgrades an existing spell'}},
+ ],spare:[
+  {name:'Holy Shock',rarity:'COMMON',kind:'SPELL',tag:'NEW',icon:SMITE,desc:'Fires <b>2 missiles</b> for <b>96</b> damage each at random enemies within <b>22 yd</b>. Bosses and elites take priority; missiles can hit the same enemy repeatedly, healing you for <b>3%</b> of maximum health per enemy hit.',stats:[['DAMAGE','96'],['COOLDOWN','5.2s']],foot:slotFoot},
+ ]},
+ rarity:{kicker:'LEVEL 12 · SPELL REWARD',heading:'Choose your reward',label:'PROPOSAL · rarity colors, sample values',cards:[
+  {name:'Holy Wrath',rarity:'UNCOMMON',kind:'SPELL',tag:'RANK 2 → 3',icon:WRATH,desc:'Deals <b>61.2</b> damage to every enemy within <b>14 yd</b> of you.',stats:[['DAMAGE',['52.4','61.2']],['RADIUS',['12 yd','14 yd']]],foot:{text:'Upgrades an existing spell'}},
+  {name:'Judgement',rarity:'RARE',kind:'SPELL',tag:'RANK 3 → 4',icon:JUDGE,desc:'Hits the <b>2</b> nearest enemies for <b>468</b> damage. Bosses and elites are targeted first.',stats:[['DAMAGE',['388.2','468.4']],['TARGETS',['1','2']]],foot:{text:'Upgrades an existing spell'}},
+  {name:'Hammer of Wrath',rarity:'LEGENDARY',kind:'SPELL',tag:'RANK 4 → 5',icon:HAMMER,desc:'Hits the nearest enemy for <b>540</b> damage. Bosses and elites are targeted first.',stats:[['DAMAGE',['310.5','540.3']],['COOLDOWN',['1.6s','1.1s']]],foot:{text:'Upgrades an existing spell'}},
+ ],spare:[
+  {name:'Holy Shock',rarity:'EPIC',kind:'SPELL',tag:'NEW',icon:SMITE,desc:'Fires <b>2 missiles</b> for <b>280</b> damage each at random enemies within <b>22 yd</b>. Bosses and elites take priority; missiles can hit the same enemy repeatedly, healing you for <b>3%</b> of maximum health per enemy hit.',stats:[['DAMAGE','280.4'],['COOLDOWN','4.6s']],foot:{text:'Takes a spell slot',pips:[5,1]}},
+ ]},
+ longest:{kicker:'FIT TEST · LONGEST TEXT IN THE GAME',heading:'Choose your reward',label:'FIT TEST · real text from the game: longest description, longest name, widest stat row',cards:[
+  {name:'Holy Shock',rarity:'LEGENDARY',kind:'SPELL',tag:'RANK 7 → 8',icon:SMITE,desc:'Fires <b>2 missiles</b> for <b>94.7</b> damage each at random enemies within <b>22 yd</b>. Bosses and elites take priority; missiles can hit the same enemy repeatedly, healing you for <b>3%</b> of maximum health per enemy hit.',stats:[['DAMAGE',['94.7','102']],['COOLDOWN',['4.2s','3.2s']],['TARGETS',['2','4']]],foot:{text:'Upgrades an existing spell'}},
+  {name:'Immolation Trap Effect',rarity:'EPIC',kind:'SPELL',tag:'RANK 7 → 8',icon:WRATH,desc:'Covers a <b>10.5 yd</b> area around you for <b>12.8 sec</b>, dealing <b>36.6</b> total damage in <b>4 ticks</b>.',stats:[['DAMAGE',['34','36.6']],['COOLDOWN',['12.6s','9.7s']],['RADIUS',['7 yd','10.5 yd']]],foot:{text:'Upgrades an existing spell'}},
+  {name:'Battle Shout',rarity:'RARE',kind:'SPELL',tag:'RANK 7 → 8',icon:JUDGE,desc:'Increases damage by <b>43.1%</b> for <b>12.8 sec</b> when enemies are within <b>30 yd</b>.',stats:[['DAMAGE BONUS',['+40%','+43.1%']],['COOLDOWN',['22.4s','17.2s']],['DURATION',['8s','12.8s']]],foot:{text:'Upgrades an existing spell'}},
+ ],spare:[]},
+ cache:{live:true,label:'PROPOSAL · pick a meal and the next chest opens, sample values',cards:[],spare:[]},
+};
+let hand=[],spare=[],banishes=1,rerolls=3,busy=false,offer=offers.level;
+let slots=new Map(),banished=[]; // type id → the id of the one food you hold of that type
+
+const foodById=id=>FOODS.find(f=>f.id===id);
+const typeById=id=>TYPES.find(t=>t.id===id);
+const slotsFull=()=>slots.size>=FOOD_SLOTS;
+const rank=f=>TIERS.indexOf(f.rarity);
+// The whole rule, per type: an empty slot takes the Common of any build, and that pick sets your
+// build. A filled slot takes only the next rank of the same build. When all five slots hold their
+// Legendary, the chest falls back to Gold.
+function eligible(f){
+ const held=slots.get(f.type);
+ if(!held)return rank(f)===0;
+ const old=foodById(held);
+ return f.path===old.path&&rank(f)===rank(old)+1;
+}
+const foodPool=()=>FOODS.filter(eligible);
+// Pick a type evenly, preferring types not on the table yet, then any food it allows.
+function drawFoods(count,keep=[]){
+ const pool=foodPool().filter(f=>!keep.includes(f.id)&&!banished.includes(f.id)),out=[];
+ const onTable=new Set(keep.filter(Boolean).map(id=>foodById(id).type));
+ while(out.length<count&&pool.length){
+  const types=[...new Set(pool.map(f=>f.type))],fresh=types.filter(t=>!onTable.has(t));
+  const from=fresh.length?fresh:types,type=from[Math.floor(Math.random()*from.length)];
+  const options=pool.filter(f=>f.type===type);
+  const chosen=options[Math.floor(Math.random()*options.length)];
+  pool.splice(pool.indexOf(chosen),1);
+  onTable.add(type);
+  out.push(foodCard(chosen));
+ }
+ return out;
+}
+function amount(value,suffix,label){
+ const v=Math.round(value*100)/100;
+ if(suffix==='%')return `+${Number.isInteger(v*10)?v.toFixed(1):v.toFixed(2)}%`;
+ return label==='TARGETS'?`+${v}`:`+${v.toFixed(2)}`;
+}
+function foodCard(f){
+ const type=typeById(f.type),held=slots.get(f.type),old=held?foodById(held):null;
+ return {food:f.id,name:f.name,rarity:f.rarity,kind:type.one,icon:f.icon,desc:f.desc,
+  tag:old?`RANK ${rank(old)+1} → ${rank(f)+1}`:'PERMANENT',
+  // Stats are running totals, so old → new only ever climbs. An unchanged stat shows once.
+  stats:f.stats.map(([label,value,suffix],i)=>{
+   const before=old?old.stats[i][1]:value;
+   return [label,before===value?amount(value,suffix,label):[amount(before,suffix,label),amount(value,suffix,label)]];
+  }),
+  foot:!old?{text:`Fills your ${type.slot} slot`,pips:[slots.size,1],total:FOOD_SLOTS}
+   :rank(f)===LAST_RANK?{text:`Final upgrade of ${old.name}`}
+   :{text:`Upgrades ${old.name}`}};
+}
+function chestHand(){const cards=drawFoods(3);return cards.length?cards:[GOLD]}
+function eat(id){slots.set(foodById(id).type,id)}
+function dealChest(){
+ banishes=1;rerolls=3;banished=[];
+ hand=chestHand();
+ const full=slotsFull(),done=!foodPool().length;
+ $('kicker').textContent=done?'BATTLEGROUND CACHE · ALL FOOD AT ITS LIMIT':full?`BATTLEGROUND CACHE · ALL ${FOOD_SLOTS} FOOD SLOTS FULL`:'BATTLEGROUND CACHE · PERMANENT FOOD';
+ $('heading').textContent=done?'Take the gold':full?'Improve a meal':'Choose one meal';
+ $('sceneLabel').textContent=offer.label;
+ render();
+}
+function renderFoods(){
+ $('hand').style.setProperty('--n',hand.length);
+ $('foodBar').hidden=!offer.live;
+ $('fill').hidden=!offer.live;
+ $('fill').disabled=slotsFull();
+ if(!offer.live)return;
+ const columns=TYPES.map(type=>{
+  const held=slots.get(type.id),f=held&&foodById(held);
+  const box=f?`<div class="food-slot full" style="--rarity:${COLORS[f.rarity]}" title="${f.name}"><img src="${f.icon}" alt="${f.name}"><span>${rank(f)===LAST_RANK?'MAX':rank(f)+1}</span></div>`:'<div class="food-slot"></div>';
+  return `<div class="food-col">${box}<small>${type.name}</small></div>`;
+ });
+ $('foodBar').innerHTML=`<div class="food-count">FOOD <b>${slots.size}</b> / ${FOOD_SLOTS}</div>${columns.join('')}`;
+}
+function renderCatalog(){
+ const rows=f=>{
+  const total=f.stats.map(([label,value,suffix])=>`${amount(value,suffix,label)} ${label.toLowerCase()}`).join(', ').replace('+1 targets','+1 target');
+  return `<div class="cat-food"><img src="${f.icon}" alt="" style="border-color:${COLORS[f.rarity]}"><div><b style="color:${COLORS[f.rarity]}">${f.name}</b><span>${total}</span><small>Rank ${rank(f)+1} · ${f.rarity[0]+f.rarity.slice(1).toLowerCase()}</small></div></div>`;
+ };
+ const build=(type,path,p)=>`<div class="cat-build"><h4>${path.name}</h4><p>${path.note}</p>${FOODS.filter(f=>f.type===type.id&&f.path===p).map(rows).join('')}</div>`;
+ $('catalogGrid').innerHTML=TYPES.map(type=>`<article><h3>${type.name}</h3><p>${type.job}</p><div class="cat-builds">${type.paths.map((path,p)=>build(type,path,p)).join('')}</div></article>`).join('');
+}
+
+function statRow([label,value]){
+ const shown=Array.isArray(value)?`<s>${value[0]}</s><i>→</i><em>${value[1]}</em>`:value;
+ return `<div class="stat"><span class="stat-label">${label}</span><span class="stat-value ${Array.isArray(value)?'':'plain'}">${shown}</span></div>`;
+}
+function pips(foot){
+ if(!foot.pips)return '';
+ const [on,next]=foot.pips,total=foot.total||6;
+ return `<span class="pips" aria-label="${on+next} of ${total} slots">${Array.from({length:total},(_,i)=>`<i class="${i<on?'on':i<on+next?'next':''}"></i>`).join('')}</span>`;
+}
+// The decoration each rarity adds on top of the step below it.
+function decor(tier){
+ const corners=tier>=2?['tl','tr','bl','br'].map(c=>`<span class="corner ${c}"></span>`).join(''):'';
+ const gemAt=tier>=4?[-44,-26,18,36]:tier>=3?[-22,14]:[];
+ const gems=gemAt.map(x=>`<span class="gem" style="left:calc(50% + var(--u)*${x})"></span>`).join('');
+ const inner=(tier>=3?'<span class="icon-wash"></span><span class="flash"></span>':'')+(tier>=4?'<span class="sweep"></span>'+[12,27,41,58,72,88].map((x,n)=>`<span class="ember" style="left:${x}%;animation-delay:${n*.57}s"></span>`).join(''):'');
+ const behind=(tier>=3?'<span class="halo"></span>':'')+(tier>=4?'<span class="beam"></span>':'');
+ return {corners,gems,inner,behind};
+}
+// All values in this preview come from the fixed example data above.
+function render(deal=hand.map((_,i)=>i)){
+ $('hand').classList.remove('picked');
+ $('hand').classList.toggle('five',hand.length>3);
+ const top=Math.max(...hand.map(card=>TIERS.indexOf(card.rarity)));
+ $('reward').classList.toggle('top-epic',top===3);
+ $('reward').classList.toggle('top-legendary',top===4);
+ $('hand').replaceChildren(...hand.map((card,i)=>{
+  const slot=document.createElement('div');slot.className=`slot t-${card.rarity.toLowerCase()}`;
+  slot.style.setProperty('--rarity',COLORS[card.rarity]);
+  const fx=decor(TIERS.indexOf(card.rarity));
+  const tag=card.tag?`<span class="tag ${card.tag==='NEW'||card.tag==='PERMANENT'?'new':''}">${card.tag}</span>`:'';
+  slot.innerHTML=`${fx.behind}<button type="button" class="card ${deal.includes(i)?'deal':''}" style="animation-delay:${i*.05}s">${fx.corners}${fx.gems}<span class="card-inner">${fx.inner}
+   <span class="card-head"><span class="icon"><img src="${card.icon}" alt=""><span class="key">${i+1}</span></span><span><span class="name" style="display:block">${card.name}</span><span class="tags"><span><span class="rar">${card.rarity}</span> ${card.kind}</span>${tag}</span></span></span>
+   <span class="desc" style="display:block">${card.desc}</span>
+   <span class="stats">${card.stats.map(statRow).join('')}</span>
+   <span class="card-foot"><span>${card.foot.text}</span>${pips(card.foot)}</span>
+  </span></button><button type="button" class="banish" ${banishes?'':'disabled'}>Banish</button>`;
+  slot.querySelector('.card').onclick=()=>pick(i);
+  slot.querySelector('.banish').onclick=()=>banish(i);
+  return slot;
+ }));
+ $('banishCount').textContent=banishes;
+ $('rerollCount').textContent=rerolls?`${rerolls} free`:'none left';
+ $('reroll').disabled=!rerolls;
+ renderFoods();
+}
+function load(){
+ offer=offers[$('offer').value];busy=false;banishes=1;rerolls=3;
+ slots=new Map();banished=[];
+ $('scene').classList.remove('original');$('original').setAttribute('aria-pressed','false');
+ if(offer.live){dealChest();return;}
+ hand=[...offer.cards];spare=[...offer.spare];
+ $('kicker').textContent=offer.kicker;$('heading').textContent=offer.heading;$('sceneLabel').textContent=offer.label;
+ render();
+}
+function banish(i){
+ if(busy||!banishes)return;
+ banishes--;
+ if(offer.live){
+  const gone=hand[i];
+  if(gone.food)banished.push(gone.food);
+  hand[i]=drawFoods(1,hand.map(card=>card.food))[0]||GOLD;
+ }else{
+  const gone=hand[i];hand[i]=spare.shift()||gone;spare.push(gone);
+ }
+ render([i]);
+}
+function reroll(){
+ if(busy||!rerolls)return;
+ rerolls--;
+ if(offer.live)hand=chestHand();
+ else{spare.push(hand.shift());hand.push(spare.shift());}
+ render();
+}
+function finish(){setTimeout(()=>{busy=false;$('hand').classList.remove('picked');offer.live?dealChest():load();},1100)}
+function pick(i){
+ if(busy)return;
+ busy=true;
+ const card=hand[i];
+ $('hand').classList.add('picked');
+ $('hand').children[i].classList.add('chosen');
+ $('sceneLabel').textContent=`Picked ${card.name} · the run resumes`;
+ if(card.food){eat(card.food);renderFoods();}
+ finish();
+}
+function fillSlots(){
+ if(busy)return;
+ for(const type of TYPES){
+  if(slots.has(type.id))continue;
+  const options=FOODS.filter(f=>f.type===type.id&&rank(f)===0);
+  eat(options[Math.floor(Math.random()*options.length)].id);
+ }
+ dealChest();
+}
+function skip(){
+ if(busy)return;
+ busy=true;
+ $('hand').classList.add('picked');
+ $('sceneLabel').textContent='Skipped · +10 gold · the run resumes';
+ finish();
+}
+renderCatalog();
+$('offer').onchange=load;$('reset').onclick=load;$('fill').onclick=fillSlots;$('reroll').onclick=reroll;$('skip').onclick=skip;
+$('original').onclick=()=>{
+ const on=$('scene').classList.toggle('original');
+ $('original').setAttribute('aria-pressed',String(on));
+ $('sceneLabel').textContent=on?'ORIGINAL · your screenshot':offer.label;
+};
+addEventListener('keydown',e=>{
+ if(e.target.tagName==='SELECT'||e.ctrlKey||e.metaKey||e.altKey)return;
+ if($('scene').classList.contains('original'))return;
+ const n=Number(e.key);
+ if(n>=1&&n<=hand.length)pick(n-1);
+ if(e.key==='r'||e.key==='R')reroll();
+ if(e.key==='s'||e.key==='S')skip();
+});
+load();
+</script>
+</body>
+</html>

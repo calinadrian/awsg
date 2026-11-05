@@ -185,12 +185,17 @@ pub(super) fn drive(
     mut selection: ResMut<Selection>,
     mut run: ResMut<Run>,
     mut offer: ResMut<Offer>,
+    mut pending: ResMut<super::cards::PendingPick>,
     mut rng: ResMut<Rng>,
     loading: Res<crate::loading_screen::LoadingScreen>,
     heroes: Query<(), With<Hero>>,
     mut enemies: Query<&mut Enemy>,
     gear: Res<super::inventory::Equipment>,
 ) {
+    let picking = crate::webenv::var("WOW_SURVIVORS_REWARD_PREVIEW").as_deref() == Some("chest-pick");
+    if picking && *phase.get() == Phase::Playing && run.food.iter().any(Option::is_some) {
+        auto.capture_once(&mut commands, "picked".into());
+    }
     let dt = time.delta_secs();
     auto.wait += dt;
     auto.frames += 1;
@@ -229,7 +234,10 @@ pub(super) fn drive(
                 auto.capture_once(&mut commands, "menu".into());
             } else if auto.wait > 3.0 && hud::start_run(&mut run, &mut selection) {
                 if let Some(kind) = crate::webenv::var("WOW_SURVIVORS_REWARD_PREVIEW") {
-                    if kind == "chest" {
+                    if kind == "chest-full" {
+                        run.food = super::food::all_common();
+                    }
+                    if kind.starts_with("chest") {
                         run.pending_chests = 1;
                     } else {
                         run.pending_levels = 1;
@@ -245,6 +253,13 @@ pub(super) fn drive(
             // After the deal-in, so the shot shows the cards settled.
             if auto.wait > 1.2 && (run.level <= 3 || run.level == 10) {
                 auto.capture_once(&mut commands, format!("levelup-{}", run.level));
+            }
+            // The chosen card's moment, then the reward going into its slot.
+            if picking && auto.wait > 1.4 {
+                pending.begin(0);
+            }
+            if picking && auto.wait > 1.55 {
+                auto.capture_once(&mut commands, "levelup-picking".into());
             }
             if auto.wait > 1.6 && crate::webenv::var("WOW_SURVIVORS_REWARD_PREVIEW").is_none() {
                 let n = offer.len().max(1);

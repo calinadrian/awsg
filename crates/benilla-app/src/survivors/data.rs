@@ -202,11 +202,15 @@ static RACIAL_ABILITIES: &[AbilityDef] = &[ability!(
     }
 )];
 
-pub(crate) fn ability(key: &str) -> &'static AbilityDef {
+pub(crate) fn every_ability() -> impl Iterator<Item = &'static AbilityDef> {
     ABILITIES
         .iter()
         .chain(LEGACY_ABILITIES.iter())
         .chain(RACIAL_ABILITIES.iter())
+}
+
+pub(crate) fn ability(key: &str) -> &'static AbilityDef {
+    every_ability()
         .find(|a| a.key == key)
         .unwrap_or_else(|| panic!("survivors: no ability {key:?}"))
 }

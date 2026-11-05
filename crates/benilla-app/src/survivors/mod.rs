@@ -42,6 +42,7 @@ mod hero;
 mod horde_spawning;
 mod hud;
 mod hud_layout;
+mod food;
 mod jewelry;
 mod journal_ui;
 mod inventory;
@@ -243,7 +244,7 @@ impl Plugin for SurvivorsPlugin {
                     talents::refresh_progress,
                     (cards::hand_controls, cards::deal_cards).chain(),
                     cards::choose_card,
-                    cards::animate_cards,
+                    (cards::animate_cards, card_view::animate_fx),
                     (hud::refresh_hud, hud::size_action_bar),
                     hud::refresh_results,
                     hud::fill_icons,
@@ -518,6 +519,8 @@ const MIGHT_PER_LEVEL: f32 = 0.03;
 /// Damage reduction stops at 60% (0x5be95ca).
 const MAX_REDUCTION: f32 = 0.6;
 pub(super) const BASE_SPEED: f32 = 7.0;
+/// Bonuses from every source together stop at 15% above the base run speed. Slows still apply.
+pub(super) const MAX_SPEED: f32 = BASE_SPEED * 1.15;
 /// Original ASR's base pickup radius (RVA 0x5be92f5).
 pub(super) const BASE_MAGNET: f32 = 9.0;
 
@@ -562,6 +565,8 @@ pub(super) struct Run {
     /// Test Grounds: enemies hold at 1 health instead of dying.
     pub test_immortal: bool,
     pub jewelry: Vec<jewelry::Jewel>,
+    /// The chest food carried, one slot per kind.
+    pub food: food::Slots,
     pub gold: u32,
     pub chest_cost: u32,
     pub revives_used: u32,
@@ -639,6 +644,7 @@ impl Default for Run {
             test_god: false,
             test_immortal: false,
             jewelry: Vec::new(),
+            food: [None; food::SLOTS],
             gold: 0,
             chest_cost: 20,
             revives_used: 0,
@@ -695,6 +701,10 @@ impl Run {
                 .map(|(_, value)| value * a.scale()).sum();
             if value > 0.0 { sources.push((damage_meter::Source::Amulet(a.index), value)); }
         }
+        for held in self.food.iter().flatten() {
+            let value = food::food_stat(*held, item_stat);
+            if value > 0.0 { sources.push((damage_meter::Source::Food(*held), value)); }
+        }
         sources
     }
     /// Native online scaling `1 + (living - 1) * chapter * coefficient`; the patched
@@ -734,7 +744,8 @@ impl Run {
             extra_targets: self
                 .amulet
                 .as_ref()
-                .map_or(0, |a| amulets::AMULETS[a.index].targets),
+                .map_or(0, |a| amulets::AMULETS[a.index].targets)
+                + food::targets(&self.food),
         };
         s.max_hp += self.gear[0];
         s.haste += self.gear[2];
@@ -763,7 +774,7 @@ impl Run {
         s.crit += t.stat(3);
         s.crit_mult += t.stat(4);
         s.regen += t.stat(6) + t.stat(24) * s.max_hp;
-        s.speed *= 1.0 + t.stat(7);
+        s.speed = (s.speed * (1.0 + t.stat(7))).min(MAX_SPEED);
         s.reduction = (s.reduction
             + t.stat(5)
             + self.jewel_stat(5)
@@ -803,6 +814,7 @@ impl Run {
                     .map(|(_, v)| *v * a.scale())
                     .sum::<f32>()
             })
+            + food::stat(&self.food, stat)
     }
     pub fn guid(&mut self) -> u64 {
         self.next_guid += 1;

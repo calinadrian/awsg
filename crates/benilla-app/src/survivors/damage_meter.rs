@@ -17,6 +17,7 @@ pub(super) enum Source {
     Talent(&'static str),
     Jewelry(usize),
     Amulet(usize),
+    Food(super::food::FoodId),
 }
 
 impl Source {
@@ -67,6 +68,7 @@ impl Source {
                 let d = &super::amulets::AMULETS[i];
                 (format!("{} (Item)", d.name), d.icon.into())
             }
+            Self::Food(id) => (format!("{} (Food)", id.food().name), id.food().icon.into()),
         }
     }
 }
