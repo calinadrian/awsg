@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from package_elwynn import Reader
+from package_elwynn import Reader, Dbc, canonical, equipment_paths, runtime_equipment
 
 
 def main():
@@ -18,7 +18,13 @@ def main():
     manifest = json.loads((args.package / 'asset-manifest.json').read_text())
     packed, source = Reader(args.package / 'Data'), Reader(args.source)
     failures = []
+    displays = runtime_equipment()
     try:
+        listed = {canonical(line.split('\t', 1)[1]) for line in source.read('@list').decode().splitlines()}
+        table = Dbc(source.read('DBFilesClient/ItemDisplayInfo.dbc'))
+        required = set(equipment_paths(table, displays, listed))
+        carried = {entry['path'] for entry in manifest['files']}
+        failures.extend('Runtime equipment asset omitted: ' + path for path in sorted(required - carried))
         for entry in manifest['files']:
             raw = packed.read(entry['path'], optional=True)
             if raw is None or len(raw) != entry['bytes'] or hashlib.sha256(raw).hexdigest() != entry['sha256']:
@@ -34,6 +40,7 @@ def main():
         packed.close()
         source.close()
     report = dict(verified_assets=len(manifest['files']), failures=failures,
+                  runtime_equipment_displays=len(displays), required_equipment_assets=len(required),
                   absent_source_references=manifest['source_missing'], gameplay_tested=False)
     (args.package / 'asset-audit.json').write_text(json.dumps(report, indent=2) + '\n')
     if failures:

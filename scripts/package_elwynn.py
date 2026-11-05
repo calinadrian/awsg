@@ -62,6 +62,33 @@ class Reader:
             raise RuntimeError('Asset reader failed')
 
 
+def runtime_equipment():
+    """The same catalog the game loads, including definitions added by Rust at runtime."""
+    result = subprocess.run(
+        ['cargo', 'run', '--quiet', '--release', '-p', 'asr-coop', '--example', 'catalog_table'],
+        cwd=ROOT, check=True, capture_output=True, text=True, encoding='utf-8')
+    return {int(line.split('\t')[3]) for line in result.stdout.splitlines()
+            if line and int(line.split('\t')[3])}
+
+
+def equipment_paths(table, item_ids, names):
+    """All available race/sex variants of the selected ItemDisplayInfo components."""
+    stems = set()
+    for item in item_ids - {0}:
+        row = table.by_id.get(item)
+        if row is None:
+            raise ValueError(f'Required equipment display {item} is missing')
+        for column in (1, 2, 3, 4, *range(14, 22)):
+            value = table.text(row[column]).lower()
+            if value:
+                stems.add(re.sub(r'\.(mdx|mdl|m2|blp)$', '', value))
+    for name in sorted(names):
+        if name.startswith('item\\'):
+            stem = re.sub(r'\.(m2|mdx|blp)$', '', name.rsplit('\\', 1)[-1])
+            if stem in stems or any(stem.startswith(base + '_') for base in stems):
+                yield name
+
+
 class Dbc:
     def __init__(self, raw):
         if raw[:4] != b'WDBC':
@@ -306,20 +333,8 @@ class Package:
         table = self.table('ItemDisplayInfo')
         # Sex/race suffixes are selected at runtime. Match the selected display's
         # basenames against the complete listfile, rather than retain all equipment.
-        stems = set()
-        for item in item_ids - {0}:
-            row = table.by_id.get(item)
-            if row is None:
-                raise ValueError(f'Required equipment display {item} is missing')
-            for column in (1, 2, 3, 4, *range(14, 22)):
-                value = table.text(row[column]).lower()
-                if value:
-                    stems.add(re.sub(r'\.(mdx|mdl|m2|blp)$', '', value))
-        for name in names:
-            if name.startswith('item\\'):
-                stem = re.sub(r'\.(m2|mdx|blp)$', '', name.rsplit('\\', 1)[-1])
-                if stem in stems or any(stem.startswith(base + '_') for base in stems):
-                    self.add(name, 'selected character equipment')
+        for name in equipment_paths(table, item_ids, names):
+            self.add(name, 'selected character equipment')
 
     def environment(self):
         textures, doodads = self.table('GroundEffectTexture'), self.table('GroundEffectDoodad')
@@ -412,8 +427,7 @@ def build():
         ids.update(int(n) for n in re.findall(r'\b(?:foe|giant|en)\(\s*"[^"\n]+",\s*(\d+)', definitions))
         equipment = package.creatures(ids)
         # Owned drops can replace every starter slot, including converted retail gear.
-        catalog = json.loads((ROOT / 'crates/asr-coop/assets/economy_catalog.json').read_text())
-        equipment.update(item['display_id'] for item in catalog['items'] if item['display_id'])
+        equipment.update(runtime_equipment())
         for weapons in re.findall(r'weapons:\s*&\[(.*?)\]', definitions, re.S):
             equipment.update(int(n) for n in re.findall(r'\(\s*\d+,\s*(\d+)', weapons))
         package.equipment(equipment, listed)
