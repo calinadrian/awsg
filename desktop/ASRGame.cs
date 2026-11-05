@@ -380,11 +380,27 @@ namespace ASRDesktop {
     static class Download {
         internal static HttpWebResponse Open(string url) {
             Uri uri; if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || uri.Scheme != "https" || !Allowed(uri.Host)) throw new InvalidDataException("Unexpected update URL.");
-            var request = (HttpWebRequest)WebRequest.Create(uri); request.UserAgent = "ASRGame/" + ReleaseInfo.Version; request.Accept = "application/vnd.github+json";
-            request.Timeout = 8000; request.ReadWriteTimeout = 60000;
-            var response = (HttpWebResponse)request.GetResponse();
-            if (response.ResponseUri.Scheme != "https" || !Allowed(response.ResponseUri.Host)) { response.Dispose(); throw new InvalidDataException("Unexpected update redirect."); }
-            return response;
+            for (int attempt = 1; ; attempt++) {
+                var request = (HttpWebRequest)WebRequest.Create(uri); request.UserAgent = "ASRGame/" + ReleaseInfo.Version; request.Accept = "application/vnd.github+json";
+                // Release downloads redirect to GitHub's asset CDN; eight seconds was too short.
+                request.Timeout = 60000; request.ReadWriteTimeout = 120000;
+                try {
+                    var response = (HttpWebResponse)request.GetResponse();
+                    if (response.ResponseUri.Scheme != "https" || !Allowed(response.ResponseUri.Host)) { response.Dispose(); throw new InvalidDataException("Unexpected update redirect."); }
+                    return response;
+                } catch (WebException error) {
+                    var response = error.Response as HttpWebResponse;
+                    int status = response == null ? 0 : (int)response.StatusCode;
+                    bool transient = status == 408 || status == 429 || status >= 500
+                        || error.Status == WebExceptionStatus.Timeout || error.Status == WebExceptionStatus.ConnectFailure
+                        || error.Status == WebExceptionStatus.ConnectionClosed || error.Status == WebExceptionStatus.NameResolutionFailure
+                        || error.Status == WebExceptionStatus.ReceiveFailure || error.Status == WebExceptionStatus.SendFailure;
+                    if (error.Response != null) error.Response.Close();
+                    if (!transient || attempt >= 3) throw;
+                    App.Log("Retrying GitHub request " + uri.Host + uri.AbsolutePath + " after " + error.Status + " (attempt " + attempt + " of 3).");
+                    Thread.Sleep(attempt * 2000);
+                }
+            }
         }
         static bool Allowed(string host) { return host == "github.com" || host == "api.github.com" || host == "release-assets.githubusercontent.com" || host == "objects.githubusercontent.com"; }
         internal static T Json<T>(string url) {
